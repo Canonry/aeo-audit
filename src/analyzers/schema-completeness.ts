@@ -1,4 +1,4 @@
-import { clampScore, findSchemaByType } from './helpers.js'
+import { clampScore, detectSiteCategory, findSchemaByType } from './helpers.js'
 import type { AnalysisResult, AuditContext, StructuredDataEntry } from '../types.js'
 
 interface BestSchemaMatch {
@@ -35,15 +35,28 @@ const ORGANIZATION_PROPS = [
 const FAQ_MIN_PAIRS = 3
 const HOWTO_MIN_STEPS = 3
 
+function formatSchemaList(schemas: string[]): string {
+  if (schemas.length === 0) return 'Organization'
+  if (schemas.length === 1) return schemas[0]
+  if (schemas.length === 2) return `${schemas[0]} and ${schemas[1]}`
+  return `${schemas.slice(0, -1).join(', ')}, and ${schemas[schemas.length - 1]}`
+}
+
 export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult {
   const findings: AnalysisResult['findings'] = []
   const recommendations: string[] = []
   let score = 0
 
   const structuredData = context.structuredData || []
+  const detection = detectSiteCategory(context)
+
   if (!structuredData.length) {
     findings.push({ type: 'missing', message: 'No structured data found to evaluate completeness.' })
-    recommendations.push('Add JSON-LD structured data with complete property coverage.')
+    // Issue #33: tailor the missing-schema recommendation to the detected
+    // category so the suggestion is actually applicable.
+    recommendations.push(
+      `Add JSON-LD with ${formatSchemaList(detection.recommendedSchemas)} schema and complete property coverage.`,
+    )
     return { score: clampScore(score), findings, recommendations }
   }
 
@@ -166,7 +179,11 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
       findings.push({ type: 'info', message: 'Structured data present but shallow and uses no recognized schema types.' })
     }
 
-    recommendations.push('Add LocalBusiness, FAQPage, HowTo, or Organization schema types.')
+    // Issue #33: recommendation reflects the detected site category instead of
+    // always suggesting LocalBusiness for any site.
+    recommendations.push(
+      `Add ${formatSchemaList(detection.recommendedSchemas)} schema types.`,
+    )
   } else {
     score = checksScore / checksRun
   }

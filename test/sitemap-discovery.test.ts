@@ -1,0 +1,98 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
+
+import { discoverSitemapUrl, parseRobotsSitemap } from '../src/sitemap.js'
+
+describe('parseRobotsSitemap', () => {
+  it('extracts a Sitemap: directive (case-insensitive)', () => {
+    const robots = `User-agent: *\nAllow: /\nSitemap: https://example.com/custom-sitemap.xml\n`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBe('https://example.com/custom-sitemap.xml')
+  })
+
+  it('handles uppercase, mixed-case, and extra whitespace', () => {
+    const robots = `SITEMAP:    https://example.com/a.xml\nsitemap:https://example.com/b.xml`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBe('https://example.com/a.xml')
+  })
+
+  it('resolves relative paths against the supplied origin', () => {
+    const robots = `Sitemap: /sitemap-2026.xml`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBe('https://example.com/sitemap-2026.xml')
+  })
+
+  it('returns null when no Sitemap directive is present', () => {
+    const robots = `User-agent: *\nDisallow: /private`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBeNull()
+  })
+
+  it('skips comment lines starting with #', () => {
+    const robots = `# Sitemap: https://example.com/commented-out.xml\nSitemap: https://example.com/real.xml`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBe('https://example.com/real.xml')
+  })
+})
+
+describe('discoverSitemapUrl', () => {
+  let server: Server
+  let origin: string
+  let handler: (path: string) => { status: number; body: string; contentType?: string }
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const result = handler(req.url || '/')
+      res.writeHead(result.status, { 'content-type': result.contentType || 'application/xml' })
+      res.end(result.body)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address() as AddressInfo
+    origin = `http://127.0.0.1:${address.port}`
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())))
+  })
+
+  it('returns /sitemap.xml when it exists', async () => {
+    handler = (path) => {
+      if (path === '/sitemap.xml') return { status: 200, body: '<urlset></urlset>' }
+      return { status: 404, body: '' }
+    }
+    expect(await discoverSitemapUrl(origin)).toBe(`${origin}/sitemap.xml`)
+  })
+
+  it('falls back to /sitemap-index.xml when /sitemap.xml is 404 (issue #32)', async () => {
+    handler = (path) => {
+      if (path === '/sitemap.xml') return { status: 404, body: '' }
+      if (path === '/sitemap-index.xml') return { status: 200, body: '<sitemapindex></sitemapindex>' }
+      return { status: 404, body: '' }
+    }
+    expect(await discoverSitemapUrl(origin)).toBe(`${origin}/sitemap-index.xml`)
+  })
+
+  it('falls back to robots.txt Sitemap directive when both default paths 404', async () => {
+    handler = (path) => {
+      if (path === '/robots.txt') {
+        return {
+          status: 200,
+          body: `User-agent: *\nSitemap: ${origin}/custom/path/sitemap.xml\n`,
+          contentType: 'text/plain',
+        }
+      }
+      return { status: 404, body: '' }
+    }
+    expect(await discoverSitemapUrl(origin)).toBe(`${origin}/custom/path/sitemap.xml`)
+  })
+
+  it('returns null when no sitemap is found anywhere', async () => {
+    handler = () => ({ status: 404, body: '' })
+    expect(await discoverSitemapUrl(origin)).toBeNull()
+  })
+
+  it('ignores non-XML 200 responses (e.g. HTML 200 from a SPA catch-all route)', async () => {
+    handler = (path) => {
+      if (path === '/sitemap.xml') return { status: 200, body: '<!doctype html><html>...</html>', contentType: 'text/html' }
+      if (path === '/sitemap-index.xml') return { status: 200, body: '<sitemapindex></sitemapindex>' }
+      return { status: 404, body: '' }
+    }
+    expect(await discoverSitemapUrl(origin)).toBe(`${origin}/sitemap-index.xml`)
+  })
+})

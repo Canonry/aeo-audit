@@ -1,6 +1,36 @@
 import { clampScore, countWords } from './helpers.js'
 import type { AnalysisResult, AuditContext, AuxiliaryResource } from '../types.js'
 
+function pushDiagnosticFindings(
+  label: string,
+  auxEntry: AuxiliaryResource | undefined,
+  findings: AnalysisResult['findings'],
+  recommendations: string[],
+): void {
+  const diagnostics = auxEntry?.diagnostics
+  if (!diagnostics) return
+
+  if (diagnostics.uaFiltering) {
+    findings.push({
+      type: 'info',
+      message: `${label} is hidden from the default audit User-Agent (404) but loads for a common browser UA — the host appears to filter by User-Agent (e.g. Vercel/Cloudflare WAF).`,
+    })
+    recommendations.push(
+      `Allow standard crawler/audit User-Agents through your CDN/WAF so ${label} is reachable for AI tools.`,
+    )
+  }
+
+  if (diagnostics.contentNegotiation) {
+    findings.push({
+      type: 'info',
+      message: `${label} returns a non-2xx response when fetched with \`Accept: text/markdown\` — content negotiation hides it from AI content extraction tools that prefer markdown.`,
+    })
+    recommendations.push(
+      `Serve ${label} with the same body regardless of the \`Accept\` header (avoid redirecting .txt to a non-existent .md variant).`,
+    )
+  }
+}
+
 function scoreAuxState(
   auxEntry: AuxiliaryResource | undefined,
   missingMessage: string,
@@ -47,6 +77,7 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
     findings,
     recommendations,
   )
+  pushDiagnosticFindings('/llms.txt', auxiliary.llmsTxt, findings, recommendations)
 
   if (auxiliary.llmsTxt?.state === 'ok') {
     const wordCount = countWords(auxiliary.llmsTxt.body || '')
@@ -67,6 +98,7 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
     findings,
     recommendations,
   )
+  pushDiagnosticFindings('/llms-full.txt', auxiliary.llmsFullTxt, findings, recommendations)
 
   if (auxiliary.llmsFullTxt?.state === 'ok') {
     const wordCount = countWords(auxiliary.llmsFullTxt.body || '')
@@ -91,6 +123,7 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
     findings.push({ type: 'missing', message: '/robots.txt is missing.' })
     recommendations.push('Add a robots.txt file.')
   }
+  pushDiagnosticFindings('/robots.txt', auxiliary.robotsTxt, findings, recommendations)
 
   // Sitemap presence
   const sitemapState = auxiliary.sitemapXml?.state
@@ -104,6 +137,7 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
     findings.push({ type: 'missing', message: '/sitemap.xml is missing.' })
     recommendations.push('Add a sitemap.xml file.')
   }
+  pushDiagnosticFindings('/sitemap.xml', auxiliary.sitemapXml, findings, recommendations)
 
   // HTML head link to llms.txt
   const llmsLink = context.$('link[href*="llms.txt"]').length > 0

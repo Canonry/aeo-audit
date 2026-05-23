@@ -95,7 +95,7 @@ npx @ainyc/aeo-audit@1 "<url>" --sitemap --top-issues --format json
 ```
 
 Flags:
-- `--sitemap [url]` — auto-discover `/sitemap.xml` or provide an explicit URL
+- `--sitemap [url]` — auto-discover the sitemap (tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`) or provide an explicit URL
 - `--limit <n>` — cap pages audited (default 200, sorted by sitemap priority)
 - `--top-issues` — skip per-page output, show only cross-cutting patterns
 
@@ -106,6 +106,13 @@ Returns:
 - Cross-cutting issues (factors failing across multiple pages)
 - Aggregate score and grade
 - Prioritized fixes ranked by site-wide impact
+
+#### Auxiliary File Diagnostics
+
+When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml`, it also runs two diagnostics that surface as findings on the **AI-Readable Content** factor:
+
+- **UA filtering** — file 404s for the default audit User-Agent but loads for a common browser UA (typical Vercel/Cloudflare WAF default). Tells the user to allow the crawler/audit UA through their CDN, not to "create" the file that already exists.
+- **Content negotiation** — file responds OK to a bare request but 404s under `Accept: text/markdown`. Catches Astro/Vercel setups that redirect `.txt` → non-existent `.md` for markdown-accepting clients, making the file invisible to AI content-extraction tools.
 
 ### Lighthouse Mode
 

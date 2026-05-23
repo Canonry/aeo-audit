@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.0 (2026-05-23)
+
+### Added
+- **Sitemap auto-discovery fallback (#32).** When `/sitemap.xml` returns 404, `runSitemapAudit` and the auxiliary fetcher now also try `/sitemap-index.xml` (common on Astro / Next.js / Vercel) and, as a final fallback, parse the `Sitemap:` directive from `/robots.txt`. Previously sites that only published `sitemap-index.xml` got "Sitemap returned HTTP 404." with no audit coverage unless the user passed the explicit URL.
+- **UA-filtering diagnostic on 404 auxiliary fetches (#34).** When `/llms.txt`, `/llms-full.txt`, `/robots.txt`, or `/sitemap.xml` returns 404 to the default audit User-Agent, the fetcher now retries once with a common browser UA. If that succeeds, the file is reported as `missing` in scoring (since AI crawlers won't reach it either) but the audit surfaces an actionable finding that the host is filtering by User-Agent (e.g. Vercel/Cloudflare WAF).
+- **Content-negotiation diagnostic (#35).** When an auxiliary file responds OK to the audit, the fetcher probes once with `Accept: text/markdown` to detect content-negotiation traps where the host redirects `.txt` to a non-existent `.md` variant. Any non-2xx markdown probe surfaces a finding so downstream AI content-extraction tools that prefer markdown don't silently fail.
+- **Domain-aware schema recommendations (#33).** The `structured-data` and `schema-completeness` analyzers now detect the site category (SaaS / dev tools, e-commerce, local business, service business, blog/content) from JSON-LD, page text keywords, and outbound links, and recommend schemas that match. SaaS sites are no longer told to add `LocalBusiness` schema; the safe fallback when no category is detected is `Organization` instead of `LocalBusiness`.
+
+### Changed
+- New `AuxiliaryDiagnostics` field on `AuxiliaryResource` carries the UA-filtering and content-negotiation signals. The `AiReadableContent` analyzer surfaces them as findings and recommendations.
+
 ## 1.9.0 (2026-05-21)
 
 ### Added

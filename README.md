@@ -145,7 +145,8 @@ Per-URL fetch errors don't abort the batch — each entry is reported with `stat
 Audit every page discovered from the site's sitemap with bounded concurrency (5 in flight):
 
 ```bash
-# Auto-discover /sitemap.xml
+# Auto-discover the sitemap (tries /sitemap.xml, then /sitemap-index.xml,
+# then the Sitemap: directive in /robots.txt)
 npx @ainyc/aeo-audit https://example.com --sitemap
 
 # Provide an explicit sitemap URL
@@ -158,7 +159,16 @@ npx @ainyc/aeo-audit https://example.com --sitemap --limit 50
 npx @ainyc/aeo-audit https://example.com --sitemap --top-issues
 ```
 
+Auto-discovery checks `/sitemap.xml` → `/sitemap-index.xml` → `Sitemap:` directives in `/robots.txt`. Astro / Next.js / Vercel sites that only publish `sitemap-index.xml` are now discovered without needing an explicit URL.
+
 When the sitemap has more URLs than `--limit`, the run audits the highest-priority pages and prints a notice to stderr listing how many were skipped and how to audit them all.
+
+### Auxiliary File Diagnostics
+
+When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` the audit runs two diagnostic probes that surface as findings on the **AI-Readable Content** factor:
+
+- **UA filtering.** If a file 404s for the audit's default `User-Agent` but loads for a common browser UA, the audit reports that the host is filtering by User-Agent (typical for Vercel/Cloudflare WAF defaults). The file is still scored as missing — AI crawlers won't reach it either — but the audit names the underlying cause so the fix is "allow the crawler UA through the WAF", not "create the file".
+- **Content negotiation.** If a file returns OK to a bare request but a non-2xx response under `Accept: text/markdown`, the audit reports the content-negotiation trap. This catches Astro / Vercel setups that redirect `.txt` → non-existent `.md` for markdown-accepting clients, which makes the file invisible to AI content-extraction tools.
 
 ### Flag Reference
 
@@ -169,7 +179,7 @@ When the sitemap has more URLs than `--limit`, the run audits the highest-priori
 | `--include-geo` | Include the optional geographic signals factor |
 | `--include-agent-skills` | Include the optional agent skill exposure factor |
 | `--lighthouse` | Include the optional Lighthouse factor (Performance + Accessibility + Best Practices, mobile strategy) via Google PageSpeed Insights. Single-URL only; cannot combine with `--sitemap` or `--detect-platform`. Adds ~15-30s. Set `PAGESPEED_API_KEY` env var to lift anonymous rate limits. |
-| `--sitemap [url]` | Audit all pages from the sitemap (auto-discovers `/sitemap.xml` or uses an explicit URL) |
+| `--sitemap [url]` | Audit all pages from the sitemap. Auto-discovery tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`. Pass an explicit URL to override. |
 | `--limit <n>` | Max pages to audit in sitemap mode (default 200, sorted by sitemap priority) |
 | `--top-issues` | In sitemap mode, skip per-page output and show only cross-cutting issues |
 | `--detect-platform` | Identify the platform/CMS/framework powering the site instead of running an audit |
