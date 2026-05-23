@@ -111,4 +111,35 @@ describe('fetchPage auxiliary diagnostics', () => {
     expect(page.auxiliary.sitemapXml?.state).toBe('ok')
     expect(page.auxiliary.sitemapXml?.url).toBe(`${ORIGIN}/sitemap-index.xml`)
   })
+
+  it('labels the content-negotiation diagnostic with the actual fetched path when the sitemap fallback resolves to /sitemap-index.xml', async () => {
+    handler = (url, init) => {
+      const accept = String(getRequestHeaders(init)['Accept'] || '')
+      if (url === `${ORIGIN}/`) {
+        return new Response(HOME_HTML, { status: 200, headers: { 'content-type': 'text/html' } })
+      }
+      if (url === `${ORIGIN}/sitemap.xml`) {
+        return new Response('', { status: 404, headers: { 'content-type': 'text/plain' } })
+      }
+      if (url === `${ORIGIN}/sitemap-index.xml`) {
+        if (accept.includes('text/markdown')) {
+          return new Response('', { status: 404, headers: { 'content-type': 'text/plain' } })
+        }
+        return new Response(
+          '<sitemapindex><sitemap><loc>https://example.com/sm.xml</loc></sitemap></sitemapindex>',
+          { status: 200, headers: { 'content-type': 'application/xml' } },
+        )
+      }
+      return new Response('', { status: 404 })
+    }
+
+    const page = await fetchPage(ORIGIN)
+    expect(page.auxiliary.sitemapXml?.url).toBe(`${ORIGIN}/sitemap-index.xml`)
+    expect(page.auxiliary.sitemapXml?.diagnostics?.contentNegotiation).toBe(true)
+
+    const result = analyzeAiReadableContent(makeContext(page.auxiliary))
+    const negotiationFinding = result.findings.find((f) => f.message.includes('content negotiation'))
+    expect(negotiationFinding?.message).toContain('/sitemap-index.xml')
+    expect(negotiationFinding?.message).not.toContain('/sitemap.xml ')
+  })
 })

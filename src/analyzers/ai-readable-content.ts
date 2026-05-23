@@ -2,13 +2,25 @@ import { clampScore, countWords } from './helpers.js'
 import type { AnalysisResult, AuditContext, AuxiliaryResource } from '../types.js'
 
 function pushDiagnosticFindings(
-  label: string,
+  fallbackLabel: string,
   auxEntry: AuxiliaryResource | undefined,
   findings: AnalysisResult['findings'],
   recommendations: string[],
 ): void {
   const diagnostics = auxEntry?.diagnostics
   if (!diagnostics) return
+
+  // Prefer the actual fetched path so that fallback resolutions (e.g.
+  // /sitemap.xml → /sitemap-index.xml) are reflected accurately in the
+  // finding instead of the spec's default label.
+  let label = fallbackLabel
+  if (auxEntry?.url) {
+    try {
+      label = new URL(auxEntry.url).pathname
+    } catch {
+      // ignore — keep the fallback label
+    }
+  }
 
   if (diagnostics.contentNegotiation) {
     findings.push({

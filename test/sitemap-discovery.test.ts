@@ -29,6 +29,26 @@ describe('parseRobotsSitemap', () => {
     const robots = `# Sitemap: https://example.com/commented-out.xml\nSitemap: https://example.com/real.xml`
     expect(parseRobotsSitemap(robots, 'https://example.com')).toBe('https://example.com/real.xml')
   })
+
+  it('rejects cross-origin Sitemap directives (SSRF guard)', () => {
+    const robots = `Sitemap: http://169.254.169.254/latest/meta-data/`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBeNull()
+  })
+
+  it('rejects a same-host directive on a different port', () => {
+    const robots = `Sitemap: https://example.com:8443/sitemap.xml`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBeNull()
+  })
+
+  it('rejects an http directive when the origin is https (no protocol downgrade)', () => {
+    const robots = `Sitemap: http://example.com/sitemap.xml`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBeNull()
+  })
+
+  it('falls through cross-origin entries and returns a later same-origin directive', () => {
+    const robots = `Sitemap: http://attacker.example/sitemap.xml\nSitemap: https://example.com/real.xml`
+    expect(parseRobotsSitemap(robots, 'https://example.com')).toBe('https://example.com/real.xml')
+  })
 })
 
 describe('discoverSitemapUrl', () => {

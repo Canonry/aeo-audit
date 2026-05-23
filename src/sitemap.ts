@@ -172,6 +172,13 @@ export async function discoverSitemapUrl(origin: string): Promise<string | null>
 }
 
 export function parseRobotsSitemap(robotsBody: string, origin: string): string | null {
+  let originUrl: URL
+  try {
+    originUrl = new URL(origin)
+  } catch {
+    return null
+  }
+
   for (const rawLine of robotsBody.split(/\r?\n/)) {
     const line = rawLine.trim()
     if (!line || line.startsWith('#')) continue
@@ -179,7 +186,12 @@ export function parseRobotsSitemap(robotsBody: string, origin: string): string |
     const match = line.match(/^sitemap\s*:\s*(\S+)\s*$/i)
     if (!match) continue
     try {
-      return new URL(match[1], origin).toString()
+      const resolved = new URL(match[1], origin)
+      // Only honor same-origin directives. fetchSitemapBody has no SSRF guard,
+      // so accepting an absolute URL at an arbitrary host would let a target
+      // steer requests from the auditing host to internal endpoints.
+      if (resolved.origin !== originUrl.origin) continue
+      return resolved.toString()
     } catch {
       // Malformed entry — keep scanning in case a later line is valid.
     }
