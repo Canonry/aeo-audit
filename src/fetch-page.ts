@@ -42,9 +42,6 @@ interface RedirectFetchResult {
 }
 
 const USER_AGENT = 'AINYC-AEO-Audit/1.0'
-// Common browser UA used for the diagnostic retry when an auxiliary file 404s
-// under the audit UA — Vercel/Cloudflare/etc. sometimes filter unknown UAs.
-const BROWSER_RETRY_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 // Accept header used to probe for content-negotiation redirects (some sites
 // 307 .txt → non-existent .md when this header is present).
 const MARKDOWN_PROBE_ACCEPT = 'text/markdown, text/html;q=0.9, */*;q=0.1'
@@ -541,7 +538,6 @@ async function probeStatusWithHeaders(
 
 async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<AuxiliaryResource> {
   let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec)
-  let usedPath = spec.path
 
   // Issue #32: if the primary path 404s, try the documented fallbacks (e.g.
   // /sitemap-index.xml). The first successful fallback wins.
@@ -550,7 +546,6 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<
       const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec)
       if (!fallbackAttempt.wasMissing && fallbackAttempt.resource.state === 'ok') {
         attempt = fallbackAttempt
-        usedPath = fallback
         break
       }
     }
@@ -558,24 +553,12 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<
 
   const diagnostics: AuxiliaryDiagnostics = {}
 
-  // Issue #34: when the file 404s with our UA, retry with a browser UA to detect
-  // CDN/WAF user-agent filtering (Vercel/Cloudflare). If the retry succeeds we
-  // surface the file as accessible but flag the diagnostic.
-  if (attempt.wasMissing) {
-    const retryUrl = new URL(usedPath, origin)
-    const retryStatus = await probeStatusWithHeaders(retryUrl, {
-      'User-Agent': BROWSER_RETRY_USER_AGENT,
-      Accept: '*/*',
-    })
-    if (retryStatus !== null && retryStatus >= 200 && retryStatus < 300) {
-      diagnostics.uaFiltering = true
-    }
-  }
-
-  // Issue #35: when the file responds OK, probe once with `Accept: text/markdown`
-  // to detect content-negotiation 404 traps that hide the file from other AI
-  // content tools. Only probe successful fetches — the signal is "this file is
-  // ours but won't load for downstream tools".
+  // Issues #34/#35: when the file responds OK, probe once with `Accept: text/markdown`
+  // to detect content-negotiation 404 traps that hide the file from AI tools.
+  // Some Vercel/Astro/Starlight stacks 307 .txt → non-existent .md when the
+  // request prefers markdown — the file is "missing" only to clients that
+  // advertise a markdown preference. The probe surfaces this so users can fix
+  // the negotiation rule, not the file.
   if (attempt.resource.state === 'ok' && attempt.resource.url) {
     const probeStatus = await probeStatusWithHeaders(attempt.resource.url, {
       'User-Agent': USER_AGENT,
@@ -586,7 +569,7 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<
     }
   }
 
-  if (diagnostics.uaFiltering || diagnostics.contentNegotiation) {
+  if (diagnostics.contentNegotiation) {
     attempt.resource.diagnostics = diagnostics
   }
 

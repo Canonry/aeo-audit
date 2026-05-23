@@ -50,31 +50,7 @@ function makeContext(auxiliary: Record<string, unknown> = {}): AuditContext {
 }
 
 describe('fetchPage auxiliary diagnostics', () => {
-  it('flags UA filtering when /llms.txt 404s for the audit UA but 200s for a browser UA (issue #34)', async () => {
-    handler = (url, init) => {
-      const ua = String(getRequestHeaders(init)['User-Agent'] || '')
-      if (url === `${ORIGIN}/`) {
-        return new Response(HOME_HTML, { status: 200, headers: { 'content-type': 'text/html' } })
-      }
-      if (url === `${ORIGIN}/llms.txt`) {
-        if (ua.startsWith('AINYC-AEO-Audit')) {
-          return new Response('', { status: 404, headers: { 'content-type': 'text/plain' } })
-        }
-        return new Response('# llms\nReal content', { status: 200, headers: { 'content-type': 'text/plain' } })
-      }
-      return new Response('', { status: 404 })
-    }
-
-    const page = await fetchPage(ORIGIN)
-    expect(page.auxiliary.llmsTxt?.state).toBe('missing')
-    expect(page.auxiliary.llmsTxt?.diagnostics?.uaFiltering).toBe(true)
-
-    const result = analyzeAiReadableContent(makeContext(page.auxiliary))
-    expect(result.findings.some((f) => f.message.includes('hidden from the default audit User-Agent'))).toBe(true)
-    expect(result.recommendations.some((r) => r.includes('CDN/WAF'))).toBe(true)
-  })
-
-  it('flags content negotiation when /llms.txt 200s but 404s under Accept: text/markdown (issue #35)', async () => {
+  it('flags content negotiation when /llms.txt 200s but 404s under Accept: text/markdown (issues #34/#35)', async () => {
     handler = (url, init) => {
       const accept = String(getRequestHeaders(init)['Accept'] || '')
       if (url === `${ORIGIN}/`) {

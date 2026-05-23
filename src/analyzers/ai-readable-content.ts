@@ -10,16 +10,6 @@ function pushDiagnosticFindings(
   const diagnostics = auxEntry?.diagnostics
   if (!diagnostics) return
 
-  if (diagnostics.uaFiltering) {
-    findings.push({
-      type: 'info',
-      message: `${label} is hidden from the default audit User-Agent (404) but loads for a common browser UA — the host appears to filter by User-Agent (e.g. Vercel/Cloudflare WAF).`,
-    })
-    recommendations.push(
-      `Allow standard crawler/audit User-Agents through your CDN/WAF so ${label} is reachable for AI tools.`,
-    )
-  }
-
   if (diagnostics.contentNegotiation) {
     findings.push({
       type: 'info',

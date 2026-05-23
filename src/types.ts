@@ -42,10 +42,9 @@ export interface RedirectHop {
 }
 
 export interface AuxiliaryDiagnostics {
-  // File was 404 with the default User-Agent but 200 with a browser UA — host filters by UA.
-  uaFiltering?: boolean
   // File responds OK with Accept star-slash-star but 404/redirect under Accept: text/markdown —
-  // host does content negotiation that hides the file from AI tools.
+  // host does content negotiation that hides the file from AI tools that prefer markdown
+  // (Astro/Vercel sites that redirect .txt to a non-existent .md variant).
   contentNegotiation?: boolean
 }
 

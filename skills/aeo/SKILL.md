@@ -109,10 +109,7 @@ Returns:
 
 #### Auxiliary File Diagnostics
 
-When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml`, it also runs two diagnostics that surface as findings on the **AI-Readable Content** factor:
-
-- **UA filtering** — file 404s for the default audit User-Agent but loads for a common browser UA (typical Vercel/Cloudflare WAF default). Tells the user to allow the crawler/audit UA through their CDN, not to "create" the file that already exists.
-- **Content negotiation** — file responds OK to a bare request but 404s under `Accept: text/markdown`. Catches Astro/Vercel setups that redirect `.txt` → non-existent `.md` for markdown-accepting clients, making the file invisible to AI content-extraction tools.
+When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml`, it probes once with `Accept: text/markdown` to detect a **content-negotiation** trap: file responds OK to a bare request but returns a non-2xx response when the client prefers markdown. This catches Astro / Vercel / Starlight setups that 307-redirect `.txt` → non-existent `.md` for markdown-accepting clients, making the file invisible to AI content-extraction tools even though the file exists. The diagnostic surfaces as a finding on the **AI-Readable Content** factor.
 
 ### Lighthouse Mode
 
