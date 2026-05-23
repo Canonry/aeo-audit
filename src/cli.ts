@@ -198,8 +198,9 @@ Options:
                           mobile strategy) via Google PageSpeed Insights. Adds ~15-30s per audit. Set
                           PAGESPEED_API_KEY to lift anonymous rate limits. Single-URL only (cannot combine
                           with --sitemap or --detect-platform).
-  --sitemap [url]         Audit all pages from sitemap (auto-discovers /sitemap.xml or use explicit URL).
-                          Pages are fetched with bounded concurrency (5 in flight).
+  --sitemap [url]         Audit all pages from sitemap. Auto-discovery tries /sitemap.xml, then
+                          /sitemap-index.xml, then the Sitemap: directive in /robots.txt. Pass an
+                          explicit URL to override. Pages are fetched with bounded concurrency (5).
   --limit <n>             Max pages to audit in sitemap mode (default 200, sorted by sitemap priority).
                           When the sitemap exceeds the limit, a notice is printed to stderr.
   --top-issues            In sitemap mode, skip per-page output and show only cross-cutting issues

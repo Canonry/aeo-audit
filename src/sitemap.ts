@@ -65,7 +65,12 @@ function parseSitemapXml(xml: string): SitemapEntry[] {
   return entries
 }
 
-async function fetchSitemapBody(url: string): Promise<string> {
+interface SitemapFetchResult {
+  body: string
+  status: number
+}
+
+async function fetchSitemapResponse(url: string): Promise<SitemapFetchResult> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), SITEMAP_TIMEOUT_MS)
 
@@ -77,11 +82,17 @@ async function fetchSitemapBody(url: string): Promise<string> {
     })
 
     if (!response.ok) {
-      throw new AeoAuditError('UNREACHABLE', `Sitemap returned HTTP ${response.status}.`)
+      // Drain the body so the socket can be released.
+      try {
+        await response.body?.cancel()
+      } catch {
+        /* ignore */
+      }
+      return { body: '', status: response.status }
     }
 
     const reader = response.body?.getReader()
-    if (!reader) return ''
+    if (!reader) return { body: '', status: response.status }
 
     const chunks: Buffer[] = []
     let totalBytes = 0
@@ -98,7 +109,7 @@ async function fetchSitemapBody(url: string): Promise<string> {
       chunks.push(chunk)
     }
 
-    return Buffer.concat(chunks).toString('utf8')
+    return { body: Buffer.concat(chunks).toString('utf8'), status: response.status }
   } catch (error) {
     if (error instanceof AeoAuditError) throw error
     if (error instanceof Error && error.name === 'AbortError') {
@@ -108,6 +119,84 @@ async function fetchSitemapBody(url: string): Promise<string> {
   } finally {
     clearTimeout(timer)
   }
+}
+
+async function fetchSitemapBody(url: string): Promise<string> {
+  const result = await fetchSitemapResponse(url)
+  if (result.status < 200 || result.status >= 300) {
+    throw new AeoAuditError('UNREACHABLE', `Sitemap returned HTTP ${result.status}.`)
+  }
+  return result.body
+}
+
+function looksLikeSitemap(body: string): boolean {
+  const lower = body.slice(0, 4096).toLowerCase()
+  return lower.includes('<urlset') || lower.includes('<sitemapindex')
+}
+
+/**
+ * Issue #32: try the documented sitemap paths in order, then fall back to
+ * Sitemap: directives in /robots.txt. Returns the first URL that 200s.
+ */
+export async function discoverSitemapUrl(origin: string): Promise<string | null> {
+  const candidates = [`${origin}/sitemap.xml`, `${origin}/sitemap-index.xml`]
+
+  for (const candidate of candidates) {
+    try {
+      const result = await fetchSitemapResponse(candidate)
+      // Require an actual sitemap marker — many SPAs serve the HTML shell for
+      // unknown routes, returning 200 with `<!doctype html>` for /sitemap.xml.
+      if (result.status >= 200 && result.status < 300 && looksLikeSitemap(result.body)) {
+        return candidate
+      }
+    } catch {
+      // Network/timeout errors fall through to the next candidate so we don't
+      // give up on the whole discovery just because one path was flaky.
+    }
+  }
+
+  // robots.txt fallback — many sites declare a non-standard sitemap location there.
+  try {
+    const robots = await fetchSitemapResponse(`${origin}/robots.txt`)
+    if (robots.status >= 200 && robots.status < 300 && robots.body) {
+      const sitemapDirective = parseRobotsSitemap(robots.body, origin)
+      if (sitemapDirective) {
+        return sitemapDirective
+      }
+    }
+  } catch {
+    /* ignore — discovery failure surfaces as null */
+  }
+
+  return null
+}
+
+export function parseRobotsSitemap(robotsBody: string, origin: string): string | null {
+  let originUrl: URL
+  try {
+    originUrl = new URL(origin)
+  } catch {
+    return null
+  }
+
+  for (const rawLine of robotsBody.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    // robots.txt directives are case-insensitive per RFC.
+    const match = line.match(/^sitemap\s*:\s*(\S+)\s*$/i)
+    if (!match) continue
+    try {
+      const resolved = new URL(match[1], origin)
+      // Only honor same-origin directives. fetchSitemapBody has no SSRF guard,
+      // so accepting an absolute URL at an arbitrary host would let a target
+      // steer requests from the auditing host to internal endpoints.
+      if (resolved.origin !== originUrl.origin) continue
+      return resolved.toString()
+    } catch {
+      // Malformed entry — keep scanning in case a later line is valid.
+    }
+  }
+  return null
 }
 
 async function resolveSitemapUrls(sitemapUrl: string): Promise<SitemapEntry[]> {
@@ -227,8 +316,22 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   const normalizedUrl = normalizeTargetUrl(rawUrl)
   const origin = normalizedUrl.origin
 
-  // Determine sitemap URL
-  const sitemapUrl = options.sitemapUrl || `${origin}/sitemap.xml`
+  // Determine sitemap URL. When the user passes one explicitly we honor it
+  // verbatim. Otherwise we try /sitemap.xml first, then /sitemap-index.xml,
+  // then the Sitemap: directive in robots.txt (issue #32).
+  let sitemapUrl: string
+  if (options.sitemapUrl) {
+    sitemapUrl = options.sitemapUrl
+  } else {
+    const discovered = await discoverSitemapUrl(origin)
+    if (!discovered) {
+      throw new AeoAuditError(
+        'UNREACHABLE',
+        'No sitemap found. Tried /sitemap.xml, /sitemap-index.xml, and the Sitemap: directive in /robots.txt. Pass --sitemap <url> with an explicit URL if your sitemap lives elsewhere.',
+      )
+    }
+    sitemapUrl = discovered
+  }
 
   // Fetch and parse sitemap
   const allEntries = await resolveSitemapUrls(sitemapUrl)
@@ -330,4 +433,9 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   }
 }
 
-export { parseSitemapXml, shouldSkipUrl, buildCrossCuttingIssues, mapWithConcurrency }
+export {
+  buildCrossCuttingIssues,
+  mapWithConcurrency,
+  parseSitemapXml,
+  shouldSkipUrl,
+}

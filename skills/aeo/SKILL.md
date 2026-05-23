@@ -95,7 +95,7 @@ npx @ainyc/aeo-audit@1 "<url>" --sitemap --top-issues --format json
 ```
 
 Flags:
-- `--sitemap [url]` — auto-discover `/sitemap.xml` or provide an explicit URL
+- `--sitemap [url]` — auto-discover the sitemap (tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`) or provide an explicit URL
 - `--limit <n>` — cap pages audited (default 200, sorted by sitemap priority)
 - `--top-issues` — skip per-page output, show only cross-cutting patterns
 
@@ -106,6 +106,10 @@ Returns:
 - Cross-cutting issues (factors failing across multiple pages)
 - Aggregate score and grade
 - Prioritized fixes ranked by site-wide impact
+
+#### Auxiliary File Diagnostics
+
+When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml`, it probes once with `Accept: text/markdown` to detect a **content-negotiation** trap: file responds OK to a bare request but returns a non-2xx response when the client prefers markdown. This catches Astro / Vercel / Starlight setups that 307-redirect `.txt` → non-existent `.md` for markdown-accepting clients, making the file invisible to AI content-extraction tools even though the file exists. The diagnostic surfaces as a finding on the **AI-Readable Content** factor.
 
 ### Lighthouse Mode
 

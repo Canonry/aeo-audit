@@ -1,13 +1,21 @@
-import { clampScore, extractSchemaTypes } from './helpers.js'
+import { clampScore, detectSiteCategory, extractSchemaTypes } from './helpers.js'
 import type { AnalysisResult, AuditContext } from '../types.js'
 
 const PRIORITY_TYPES = ['LocalBusiness', 'FAQPage', 'Service', 'HowTo']
+
+function formatSchemaList(schemas: string[]): string {
+  if (schemas.length === 0) return 'Organization'
+  if (schemas.length === 1) return schemas[0]
+  if (schemas.length === 2) return `${schemas[0]} and ${schemas[1]}`
+  return `${schemas.slice(0, -1).join(', ')}, and ${schemas[schemas.length - 1]}`
+}
 
 export function analyzeStructuredData(context: AuditContext): AnalysisResult {
   const findings: AnalysisResult['findings'] = []
   const recommendations: string[] = []
   const structuredData = context.structuredData || []
   const schemaTypes = extractSchemaTypes(structuredData)
+  const detection = detectSiteCategory(context)
 
   let score = 0
 
@@ -16,7 +24,10 @@ export function analyzeStructuredData(context: AuditContext): AnalysisResult {
     findings.push({ type: 'found', message: `Detected ${structuredData.length} JSON-LD block(s).` })
   } else {
     findings.push({ type: 'missing', message: 'No JSON-LD structured data found.' })
-    recommendations.push('Add JSON-LD with LocalBusiness and Service schema.')
+    // Issue #33: recommend schemas that fit the detected site category instead
+    // of always suggesting LocalBusiness/Service (which is wrong for SaaS,
+    // dev tools, blogs, e-commerce, etc.).
+    recommendations.push(`Add JSON-LD with ${formatSchemaList(detection.recommendedSchemas)} schema.`)
   }
 
   for (const type of PRIORITY_TYPES) {

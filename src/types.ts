@@ -41,6 +41,13 @@ export interface RedirectHop {
   to: string
 }
 
+export interface AuxiliaryDiagnostics {
+  // File responds OK with Accept star-slash-star but 404/redirect under Accept: text/markdown —
+  // host does content negotiation that hides the file from AI tools that prefer markdown
+  // (Astro/Vercel sites that redirect .txt to a non-existent .md variant).
+  contentNegotiation?: boolean
+}
+
 export interface AuxiliaryResource {
   state: AuxiliaryResourceState
   url?: string
@@ -50,6 +57,7 @@ export interface AuxiliaryResource {
   redirectChain?: RedirectHop[]
   timingMs?: number
   errorCode?: string
+  diagnostics?: AuxiliaryDiagnostics
 }
 
 export interface AuxiliaryResources {

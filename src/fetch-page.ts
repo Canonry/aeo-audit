@@ -2,6 +2,7 @@ import dns from 'node:dns/promises'
 import ipaddr from 'ipaddr.js'
 import { AeoAuditError, isAeoAuditError } from './errors.js'
 import type {
+  AuxiliaryDiagnostics,
   AuxiliaryResource,
   AuxiliaryResourceState,
   AuxiliaryResources,
@@ -11,7 +12,10 @@ import type {
 
 interface AuxiliarySpec {
   key: keyof AuxiliaryResources
+  /** Primary path checked first. */
   path: string
+  /** Optional fallback paths tried when the primary path returns 404 (e.g. sitemap-index.xml). */
+  fallbackPaths?: string[]
   kind: 'text' | 'xml'
 }
 
@@ -38,8 +42,13 @@ interface RedirectFetchResult {
 }
 
 const USER_AGENT = 'AINYC-AEO-Audit/1.0'
+// Accept header used to probe for content-negotiation redirects (some sites
+// 307 .txt → non-existent .md when this header is present).
+const MARKDOWN_PROBE_ACCEPT = 'text/markdown, text/html;q=0.9, */*;q=0.1'
+
 const MAIN_TIMEOUT_MS = 10_000
 const AUX_TIMEOUT_MS = 5_000
+const DIAGNOSTIC_TIMEOUT_MS = 4_000
 const MAIN_MAX_BYTES = 5 * 1024 * 1024
 const AUX_MAX_BYTES = 1024 * 1024
 const MAX_REDIRECTS = 5
@@ -48,7 +57,9 @@ const AUXILIARY_SPECS: AuxiliarySpec[] = [
   { key: 'llmsTxt', path: '/llms.txt', kind: 'text' },
   { key: 'llmsFullTxt', path: '/llms-full.txt', kind: 'text' },
   { key: 'robotsTxt', path: '/robots.txt', kind: 'text' },
-  { key: 'sitemapXml', path: '/sitemap.xml', kind: 'xml' },
+  // Astro/Next.js sometimes publish only /sitemap-index.xml. Try it as a
+  // fallback so we don't false-report "no sitemap" on those stacks.
+  { key: 'sitemapXml', path: '/sitemap.xml', fallbackPaths: ['/sitemap-index.xml'], kind: 'xml' },
 ]
 
 const BLOCKED_HOST_SUFFIXES = ['.localhost', '.local', '.internal', '.home', '.lan']
@@ -407,9 +418,19 @@ function classifyAuxiliaryState(spec: AuxiliarySpec, response: Response, bodyTex
   return 'ok'
 }
 
-async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<AuxiliaryResource> {
+interface AuxiliaryFetchAttempt {
+  resource: AuxiliaryResource
+  /** True when the primary fetch returned 404 — used to decide whether to try fallback paths. */
+  wasMissing: boolean
+}
+
+async function attemptAuxiliaryFetch(
+  origin: string,
+  path: string,
+  spec: AuxiliarySpec,
+): Promise<AuxiliaryFetchAttempt> {
   const startedAt = Date.now()
-  const targetUrl = new URL(spec.path, origin)
+  const targetUrl = new URL(path, origin)
 
   try {
     const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(targetUrl, {
@@ -424,13 +445,16 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<
     const state = classifyAuxiliaryState(spec, response, body)
 
     return {
-      state,
-      url: finalUrl,
-      statusCode: response.status,
-      contentType: response.headers.get('content-type') || '',
-      body,
-      redirectChain,
-      timingMs: Date.now() - startedAt,
+      resource: {
+        state,
+        url: finalUrl,
+        statusCode: response.status,
+        contentType: response.headers.get('content-type') || '',
+        body,
+        redirectChain,
+        timingMs: Date.now() - startedAt,
+      },
+      wasMissing: response.status === 404,
     }
   } catch (error) {
     const knownError = isAeoAuditError(error)
@@ -439,27 +463,117 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<
 
     if (knownError.code === 'TIMEOUT') {
       return {
-        state: 'timeout',
+        resource: {
+          state: 'timeout',
+          url: targetUrl.toString(),
+          statusCode: null,
+          contentType: '',
+          body: '',
+          redirectChain: [],
+          timingMs: Date.now() - startedAt,
+        },
+        wasMissing: false,
+      }
+    }
+
+    return {
+      resource: {
+        state: 'unreachable',
         url: targetUrl.toString(),
         statusCode: null,
         contentType: '',
         body: '',
         redirectChain: [],
         timingMs: Date.now() - startedAt,
-      }
-    }
-
-    return {
-      state: 'unreachable',
-      url: targetUrl.toString(),
-      statusCode: null,
-      contentType: '',
-      body: '',
-      redirectChain: [],
-      timingMs: Date.now() - startedAt,
-      errorCode: knownError.code,
+        errorCode: knownError.code,
+      },
+      wasMissing: false,
     }
   }
+}
+
+async function probeStatusWithHeaders(
+  url: URL | string,
+  headers: Record<string, string>,
+): Promise<number | null> {
+  const startUrl = typeof url === 'string' ? new URL(url) : new URL(url.toString())
+  let currentUrl = startUrl
+  let redirects = 0
+
+  for (;;) {
+    let response: Response
+    try {
+      await validatePublicRequestTarget(currentUrl)
+      response = await timedFetch(currentUrl, {
+        timeoutMs: DIAGNOSTIC_TIMEOUT_MS,
+        headers,
+        redirect: 'manual',
+      })
+    } catch {
+      return null
+    }
+
+    if (!isRedirectStatus(response.status)) {
+      try {
+        await response.body?.cancel()
+      } catch {
+        /* ignore */
+      }
+      return response.status
+    }
+
+    const location = response.headers.get('location')
+    if (!location || redirects >= MAX_REDIRECTS) {
+      return response.status
+    }
+
+    try {
+      currentUrl = new URL(location, currentUrl)
+    } catch {
+      return null
+    }
+    redirects += 1
+  }
+}
+
+async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<AuxiliaryResource> {
+  let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec)
+
+  // Issue #32: if the primary path 404s, try the documented fallbacks (e.g.
+  // /sitemap-index.xml). The first successful fallback wins.
+  if (attempt.wasMissing && spec.fallbackPaths?.length) {
+    for (const fallback of spec.fallbackPaths) {
+      const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec)
+      if (!fallbackAttempt.wasMissing && fallbackAttempt.resource.state === 'ok') {
+        attempt = fallbackAttempt
+        break
+      }
+    }
+  }
+
+  const diagnostics: AuxiliaryDiagnostics = {}
+
+  // Issues #34/#35: when the file responds OK, probe once with `Accept: text/markdown`
+  // to detect content-negotiation 404 traps that hide the file from AI tools.
+  // Some Vercel/Astro/Starlight stacks 307 .txt → non-existent .md when the
+  // request prefers markdown — the file is "missing" only to clients that
+  // advertise a markdown preference. The probe surfaces this so users can fix
+  // the negotiation rule, not the file.
+  if (attempt.resource.state === 'ok' && attempt.resource.url) {
+    const probeStatus = await probeStatusWithHeaders(attempt.resource.url, {
+      'User-Agent': USER_AGENT,
+      Accept: MARKDOWN_PROBE_ACCEPT,
+    })
+    if (probeStatus !== null && (probeStatus < 200 || probeStatus >= 400)) {
+      diagnostics.contentNegotiation = true
+    }
+  }
+
+  if (diagnostics.contentNegotiation) {
+    attempt.resource.diagnostics = diagnostics
+  }
+
+  return attempt.resource
 }
 
 export interface FetchPageOptions {
