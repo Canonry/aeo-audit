@@ -92,6 +92,10 @@ npx @ainyc/aeo-audit https://example.com --lighthouse
 
 # Provide a PageSpeed Insights API key to lift anonymous rate limits
 PAGESPEED_API_KEY=xxx npx @ainyc/aeo-audit https://example.com --lighthouse --format json
+
+# Force exit 1 when meta description is missing (CI gate)
+npx @ainyc/aeo-audit https://example.com --require-meta
+npx @ainyc/aeo-audit https://example.com --sitemap --require-meta
 ```
 
 ### Platform Detection Mode
@@ -183,9 +187,10 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 | `--urls <src>` | In `--detect-platform` mode, run on multiple URLs. `<src>` is a file path (one URL per line), a comma-separated list, or `-` for stdin |
 | `--concurrency <n>` | In `--detect-platform` batch mode, max in-flight fetches (default 5) |
 | `--min-confidence <lvl>` | In platform-detect mode, only report matches at or above this level: `low` (default), `medium`, `high` |
+| `--require-meta` | Exit `1` if any audited page is missing `<meta name="description">`, regardless of the overall score. Works in both single-URL and sitemap modes. |
 | `-h`, `--help` | Show the help message |
 
-Exit code `0` for score >= 70, `1` for < 70 (CI-friendly). In sitemap mode the exit code is based on the aggregate score.
+Exit code `0` for score >= 70, `1` for < 70 (CI-friendly). In sitemap mode the exit code is based on the aggregate score. When `--require-meta` is passed, exit is forced to `1` if any audited page lacks `<meta name="description">`, regardless of the score-based rule.
 
 ## Programmatic Usage
 

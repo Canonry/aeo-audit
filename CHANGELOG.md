@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.0 (2026-05-28)
+
+### Added
+- **`--require-meta` flag (#37).** New CI gate: when passed, the CLI exits `1` if any audited page lacks `<meta name="description">`, regardless of the overall (or aggregate) score-based exit rule. Previously a missing meta description surfaced as a `missing` finding under `technical-seo` but did not fail the run on otherwise-healthy sites, so the issue could silently pass CI. Works in both single-URL and sitemap modes; in sitemap mode the failure lists the offending URLs (truncated to the first three) on stderr.
+
 ## 1.10.0 (2026-05-23)
 
 ### Added

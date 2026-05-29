@@ -25,6 +25,7 @@ import type {
   BatchPlatformDetectionReport,
   PlatformConfidence,
   PlatformDetectionReport,
+  ScoredFactor,
   SitemapAuditOptions,
   SitemapAuditReport,
 } from './types.js'
@@ -71,6 +72,7 @@ interface ParsedArgs {
   minConfidence: PlatformConfidence | null
   urls: string | null
   concurrency: number | null
+  requireMeta: boolean
 }
 
 function isFormatterName(value: string): value is FormatterName {
@@ -95,6 +97,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     minConfidence: null,
     urls: null,
     concurrency: null,
+    requireMeta: false,
   }
 
   for (let i = 0; i < args.length; i += 1) {
@@ -142,6 +145,8 @@ function parseArgs(argv: string[]): ParsedArgs {
         result.concurrency = num
       }
       i += 1
+    } else if (args[i] === '--require-meta') {
+      result.requireMeta = true
     } else if (args[i] === '--help' || args[i] === '-h') {
       result.help = true
     } else if (!args[i].startsWith('-')) {
@@ -150,6 +155,15 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   return result
+}
+
+export function hasMissingMetaDescription(factors: ScoredFactor[] | undefined): boolean {
+  if (!factors) return false
+  const tech = factors.find((f) => f.id === 'technical-seo')
+  if (!tech) return false
+  return tech.findings.some(
+    (f) => f.type === 'missing' && f.message.startsWith('No meta description found'),
+  )
 }
 
 export function parseUrlList(text: string): string[] {
@@ -212,6 +226,8 @@ Options:
   --concurrency <n>       In --detect-platform batch mode, max in-flight fetches (default 5).
   --min-confidence <lvl>  In platform-detect mode, only report platforms at or above this
                           confidence level: low (default), medium, high.
+  --require-meta          Exit 1 if any audited page is missing <meta name="description">,
+                          regardless of overall score. Works in both single-URL and sitemap modes.
   -h, --help              Show this help message
 
 Examples:
@@ -227,6 +243,8 @@ Examples:
   aeo-audit https://example.com --sitemap https://example.com/sitemap.xml
   aeo-audit https://example.com --sitemap --limit 10
   aeo-audit https://example.com --sitemap --top-issues
+  aeo-audit https://example.com --require-meta
+  aeo-audit https://example.com --sitemap --require-meta
   aeo-audit https://example.com --detect-platform
   aeo-audit https://example.com --detect-platform --format json
   aeo-audit https://example.com --detect-platform --min-confidence medium
@@ -237,6 +255,8 @@ Examples:
 Exit code: 0 when score >= 70, 1 otherwise. In sitemap mode, the aggregate score is used.
 In --detect-platform mode, exit code is 0 if any platform is detected, 1 otherwise.
 In --detect-platform batch mode, exit code is 0 if at least one URL succeeded, 1 otherwise.
+With --require-meta, exit is 1 if any audited page is missing <meta name="description">,
+regardless of the score-based rule above.
 `)
 }
 
@@ -329,6 +349,22 @@ export async function main(argv: string[] = process.argv): Promise<number> {
       const report = await runSitemapAudit(args.url, options)
       const sitemapFormatter = SITEMAP_FORMATTERS[args.format]
       console.log(sitemapFormatter(report, args.topIssues))
+
+      if (args.requireMeta) {
+        const missingPages = report.pages.filter(
+          (p) => p.status === 'success' && hasMissingMetaDescription(p.factors),
+        )
+        if (missingPages.length > 0) {
+          console.error(
+            `Error: --require-meta failed. ${missingPages.length} page(s) missing <meta name="description">: ${missingPages
+              .slice(0, 3)
+              .map((p) => p.url)
+              .join(', ')}${missingPages.length > 3 ? ` (+${missingPages.length - 3} more)` : ''}`,
+          )
+          return 1
+        }
+      }
+
       return report.aggregateScore >= 70 ? 0 : 1
     }
 
@@ -341,6 +377,12 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     })
 
     console.log(formatter(report))
+
+    if (args.requireMeta && hasMissingMetaDescription(report.factors)) {
+      console.error(`Error: --require-meta failed. Page is missing <meta name="description">: ${report.finalUrl}`)
+      return 1
+    }
+
     return report.overallScore >= 70 ? 0 : 1
   } catch (error) {
     if (isAeoAuditError(error)) {

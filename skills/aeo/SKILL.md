@@ -53,6 +53,8 @@ If no mode is provided, default to `audit`.
 - `audit https://example.com --sitemap --limit 10`
 - `audit https://example.com --sitemap --top-issues`
 - `audit https://example.com --lighthouse`
+- `audit https://example.com --require-meta`
+- `audit https://example.com --sitemap --require-meta`
 - `fix https://example.com`
 - `schema https://example.com`
 - `llms https://example.com`
@@ -83,6 +85,10 @@ Use for broad requests such as "audit this site" or "why am I not being cited?"
    - Top fixes
    - Metadata such as fetch time and auxiliary file availability
 
+#### `--require-meta` (CI gate)
+
+Pass `--require-meta` (single or sitemap mode) to force exit `1` whenever any audited page is missing `<meta name="description">`, regardless of the otherwise score-based exit rule. Useful in CI pipelines that need to block deploys on a missing meta description even on otherwise-healthy sites.
+
 ### Sitemap Mode
 
 Use `--sitemap` to audit all pages discovered from the site's sitemap:
@@ -98,6 +104,7 @@ Flags:
 - `--sitemap [url]` — auto-discover the sitemap (tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`) or provide an explicit URL
 - `--limit <n>` — cap pages audited (default 200, sorted by sitemap priority)
 - `--top-issues` — skip per-page output, show only cross-cutting patterns
+- `--require-meta` — force exit `1` if any audited page is missing `<meta name="description">`, regardless of overall score (useful as a CI gate)
 
 Pages are audited with bounded concurrency (5 in flight) to avoid hammering the target origin.
 

@@ -125,6 +125,35 @@ function captureConsole(t: TestContext): { stdout: string[]; stderr: string[] } 
   return { stdout, stderr }
 }
 
+test('--require-meta forces exit 1 when the fixture has no <meta name="description">', async (t) => {
+  installMockClock(t)
+  installMockFetch(t)
+  const { stdout, stderr } = captureConsole(t)
+  const { main } = await import(new URL('../../dist/cli.js', import.meta.url).href)
+
+  const exitCode = await main([
+    'node',
+    'aeo-audit',
+    FIXTURE_URL,
+    '--format',
+    'json',
+    '--require-meta',
+  ])
+
+  assert.equal(exitCode, 1, 'expected exit 1 because fixture HTML has no meta description')
+  assert.equal(stdout.length, 1, 'report still printed before failure')
+  assert.ok(
+    stderr.some((line) => line.includes('--require-meta failed')),
+    'stderr should mention --require-meta failure',
+  )
+
+  const report = JSON.parse(stdout[0]) as AuditReport
+  assert.ok(
+    report.overallScore >= 70,
+    'sanity check: fixture would otherwise pass the score-based exit rule',
+  )
+})
+
 test('compiled CLI returns the expected JSON report for the fixture site', async (t) => {
   installMockClock(t)
   installMockFetch(t)
