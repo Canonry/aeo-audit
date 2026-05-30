@@ -1,6 +1,6 @@
 # @ainyc/aeo-audit
 
-The most comprehensive open-source Answer Engine Optimization (AEO) audit tool. Scores any website across 16 ranking factors that determine whether AI answer engines — ChatGPT, Perplexity, Gemini, Claude — will cite your content.
+The most comprehensive open-source technical Answer Engine Optimization (AEO) audit tool. Scores any website across 16 ranking factors that determine whether AI answer engines — ChatGPT, Perplexity, Gemini, Claude — will cite your content.
 
 Website: [ainyc.ai](https://ainyc.ai)
 
