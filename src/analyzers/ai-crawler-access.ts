@@ -1,4 +1,5 @@
 import { clampScore } from './helpers.js'
+import { specCitation } from '../spec-references.js'
 import type { AnalysisResult, AuditContext } from '../types.js'
 
 interface RobotRule {
@@ -160,6 +161,17 @@ export function analyzeAiCrawlerAccess(context: AuditContext): AnalysisResult {
   if (robotsTxt.toLowerCase().includes('sitemap:')) {
     score += 18
     findings.push({ type: 'found', message: 'Sitemap directive found in robots.txt.' })
+  }
+
+  // Content Signals — machine-readable AI usage preferences in robots.txt
+  // (specification.website: content-signals).
+  if (/^\s*content-signal\s*:/im.test(robotsTxt)) {
+    score += 8
+    findings.push({ type: 'found', message: 'robots.txt declares Content-Signal directives — AI search/input/train preferences are machine-readable.' })
+  } else {
+    recommendations.push(
+      `Declare AI usage preferences with a Content-Signal directive in robots.txt (e.g. "Content-Signal: search=yes, ai-input=yes, ai-train=no"). ${specCitation('content-signals')}`,
+    )
   }
 
   return {

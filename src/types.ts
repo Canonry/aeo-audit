@@ -84,6 +84,19 @@ export interface RunAeoAuditOptions {
   includeGeo?: boolean
   includeAgentSkills?: boolean
   includeLighthouse?: boolean
+  /**
+   * Narrowly-scoped escape hatch for the SSRF guard. Set to a single hostname
+   * (e.g. `localhost`, `127.0.0.1`, `staging.internal`) to permit that ONE host
+   * to resolve to a private/loopback/link-local address. This is intentionally a
+   * host string, not a boolean: there is no way to disable the guard wholesale.
+   *
+   * The relaxation is evaluated per request hop against `url.hostname`, so a
+   * redirect or sitemap `<loc>` pointing at any OTHER private host (cloud metadata
+   * at 169.254.169.254, internal services, …) is still blocked. The CLI derives
+   * this from the exact target host the user typed for `--allow-local`; library
+   * and service callers that never set it remain fully protected.
+   */
+  allowPrivateHost?: string
 }
 
 export interface RawFactorResult extends AnalysisResult {
@@ -205,6 +218,14 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
   sitemapUrl?: string
   limit?: number
   topIssuesOnly?: boolean
+  /**
+   * Rewrite every sitemap `<loc>`'s origin to the origin of the target URL passed
+   * to `runSitemapAudit` before crawling. Useful when a sitemap hardcodes the
+   * canonical/prod domain but you want to audit a different origin that serves the
+   * same paths (a staging host, or a local dev server behind a tunnel). No
+   * security cost: every crawled URL is pinned to the origin you explicitly named.
+   */
+  rewriteOrigin?: boolean
   onPlan?: (plan: SitemapAuditPlan) => void
 }
 

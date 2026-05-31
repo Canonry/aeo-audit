@@ -17,13 +17,17 @@ function aux(overrides: Partial<AuxiliaryResources> = {}): AuxiliaryResources {
   }
 }
 
-function buildContext(html: string = bareHtml, auxiliary: AuxiliaryResources = aux()): AuditContext {
+function buildContext(
+  html: string = bareHtml,
+  auxiliary: AuxiliaryResources = aux(),
+  headers: Record<string, string> = {},
+): AuditContext {
   const $ = load(html)
   return {
     $,
     html,
     url: 'https://example.com/',
-    headers: {},
+    headers,
     auxiliary,
     structuredData: parseJsonLdScripts($),
     textContent: getVisibleText($, html),
@@ -179,17 +183,43 @@ describe('head link to llms.txt', () => {
   })
 })
 
+// ─── Per-page Markdown source endpoint ───────────────────────────────────────
+describe('per-page Markdown source endpoint', () => {
+  it('credits +10 and a found finding for a text/markdown alternate link', () => {
+    const html = '<!doctype html><html><head><title>T</title><link rel="alternate" type="text/markdown" href="/index.md"></head><body></body></html>'
+    const result = analyzeAiReadableContent(buildContext(html))
+    expect(result.score).toBe(10) // only the markdown endpoint; all aux missing, no llms.txt link
+    expect(result.findings.some((f) => f.type === 'found' && f.message.includes('Markdown source endpoint'))).toBe(true)
+  })
+
+  it('credits +10 when the endpoint is advertised via a Link response header', () => {
+    const result = analyzeAiReadableContent(buildContext(bareHtml, aux(), {
+      link: '</index.md>; rel="alternate"; type="text/markdown"',
+    }))
+    expect(result.score).toBe(10)
+    expect(result.findings.some((f) => f.type === 'found' && f.message.includes('Markdown source endpoint'))).toBe(true)
+  })
+
+  it('flags info + a spec-cited recommendation when no markdown endpoint is advertised', () => {
+    const result = analyzeAiReadableContent(buildContext(bareHtml))
+    expect(result.findings.some((f) => f.type === 'info' && f.message.includes('Markdown source endpoint'))).toBe(true)
+    expect(result.recommendations.some((r) =>
+      r.includes('text/markdown') && r.includes('specification.website'),
+    )).toBe(true)
+  })
+})
+
 // ─── Additive full-strength scenario ─────────────────────────────────────────
 describe('fully ai-readable page', () => {
   it('reaches near-full score with every signal satisfied', () => {
-    const html = '<!doctype html><html><head><title>T</title><link rel="alternate" type="text/plain" href="/llms.txt"></head><body></body></html>'
+    const html = '<!doctype html><html><head><title>T</title><link rel="alternate" type="text/markdown" href="/llms.txt"></head><body></body></html>'
     const result = analyzeAiReadableContent(buildContext(html, {
       llmsTxt: { state: 'ok', body: 'word '.repeat(120) },
       llmsFullTxt: { state: 'ok', body: 'word '.repeat(220) },
       robotsTxt: { state: 'ok', body: 'User-agent: *' },
       sitemapXml: { state: 'ok', body: '<urlset></urlset>' },
     }))
-    // 24 + 8 + 24 + 10 + 16 + 16 + 10 = 108 → clamped to 100
+    // 24 + 8 + 24 + 10 + 16 + 16 + 10 (llms link) + 10 (markdown) = 118 → clamped to 100
     expect(result.score).toBe(100)
     expect(result.recommendations.length).toBe(0)
   })

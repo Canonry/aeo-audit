@@ -28,6 +28,26 @@ function shouldSkipUrl(url: string): boolean {
   }
 }
 
+/**
+ * Re-home a sitemap `<loc>` onto `targetOrigin`, preserving its path, query, and
+ * fragment. Used by `--rewrite-sitemap-origin` so a sitemap that hardcodes the
+ * canonical/prod domain can be crawled against the origin the user actually named
+ * (a staging host, or a local dev server). Unparseable locs are returned
+ * unchanged so they fall through to the normal skip/error handling.
+ */
+export function rewriteLocOrigin(loc: string, targetOrigin: string): string {
+  try {
+    const locUrl = new URL(loc)
+    const rewritten = new URL(targetOrigin)
+    rewritten.pathname = locUrl.pathname
+    rewritten.search = locUrl.search
+    rewritten.hash = locUrl.hash
+    return rewritten.toString()
+  } catch {
+    return loc
+  }
+}
+
 interface SitemapEntry {
   loc: string
   priority?: number
@@ -334,7 +354,23 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   }
 
   // Fetch and parse sitemap
-  const allEntries = await resolveSitemapUrls(sitemapUrl)
+  let allEntries = await resolveSitemapUrls(sitemapUrl)
+
+  // Opt-in origin rewriting (issue from field feedback): re-home every <loc> onto
+  // the origin the user named so a sitemap hardcoding the prod/canonical domain can
+  // be audited against a staging host or local dev server. Rewriting can collapse
+  // http/https or www variants onto the same URL, so dedupe afterward.
+  if (options.rewriteOrigin) {
+    const seen = new Set<string>()
+    allEntries = allEntries
+      .map((e) => ({ ...e, loc: rewriteLocOrigin(e.loc, origin) }))
+      .filter((e) => {
+        if (seen.has(e.loc)) return false
+        seen.add(e.loc)
+        return true
+      })
+  }
+
   const discovered = allEntries.length
 
   // Filter to HTML content pages
@@ -362,9 +398,20 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     effectiveLimit,
   })
 
+  // Forward the in-process optional factors so opt-in flags behave the same as in
+  // single-URL mode. includeLighthouse is deliberately NOT forwarded: each
+  // PageSpeed Insights call takes 15-30s, so running it across a sitemap would be
+  // pathological — the CLI rejects --lighthouse + --sitemap for the same reason.
   const auditOptions: RunAeoAuditOptions = {
     factors: options.factors,
     includeGeo: options.includeGeo,
+    includeAgentSkills: options.includeAgentSkills,
+    // Forward the target-scoped private-host allowance so `--allow-local` reaches
+    // per-page fetches. It only ever matches the single host the user named, so a
+    // <loc> on any other private host stays blocked even with this set. With
+    // --rewrite-sitemap-origin, every <loc> is on that named host, so a local dev
+    // server's whole sitemap becomes auditable.
+    allowPrivateHost: options.allowPrivateHost,
   }
 
   // Audit pages with bounded concurrency: 5 workers is a polite ceiling for one
@@ -435,6 +482,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
 
 export {
   buildCrossCuttingIssues,
+  buildPrioritizedFixes,
   mapWithConcurrency,
   parseSitemapXml,
   shouldSkipUrl,

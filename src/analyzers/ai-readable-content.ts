@@ -1,4 +1,5 @@
 import { clampScore, countWords } from './helpers.js'
+import { specCitation } from '../spec-references.js'
 import type { AnalysisResult, AuditContext, AuxiliaryResource } from '../types.js'
 
 function pushDiagnosticFindings(
@@ -149,6 +150,22 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
   } else {
     findings.push({ type: 'info', message: 'No llms.txt link detected in <head>.' })
     recommendations.push('Add a <link> reference to /llms.txt in your document head.')
+  }
+
+  // Per-page Markdown source endpoint — lets agents fetch unrendered source
+  // instead of scraping rendered HTML. Discoverable via a text/markdown alternate
+  // link or a Link response header (specification.website: markdown-source-endpoints).
+  const markdownLinkTag = context.$('link[type*="markdown"]').length > 0
+  const linkHeader = context.headers?.['link'] || context.headers?.['Link'] || ''
+  const markdownLinkHeader = /type="?text\/markdown"?/i.test(linkHeader)
+  if (markdownLinkTag || markdownLinkHeader) {
+    score += 10
+    findings.push({ type: 'found', message: 'Per-page Markdown source endpoint advertised (text/markdown alternate) — agents can fetch unrendered source.' })
+  } else {
+    findings.push({ type: 'info', message: 'No per-page Markdown source endpoint advertised (text/markdown alternate link or Link header).' })
+    recommendations.push(
+      `Expose a Markdown version of each page (a .md URL or content negotiation) and advertise it via <link rel="alternate" type="text/markdown">. ${specCitation('markdown-source-endpoints')}`,
+    )
   }
 
   return {
