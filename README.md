@@ -61,30 +61,6 @@ AI answer engines are replacing traditional search for millions of queries. Gett
 
 > **Note on Google's guidance.** Google's [AI features and your website][google-aeo] guide says `llms.txt` and heavy structured data aren't required for AI Overviews or AI Mode. We still score them — Google is one engine; ChatGPT, Perplexity, and Claude do rely on them. Snippet eligibility is the one hard gate Google enforces: a page must be indexable and snippet-eligible to appear in AI features.
 
-## specification.website Alignment
-
-aeo-audit's agent-readiness factors map directly onto rules in the platform-agnostic web specification at [specification.website](https://specification.website) (by Joost de Valk, founder of Yoast). The spec is the authoritative reference for *what* good agent-readiness looks like; aeo-audit is the engine that *measures* it on a live URL. The mapping is exported as `FACTOR_SPEC_RULES`:
-
-| aeo-audit factor | specification.website agent-readiness rule(s) |
-|------------------|------------------------------------------------|
-| `structured-data` | Structured data for agents |
-| `ai-readable-content` | /llms.txt · /llms-full.txt · Per-page Markdown source endpoints · HTTP Link headers for discovery |
-| `ai-crawler-access` | robots.txt for AI crawlers · Content Signals in robots.txt |
-| `agent-skill-exposure` | MCP and tool discovery · Agent Skills discovery · A2A agent cards · Web Bot Auth |
-
-Recommendations for these signals cite the exact rule page and its status — e.g. *“See specification.website — "Per-page Markdown source endpoints" (recommended)”* — so an audit doubles as a conformance report against the spec's agent-readiness category.
-
-```ts
-import { FACTOR_SPEC_RULES, SPEC_RULES, specCitation } from '@ainyc/aeo-audit'
-
-SPEC_RULES['content-signals']
-// { slug: 'content-signals', title: 'Content Signals in robots.txt',
-//   status: 'optional', url: 'https://specification.website/spec/agent-readiness/content-signals/' }
-
-specCitation('a2a-agent-cards')
-// 'See specification.website — "A2A agent cards" (optional): https://…/a2a-agent-cards/'
-```
-
 ## CLI Usage
 
 ```bash
