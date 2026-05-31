@@ -1,4 +1,5 @@
 import { clampScore } from './helpers.js'
+import { specCitation } from '../spec-references.js'
 import type { AnalysisResult, AuditContext, StructuredDataEntry } from '../types.js'
 
 interface ActionMatch {
@@ -152,6 +153,25 @@ export function analyzeAgentSkillExposure(context: AuditContext): AnalysisResult
   } else {
     findings.push({ type: 'missing', message: 'No MCP / WebMCP / ai-plugin discovery link or header.' })
     recommendations.push('Expose an MCP server card via <link rel="mcp" href="/.well-known/mcp.json"> or a Link header so agents can discover your tools.')
+  }
+
+  // ── A2A agent card discovery (up to 12) ─────────────────────────────────
+  // An Agent2Agent (A2A) card lets agents negotiate capabilities before invoking
+  // tools. Discoverable via a link/meta tag, a Link header, or a well-known path
+  // (specification.website: a2a-agent-cards).
+  const agentCardLink = $(
+    'link[rel~="agent-card"], link[rel~="a2a"], link[href*="/.well-known/agent.json"], link[href*="agent-card.json"]',
+  ).first()
+  const agentCardMeta = $('meta[name="agent-card"], meta[name="a2a-agent-card"]').first()
+  const agentCardHeader = /rel="?(agent-card|a2a)"?/i.test(linkHeader)
+  if (agentCardLink.length || agentCardMeta.length || agentCardHeader) {
+    score += 12
+    findings.push({ type: 'found', message: 'A2A agent card discovery present — agents can fetch an agent card to negotiate capabilities.' })
+  } else {
+    findings.push({ type: 'info', message: 'No A2A agent card discovery (no link/meta/Link header pointing to an agent card).' })
+    recommendations.push(
+      `Publish an A2A agent card and advertise it via <link rel="agent-card" href="/.well-known/agent.json"> or a Link header. ${specCitation('a2a-agent-cards')}`,
+    )
   }
 
   // ── OpenAPI / service-description links (up to 10) ──────────────────────

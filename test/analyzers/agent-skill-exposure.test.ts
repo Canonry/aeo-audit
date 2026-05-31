@@ -128,6 +128,36 @@ describe('MCP discovery', () => {
   })
 })
 
+// ─── A2A agent card discovery ────────────────────────────────────────────────
+describe('A2A agent card discovery', () => {
+  it.each([
+    ['agent-card link', '<link rel="agent-card" href="/.well-known/agent.json">'],
+    ['well-known agent.json href', '<link rel="alternate" href="/.well-known/agent.json">'],
+    ['agent-card.json href', '<link rel="alternate" href="/agent-card.json">'],
+  ])('credits a found A2A finding for %s', (_, tag) => {
+    const result = analyzeAgentSkillExposure(buildContext(wrap(tag)))
+    expect(result.findings.some((f) => f.type === 'found' && f.message.includes('A2A agent card'))).toBe(true)
+  })
+
+  it('credits a found A2A finding for <meta name="agent-card">', () => {
+    const result = analyzeAgentSkillExposure(buildContext(wrap('<meta name="agent-card" content="/.well-known/agent.json">')))
+    expect(result.findings.some((f) => f.type === 'found' && f.message.includes('A2A agent card'))).toBe(true)
+  })
+
+  it('credits a found A2A finding when advertised via the Link response header', () => {
+    const result = analyzeAgentSkillExposure(buildContext(wrap(''), {
+      link: '</.well-known/agent.json>; rel="agent-card"',
+    }))
+    expect(result.findings.some((f) => f.type === 'found' && f.message.includes('A2A agent card'))).toBe(true)
+  })
+
+  it('flags info + a spec-cited recommendation when no agent card is discoverable', () => {
+    const result = analyzeAgentSkillExposure(buildContext(wrap('')))
+    expect(result.findings.some((f) => f.type === 'info' && f.message.includes('A2A agent card'))).toBe(true)
+    expect(result.recommendations.some((r) => r.includes('agent card') && r.includes('specification.website'))).toBe(true)
+  })
+})
+
 // ─── OpenAPI / service-description links ─────────────────────────────────────
 describe('OpenAPI / service-description links', () => {
   it.each([

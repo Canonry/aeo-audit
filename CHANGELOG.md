@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.13.0 (2026-05-31)
+
+### Added
+- **`--allow-local` / `--allow-private` — target-scoped SSRF opt-out.** The audit blocks any URL resolving to a private/loopback/link-local address by default. These flags relax the guard for the **single host named on the CLI, and only that host**. Internally this is a `allowPrivateHost: <hostname>` option (not a boolean), evaluated per request hop, so a redirect or sitemap `<loc>` pointing at any other private host (cloud metadata at `169.254.169.254`, internal services) is still blocked. There is no way to disable the guard wholesale, and library/service callers that never set it stay fully protected. Removes the need for a public tunnel when auditing your own dev/staging server.
+- **`--rewrite-sitemap-origin` — opt-in sitemap origin rewriting.** In `--sitemap` mode, re-homes every `<loc>` onto the origin of the target URL you passed (preserving path and query) before crawling. Use it when a sitemap hardcodes the canonical/prod domain but you want to audit a staging host or local dev server that serves the same paths. Every crawled URL is pinned to the origin you explicitly named, so there's no SSRF cost; combined with `--allow-local` it makes a local dev server's whole sitemap auditable in one command. Also exposed as `rewriteOrigin` on `SitemapAuditOptions`.
+- **Static-output mode — audit built HTML offline.** Pass a filesystem path instead of a URL (`aeo-audit ./out`) to audit built HTML with no network — ideal for CI on a `next export` / `dist` / `out` directory. A `.html`/`.htm` file produces a single-page report; a directory is walked for HTML files and aggregated like sitemap mode. `--base-url` maps files to page URLs (`out/about/index.html` → `<base>/about/`); `llms.txt`, `robots.txt`, etc. are read from disk. Coverage is partial by nature — server-only signals (redirects, `X-Robots-Tag`, `Last-Modified`, `Link` headers) aren't visible from static files. New `runStaticAudit()` export plus `StaticAuditOptions` / `StaticAuditResult` types; the analyzer pipeline is shared with single-URL mode via the new `auditHtmlPage()` export.
+
+## 1.12.0 (2026-05-31)
+
+### Added
+- **specification.website agent-readiness alignment.** Three emerging agent-readiness signals from the platform-agnostic web spec at [specification.website](https://specification.website) (Joost de Valk) are now detected:
+  - **Per-page Markdown source endpoints** (`ai-readable-content`) — credits a `text/markdown` alternate `<link>` or `Link` response header so agents can fetch unrendered source instead of scraping HTML.
+  - **Content Signals in robots.txt** (`ai-crawler-access`) — credits a `Content-Signal:` directive that declares machine-readable AI search/input/train preferences.
+  - **A2A agent card discovery** (`agent-skill-exposure`) — credits an agent card advertised via `<link rel="agent-card">`, a `Link` header, or a `/.well-known/agent.json` reference.
+  All three are additive and clamp-bounded, so existing audit scores are unchanged (no weight changes); the new signals only add credit paths and spec-cited recommendations.
+- **`spec-references` module + `FACTOR_SPEC_RULES` map (exported).** New `SPEC_RULES`, `FACTOR_SPEC_RULES`, `SPEC_SITE`, and `specCitation()` exports map aeo-audit factor IDs to the exact specification.website agent-readiness rules they evaluate (with verified titles and `required`/`recommended`/`optional` statuses). Recommendations for the new signals cite the precise rule page, positioning aeo-audit as the automated conformance checker for the spec's agent-readiness category.
+
+### Fixed
+- **`--include-agent-skills` is now honored in sitemap mode.** `runSitemapAudit` only forwarded `factors` and `includeGeo` to per-page audits, so `--include-agent-skills` was silently dropped and the `agent-skill-exposure` factor never ran across a sitemap (the only workaround was `--factors agent-skill-exposure`). It now forwards `includeAgentSkills` alongside `includeGeo`. `includeLighthouse` remains intentionally excluded from sitemap mode (each PageSpeed Insights call takes 15–30s).
+
 ## 1.11.0 (2026-05-28)
 
 ### Added

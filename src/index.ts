@@ -22,11 +22,23 @@ import { analyzeAgentSkillExposure } from './analyzers/agent-skill-exposure.js'
 import { analyzeLighthouse } from './analyzers/lighthouse.js'
 import { getVisibleText, parseJsonLdScripts, countWords } from './analyzers/helpers.js'
 import { FACTOR_DEFINITIONS, OPTIONAL_FACTOR_DEFINITIONS, scoreFactors } from './scoring.js'
-import type { Analyzer, AuditContext, AuditReport, RunAeoAuditOptions, ScoredFactor } from './types.js'
+import type {
+  Analyzer,
+  AuditContext,
+  AuditReport,
+  AuxiliaryResources,
+  RedirectHop,
+  RunAeoAuditOptions,
+  ScoredFactor,
+} from './types.js'
 
 export { runSitemapAudit } from './sitemap.js'
+export { runStaticAudit } from './static-audit.js'
 export { detectPlatform, detectPlatformBatch } from './detect-platform.js'
+export { SPEC_RULES, FACTOR_SPEC_RULES, SPEC_SITE, specCitation } from './spec-references.js'
+export type { SpecRule, SpecRuleId, SpecStatus } from './spec-references.js'
 export type { SitemapAuditReport, SitemapAuditOptions } from './types.js'
+export type { StaticAuditOptions, StaticAuditResult } from './static-audit.js'
 export type {
   BatchDetectionEntry,
   BatchPlatformDetectionReport,
@@ -75,30 +87,53 @@ function buildSummary(factors: ScoredFactor[], overallGrade: string): string {
   return `Overall grade ${overallGrade}. Strongest signals: ${strengths.join(', ')}. Biggest opportunities: ${weaknesses.join(', ')}.`
 }
 
-export async function runAeoAudit(rawUrl: string, options: RunAeoAuditOptions = {}): Promise<AuditReport> {
-  const normalizedUrl = normalizeTargetUrl(rawUrl)
-  const selectedFactors = options.factors ?? []
-
-  // Validate factor IDs if provided
-  if (selectedFactors.length > 0) {
-    const invalid = selectedFactors.filter((id) => !ALL_FACTOR_IDS.has(id))
-    if (invalid.length > 0) {
-      throw new AeoAuditError('BAD_INPUT', `Unknown factor ID(s): ${invalid.join(', ')}. Valid IDs: ${[...ALL_FACTOR_IDS].join(', ')}`)
-    }
+function assertValidFactorIds(selectedFactors: string[]): void {
+  if (selectedFactors.length === 0) {
+    return
   }
 
-  const fetchedPage = await fetchPage(normalizedUrl.toString())
+  const invalid = selectedFactors.filter((id) => !ALL_FACTOR_IDS.has(id))
+  if (invalid.length > 0) {
+    throw new AeoAuditError('BAD_INPUT', `Unknown factor ID(s): ${invalid.join(', ')}. Valid IDs: ${[...ALL_FACTOR_IDS].join(', ')}`)
+  }
+}
 
-  const $ = load(fetchedPage.html)
+/**
+ * A page's raw inputs, decoupled from how it was obtained. `runAeoAudit` builds
+ * this from a network fetch; `runStaticAudit` builds it from HTML on disk. Both
+ * feed the identical analyzer pipeline below.
+ */
+export interface AuditHtmlPageInput {
+  inputUrl: string
+  finalUrl: string
+  html: string
+  /** Response headers. Empty `{}` is valid (static mode) — every header read is optional. */
+  headers: Record<string, string>
+  redirectChain: RedirectHop[]
+  auxiliary: AuxiliaryResources
+  fetchTimeMs: number
+}
+
+/**
+ * Run the analyzer pipeline against already-fetched HTML and produce a report.
+ * This is the shared core of single-URL and static-output auditing — it performs
+ * no network I/O, so callers are responsible for sourcing `html`, `headers`, and
+ * `auxiliary` (over the network, or from the filesystem).
+ */
+export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAuditOptions = {}): Promise<AuditReport> {
+  const selectedFactors = options.factors ?? []
+  assertValidFactorIds(selectedFactors)
+
+  const $ = load(page.html)
   const structuredData = parseJsonLdScripts($)
-  const textContent = getVisibleText($, fetchedPage.html)
+  const textContent = getVisibleText($, page.html)
 
   const context: AuditContext = {
     $,
-    html: fetchedPage.html,
-    url: fetchedPage.finalUrl,
-    headers: fetchedPage.headers,
-    auxiliary: fetchedPage.auxiliary,
+    html: page.html,
+    url: page.finalUrl,
+    headers: page.headers,
+    auxiliary: page.auxiliary,
     structuredData,
     textContent,
     pageTitle: $('title').first().text().trim(),
@@ -140,24 +175,48 @@ export async function runAeoAudit(rawUrl: string, options: RunAeoAuditOptions = 
   const { overallScore, overallGrade, factors } = scoreFactors(rawFactorResults)
 
   return {
-    url: fetchedPage.inputUrl,
-    finalUrl: fetchedPage.finalUrl,
+    url: page.inputUrl,
+    finalUrl: page.finalUrl,
     auditedAt: new Date().toISOString(),
     overallScore,
     overallGrade,
     summary: buildSummary(factors, overallGrade),
     factors,
     metadata: {
-      fetchTimeMs: fetchedPage.timings.fetchTimeMs,
+      fetchTimeMs: page.fetchTimeMs,
       pageTitle: context.pageTitle,
       wordCount: countWords(textContent),
       auxiliary: {
-        llmsTxt: fetchedPage.auxiliary.llmsTxt?.state || 'missing',
-        llmsFullTxt: fetchedPage.auxiliary.llmsFullTxt?.state || 'missing',
-        robotsTxt: fetchedPage.auxiliary.robotsTxt?.state || 'missing',
-        sitemapXml: fetchedPage.auxiliary.sitemapXml?.state || 'missing',
+        llmsTxt: page.auxiliary.llmsTxt?.state || 'missing',
+        llmsFullTxt: page.auxiliary.llmsFullTxt?.state || 'missing',
+        robotsTxt: page.auxiliary.robotsTxt?.state || 'missing',
+        sitemapXml: page.auxiliary.sitemapXml?.state || 'missing',
       },
-      redirectChain: fetchedPage.redirectChain,
+      redirectChain: page.redirectChain,
     },
   }
+}
+
+export async function runAeoAudit(rawUrl: string, options: RunAeoAuditOptions = {}): Promise<AuditReport> {
+  const normalizedUrl = normalizeTargetUrl(rawUrl)
+
+  // Validate factor IDs up front so a typo'd --factors fails before the fetch.
+  assertValidFactorIds(options.factors ?? [])
+
+  const fetchedPage = await fetchPage(normalizedUrl.toString(), {
+    allowPrivateHost: options.allowPrivateHost,
+  })
+
+  return auditHtmlPage(
+    {
+      inputUrl: fetchedPage.inputUrl,
+      finalUrl: fetchedPage.finalUrl,
+      html: fetchedPage.html,
+      headers: fetchedPage.headers,
+      redirectChain: fetchedPage.redirectChain,
+      auxiliary: fetchedPage.auxiliary,
+      fetchTimeMs: fetchedPage.timings.fetchTimeMs,
+    },
+    options,
+  )
 }

@@ -1,6 +1,8 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { runAeoAudit } from './index.js'
 import { runSitemapAudit } from './sitemap.js'
+import { runStaticAudit } from './static-audit.js'
+import { normalizeTargetUrl } from './fetch-page.js'
 import { detectPlatform, detectPlatformBatch } from './detect-platform.js'
 import { isAeoAuditError } from './errors.js'
 import {
@@ -28,6 +30,7 @@ import type {
   ScoredFactor,
   SitemapAuditOptions,
   SitemapAuditReport,
+  SitemapPageResult,
 } from './types.js'
 
 const FORMATTERS = {
@@ -73,6 +76,9 @@ interface ParsedArgs {
   urls: string | null
   concurrency: number | null
   requireMeta: boolean
+  allowLocal: boolean
+  rewriteSitemapOrigin: boolean
+  baseUrl: string | null
 }
 
 function isFormatterName(value: string): value is FormatterName {
@@ -98,6 +104,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     urls: null,
     concurrency: null,
     requireMeta: false,
+    allowLocal: false,
+    rewriteSitemapOrigin: false,
+    baseUrl: null,
   }
 
   for (let i = 0; i < args.length; i += 1) {
@@ -147,6 +156,13 @@ function parseArgs(argv: string[]): ParsedArgs {
       i += 1
     } else if (args[i] === '--require-meta') {
       result.requireMeta = true
+    } else if (args[i] === '--allow-local' || args[i] === '--allow-private') {
+      result.allowLocal = true
+    } else if (args[i] === '--rewrite-sitemap-origin') {
+      result.rewriteSitemapOrigin = true
+    } else if (args[i] === '--base-url' && args[i + 1]) {
+      result.baseUrl = args[i + 1]
+      i += 1
     } else if (args[i] === '--help' || args[i] === '-h') {
       result.help = true
     } else if (!args[i].startsWith('-')) {
@@ -199,9 +215,40 @@ async function resolveUrls(spec: string): Promise<string[]> {
   return parseUrlList(text)
 }
 
+/**
+ * Decide whether the positional argument is a filesystem path (static-output mode)
+ * rather than a URL. An explicit `http(s)://` scheme is always a URL; a leading
+ * `.`/`/`/`~` or a path that exists on disk is treated as a static target.
+ */
+async function isStaticTarget(arg: string): Promise<boolean> {
+  if (/^https?:\/\//i.test(arg)) return false
+  if (/^[./~]/.test(arg)) return true
+  try {
+    await stat(arg)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Build the --require-meta failure message for a multi-page report, or null if all pages pass. */
+function sitemapMetaFailureMessage(pages: SitemapPageResult[]): string | null {
+  const missingPages = pages.filter(
+    (p) => p.status === 'success' && hasMissingMetaDescription(p.factors),
+  )
+  if (missingPages.length === 0) return null
+  return `Error: --require-meta failed. ${missingPages.length} page(s) missing <meta name="description">: ${missingPages
+    .slice(0, 3)
+    .map((p) => p.url)
+    .join(', ')}${missingPages.length > 3 ? ` (+${missingPages.length - 3} more)` : ''}`
+}
+
 function printHelp() {
   console.log(`
-Usage: aeo-audit <url> [options]
+Usage: aeo-audit <url|path> [options]
+
+Pass a URL to audit a live site, or a filesystem path (a .html file or a
+directory of built HTML, e.g. ./out) to audit static output offline.
 
 Options:
   --format <type>         Output format: text (default), json, markdown
@@ -227,7 +274,19 @@ Options:
   --min-confidence <lvl>  In platform-detect mode, only report platforms at or above this
                           confidence level: low (default), medium, high.
   --require-meta          Exit 1 if any audited page is missing <meta name="description">,
-                          regardless of overall score. Works in both single-URL and sitemap modes.
+                          regardless of overall score. Works in single-URL, sitemap, and
+                          static-output modes.
+  --allow-local           Allow the target host you named on the CLI to resolve to a
+  (alias --allow-private) private/loopback IP (e.g. http://localhost:3000). Scoped to that
+                          one host only: redirects and sitemap <loc>s pointing at any other
+                          private host stay blocked. For auditing your own dev/staging server.
+  --rewrite-sitemap-origin
+                          In --sitemap mode, rewrite every <loc>'s origin to the target URL's
+                          origin before crawling (preserving path/query). Use when a sitemap
+                          hardcodes the prod/canonical domain but you want to audit a staging
+                          host or local dev server that serves the same paths.
+  --base-url <url>        In static-output mode, base URL used to map files to page URLs
+                          (e.g. out/about/index.html -> <base>/about/). Default https://localhost.
   -h, --help              Show this help message
 
 Examples:
@@ -245,6 +304,12 @@ Examples:
   aeo-audit https://example.com --sitemap --top-issues
   aeo-audit https://example.com --require-meta
   aeo-audit https://example.com --sitemap --require-meta
+  aeo-audit http://localhost:3000 --allow-local
+  aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local
+  aeo-audit https://staging.example.com --sitemap --rewrite-sitemap-origin
+  aeo-audit ./out
+  aeo-audit ./out --base-url https://example.com --require-meta
+  aeo-audit ./dist/index.html
   aeo-audit https://example.com --detect-platform
   aeo-audit https://example.com --detect-platform --format json
   aeo-audit https://example.com --detect-platform --min-confidence medium
@@ -252,7 +317,7 @@ Examples:
   aeo-audit --detect-platform --urls https://a.com,https://b.com --format json
   cat urls.txt | aeo-audit --detect-platform --urls -
 
-Exit code: 0 when score >= 70, 1 otherwise. In sitemap mode, the aggregate score is used.
+Exit code: 0 when score >= 70, 1 otherwise. In sitemap and static-directory modes, the aggregate score is used.
 In --detect-platform mode, exit code is 0 if any platform is detected, 1 otherwise.
 In --detect-platform batch mode, exit code is 0 if at least one URL succeeded, 1 otherwise.
 With --require-meta, exit is 1 if any audited page is missing <meta name="description">,
@@ -288,7 +353,57 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     return 1
   }
 
+  if (args.rewriteSitemapOrigin && !args.sitemap) {
+    console.error('Error: --rewrite-sitemap-origin only applies to --sitemap mode.')
+    return 1
+  }
+
   try {
+    // Static-output mode: the positional arg is a filesystem path, audited offline.
+    if (args.url && (await isStaticTarget(args.url))) {
+      if (args.detectPlatform || args.sitemap || args.lighthouse) {
+        console.error(
+          'Error: a filesystem path (static-output mode) cannot be combined with --detect-platform, --sitemap, or --lighthouse. Those modes need a live URL.',
+        )
+        return 1
+      }
+
+      const result = await runStaticAudit(args.url, {
+        factors: args.factors,
+        includeGeo: args.includeGeo,
+        includeAgentSkills: args.includeAgentSkills,
+        baseUrl: args.baseUrl ?? undefined,
+        limit: args.limit ?? undefined,
+        topIssuesOnly: args.topIssues,
+        onPlan: (plan) => {
+          if (plan.truncated > 0) {
+            console.error(
+              `Notice: ${plan.discovered} HTML files found; auditing the first ${plan.willAudit} (--limit ${plan.effectiveLimit}). ${plan.truncated} skipped. Pass --limit ${Math.max(plan.discovered, 9999)} to audit all.`,
+            )
+          }
+        },
+      })
+
+      if (result.kind === 'single') {
+        console.log(FORMATTERS[args.format](result.report))
+        if (args.requireMeta && hasMissingMetaDescription(result.report.factors)) {
+          console.error(`Error: --require-meta failed. Page is missing <meta name="description">: ${result.report.finalUrl}`)
+          return 1
+        }
+        return result.report.overallScore >= 70 ? 0 : 1
+      }
+
+      console.log(SITEMAP_FORMATTERS[args.format](result.report, args.topIssues))
+      if (args.requireMeta) {
+        const message = sitemapMetaFailureMessage(result.report.pages)
+        if (message) {
+          console.error(message)
+          return 1
+        }
+      }
+      return result.report.aggregateScore >= 70 ? 0 : 1
+    }
+
     if (args.detectPlatform) {
       if (args.urls) {
         if (args.url) {
@@ -329,6 +444,11 @@ export async function main(argv: string[] = process.argv): Promise<number> {
       return 1
     }
 
+    // --allow-local relaxes the private-host guard for the exact host the user
+    // named — and only that host. Derived here from the positional target so a
+    // redirect or sitemap <loc> to any other private host is still blocked.
+    const allowPrivateHost = args.allowLocal ? normalizeTargetUrl(args.url).hostname : undefined
+
     if (args.sitemap) {
       const options: SitemapAuditOptions = {
         factors: args.factors,
@@ -337,6 +457,8 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         sitemapUrl: args.sitemapUrl ?? undefined,
         limit: args.limit ?? undefined,
         topIssuesOnly: args.topIssues,
+        rewriteOrigin: args.rewriteSitemapOrigin,
+        allowPrivateHost,
         onPlan: (plan) => {
           if (plan.truncated > 0) {
             console.error(
@@ -351,16 +473,9 @@ export async function main(argv: string[] = process.argv): Promise<number> {
       console.log(sitemapFormatter(report, args.topIssues))
 
       if (args.requireMeta) {
-        const missingPages = report.pages.filter(
-          (p) => p.status === 'success' && hasMissingMetaDescription(p.factors),
-        )
-        if (missingPages.length > 0) {
-          console.error(
-            `Error: --require-meta failed. ${missingPages.length} page(s) missing <meta name="description">: ${missingPages
-              .slice(0, 3)
-              .map((p) => p.url)
-              .join(', ')}${missingPages.length > 3 ? ` (+${missingPages.length - 3} more)` : ''}`,
-          )
+        const message = sitemapMetaFailureMessage(report.pages)
+        if (message) {
+          console.error(message)
           return 1
         }
       }
@@ -374,6 +489,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
       includeGeo: args.includeGeo,
       includeAgentSkills: args.includeAgentSkills,
       includeLighthouse: args.lighthouse,
+      allowPrivateHost,
     })
 
     console.log(formatter(report))

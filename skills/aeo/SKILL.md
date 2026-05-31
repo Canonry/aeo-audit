@@ -30,7 +30,7 @@ npx @ainyc/aeo-audit@1 "<url>" [flags] --format json
 ## Argument Safety
 
 **Never interpolate user input directly into shell commands.** Always:
-1. Validate that URLs match `https://` or `http://` and contain no shell metacharacters.
+1. Validate that the target is either a URL matching `https://` / `http://` or a local filesystem path (static-output mode), and that it contains no shell metacharacters.
 2. Quote every argument individually (e.g., `npx @ainyc/aeo-audit@1 "https://example.com" --format json`).
 3. Pass flags as separate, literal tokens — never construct command strings from raw user text.
 4. Reject arguments containing characters like `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>`, or newlines.
@@ -55,6 +55,11 @@ If no mode is provided, default to `audit`.
 - `audit https://example.com --lighthouse`
 - `audit https://example.com --require-meta`
 - `audit https://example.com --sitemap --require-meta`
+- `audit http://localhost:3000 --allow-local`
+- `audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local`
+- `audit https://staging.example.com --sitemap --rewrite-sitemap-origin`
+- `audit ./out` (static-output mode: audit built HTML offline)
+- `audit ./out --base-url https://example.com --require-meta`
 - `fix https://example.com`
 - `schema https://example.com`
 - `llms https://example.com`
@@ -104,7 +109,9 @@ Flags:
 - `--sitemap [url]` — auto-discover the sitemap (tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`) or provide an explicit URL
 - `--limit <n>` — cap pages audited (default 200, sorted by sitemap priority)
 - `--top-issues` — skip per-page output, show only cross-cutting patterns
+- `--rewrite-sitemap-origin` — rewrite every `<loc>`'s origin to the target URL's origin (preserving path/query) before crawling. Use when the sitemap hardcodes the prod/canonical domain but you want to audit a staging host or local dev server.
 - `--require-meta` — force exit `1` if any audited page is missing `<meta name="description">`, regardless of overall score (useful as a CI gate)
+- `--include-geo` / `--include-agent-skills` — honored per page in sitemap mode (adds the optional geographic-signals / agent-skill-exposure factors). `--lighthouse` is not available with `--sitemap`.
 
 Pages are audited with bounded concurrency (5 in flight) to avoid hammering the target origin.
 
@@ -117,6 +124,41 @@ Returns:
 #### Auxiliary File Diagnostics
 
 When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml`, it probes once with `Accept: text/markdown` to detect a **content-negotiation** trap: file responds OK to a bare request but returns a non-2xx response when the client prefers markdown. This catches Astro / Vercel / Starlight setups that 307-redirect `.txt` → non-existent `.md` for markdown-accepting clients, making the file invisible to AI content-extraction tools even though the file exists. The diagnostic surfaces as a finding on the **AI-Readable Content** factor.
+
+### Local Dev / Staging Targets
+
+By default the audit blocks any URL that resolves to a private, loopback, or link-local address (SSRF protection). When the user wants to audit **their own** dev or staging server, pass `--allow-local` (alias `--allow-private`):
+
+```bash
+npx @ainyc/aeo-audit@1 "http://localhost:3000" --allow-local --format json
+npx @ainyc/aeo-audit@1 "http://10.0.5.20" --allow-private --format json
+```
+
+- Pass the explicit `http://` scheme for local dev servers — a bare host defaults to `https://`.
+- The relaxation is scoped to the **single host named on the CLI**, evaluated per hop. A redirect or sitemap `<loc>` pointing at any other private host (e.g. `169.254.169.254`) stays blocked.
+- To audit a whole local site whose sitemap hardcodes the prod domain, combine with sitemap origin rewriting:
+
+```bash
+npx @ainyc/aeo-audit@1 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json
+```
+
+### Static-Output Mode
+
+When the user wants to audit **built HTML offline** (CI on a `next export` / `dist` / `out` directory, or before deploying), pass a filesystem path instead of a URL:
+
+```bash
+# A directory of built HTML (aggregated like sitemap mode)
+npx @ainyc/aeo-audit@1 "./out" --base-url https://example.com --format json
+# A single built file
+npx @ainyc/aeo-audit@1 "./dist/index.html" --format json
+# Gate CI on missing meta descriptions across the build
+npx @ainyc/aeo-audit@1 "./out" --require-meta --format json
+```
+
+- A `.html`/`.htm` file → single-page report; a directory → aggregated report (`--limit`, `--top-issues`, `--factors`, `--include-geo`, `--include-agent-skills`, `--require-meta` apply).
+- `--base-url <url>` maps files to page URLs (`out/about/index.html` → `<base>/about/`; default `https://localhost`). `index.html` collapses to its directory URL; other files drop the `.html` extension.
+- `llms.txt`, `llms-full.txt`, `robots.txt`, and `sitemap.xml` are read from the directory root when present.
+- **Partial coverage:** server-only signals (redirects, `X-Robots-Tag`, `Last-Modified`, `Link` headers) aren't visible from static files. Recommend auditing the deployed URL for full coverage.
 
 ### Lighthouse Mode
 
@@ -178,6 +220,7 @@ Use when the user wants code changes applied after the audit.
    - E-E-A-T signals
    - FAQ markup
    - freshness metadata
+   - agent-readiness signals: per-page Markdown source endpoints, `robots.txt` `Content-Signal` directives, and A2A agent cards (aligned with specification.website)
 5. Re-run the audit and report the score delta.
 
 Rules:
@@ -241,6 +284,7 @@ If no URL is provided:
 
 After generation:
 - Add `<link rel="alternate" type="text/markdown" href="/llms.txt">` when appropriate.
+- Expose per-page Markdown source endpoints (a `.md` URL or content negotiation) advertised via `<link rel="alternate" type="text/markdown">` — a scored AI-readable signal.
 - Suggest adding the files to the sitemap.
 
 ## Monitor

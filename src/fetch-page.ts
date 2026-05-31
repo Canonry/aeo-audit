@@ -33,6 +33,7 @@ interface ReadBodyOptions {
 interface FetchWithRedirectOptions {
   timeoutMs: number
   maxRedirects?: number
+  allowPrivateHost?: string
 }
 
 interface RedirectFetchResult {
@@ -78,6 +79,25 @@ function stripPort(hostname = ''): string {
   return segments.length > 2 ? hostname : segments[0]
 }
 
+function normalizeHostname(hostname = ''): string {
+  return stripPort(hostname).toLowerCase().replace(/\.$/, '')
+}
+
+/**
+ * True when `hostname` is the exact host the caller opted out of the private-target
+ * guard via `allowPrivateHost`. Comparison is host-only (port-insensitive) and
+ * normalized for case and trailing dots. Returns false when no allow-host is set,
+ * so the guard stays on by default and only ever relaxes for one named host.
+ */
+export function isHostExplicitlyAllowed(hostname: string, allowPrivateHost?: string): boolean {
+  if (!allowPrivateHost) {
+    return false
+  }
+
+  const normalized = normalizeHostname(hostname)
+  return normalized !== '' && normalized === normalizeHostname(allowPrivateHost)
+}
+
 export function normalizeTargetUrl(rawUrl: unknown): URL {
   if (typeof rawUrl !== 'string') {
     throw new AeoAuditError('BAD_INPUT', 'A target URL is required.')
@@ -107,7 +127,7 @@ export function normalizeTargetUrl(rawUrl: unknown): URL {
 }
 
 export function isHostnameBlocked(hostname: string): boolean {
-  const normalized = stripPort(hostname).toLowerCase().replace(/\.$/, '')
+  const normalized = normalizeHostname(hostname)
 
   if (!normalized) {
     return true
@@ -192,9 +212,24 @@ async function resolveHostAddresses(hostname: string): Promise<string[]> {
   return ips
 }
 
-async function validatePublicRequestTarget(targetUrl: URL): Promise<string[]> {
+interface ValidateTargetOptions {
+  /** Single host permitted to resolve to a private/loopback IP. See RunAeoAuditOptions.allowPrivateHost. */
+  allowPrivateHost?: string
+}
+
+async function validatePublicRequestTarget(targetUrl: URL, options: ValidateTargetOptions = {}): Promise<void> {
   if (!['http:', 'https:'].includes(targetUrl.protocol)) {
     throw new AeoAuditError('UNSUPPORTED_PROTOCOL', 'Only HTTP and HTTPS URLs are supported.')
+  }
+
+  // Narrowly-scoped escape hatch (CLI --allow-local): when the caller named this
+  // exact host, skip BOTH the hostname blocklist and the DNS/IP check. We must not
+  // resolve here — `localhost` lives in /etc/hosts and is not answerable via
+  // dns.resolve4, so a resolution attempt would spuriously fail UNREACHABLE; the
+  // subsequent fetch() uses the OS resolver instead. The match is per-hop, so a
+  // redirect or sitemap <loc> to any OTHER private host still hits the guard below.
+  if (isHostExplicitlyAllowed(targetUrl.hostname, options.allowPrivateHost)) {
+    return
   }
 
   if (isHostnameBlocked(targetUrl.hostname)) {
@@ -209,8 +244,6 @@ async function validatePublicRequestTarget(targetUrl: URL): Promise<string[]> {
       details: { ip: privateIp },
     })
   }
-
-  return ips
 }
 
 function isRedirectStatus(status: number): boolean {
@@ -245,13 +278,13 @@ async function timedFetch(url: URL | string, options: TimedFetchOptions): Promis
 }
 
 async function fetchWithValidatedRedirects(startUrl: URL | string, options: FetchWithRedirectOptions): Promise<RedirectFetchResult> {
-  const { timeoutMs, maxRedirects = MAX_REDIRECTS } = options
+  const { timeoutMs, maxRedirects = MAX_REDIRECTS, allowPrivateHost } = options
 
   let currentUrl = new URL(startUrl.toString())
   const redirectChain: RedirectHop[] = []
 
   for (;;) {
-    await validatePublicRequestTarget(currentUrl)
+    await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
 
     const response = await timedFetch(currentUrl, { timeoutMs, redirect: 'manual' })
 
@@ -428,6 +461,7 @@ async function attemptAuxiliaryFetch(
   origin: string,
   path: string,
   spec: AuxiliarySpec,
+  allowPrivateHost?: string,
 ): Promise<AuxiliaryFetchAttempt> {
   const startedAt = Date.now()
   const targetUrl = new URL(path, origin)
@@ -436,6 +470,7 @@ async function attemptAuxiliaryFetch(
     const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(targetUrl, {
       timeoutMs: AUX_TIMEOUT_MS,
       maxRedirects: MAX_REDIRECTS,
+      allowPrivateHost,
     })
 
     const body = response.ok
@@ -495,6 +530,7 @@ async function attemptAuxiliaryFetch(
 async function probeStatusWithHeaders(
   url: URL | string,
   headers: Record<string, string>,
+  allowPrivateHost?: string,
 ): Promise<number | null> {
   const startUrl = typeof url === 'string' ? new URL(url) : new URL(url.toString())
   let currentUrl = startUrl
@@ -503,7 +539,7 @@ async function probeStatusWithHeaders(
   for (;;) {
     let response: Response
     try {
-      await validatePublicRequestTarget(currentUrl)
+      await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
       response = await timedFetch(currentUrl, {
         timeoutMs: DIAGNOSTIC_TIMEOUT_MS,
         headers,
@@ -536,14 +572,14 @@ async function probeStatusWithHeaders(
   }
 }
 
-async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<AuxiliaryResource> {
-  let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec)
+async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, allowPrivateHost?: string): Promise<AuxiliaryResource> {
+  let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec, allowPrivateHost)
 
   // Issue #32: if the primary path 404s, try the documented fallbacks (e.g.
   // /sitemap-index.xml). The first successful fallback wins.
   if (attempt.wasMissing && spec.fallbackPaths?.length) {
     for (const fallback of spec.fallbackPaths) {
-      const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec)
+      const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec, allowPrivateHost)
       if (!fallbackAttempt.wasMissing && fallbackAttempt.resource.state === 'ok') {
         attempt = fallbackAttempt
         break
@@ -563,7 +599,7 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<
     const probeStatus = await probeStatusWithHeaders(attempt.resource.url, {
       'User-Agent': USER_AGENT,
       Accept: MARKDOWN_PROBE_ACCEPT,
-    })
+    }, allowPrivateHost)
     if (probeStatus !== null && (probeStatus < 200 || probeStatus >= 400)) {
       diagnostics.contentNegotiation = true
     }
@@ -578,15 +614,19 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec): Promise<
 
 export interface FetchPageOptions {
   skipAuxiliary?: boolean
+  /** Permit this single host to resolve to a private/loopback IP. See RunAeoAuditOptions.allowPrivateHost. */
+  allowPrivateHost?: string
 }
 
 export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}): Promise<FetchedPage> {
   const startedAt = Date.now()
   const normalizedUrl = normalizeTargetUrl(rawUrl)
+  const { allowPrivateHost } = options
 
   const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(normalizedUrl, {
     timeoutMs: MAIN_TIMEOUT_MS,
     maxRedirects: MAX_REDIRECTS,
+    allowPrivateHost,
   })
 
   const contentType = response.headers.get('content-type') || ''
@@ -616,7 +656,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
     const origin = new URL(finalUrl).origin
     const auxiliaryEntries = await Promise.all(
       AUXILIARY_SPECS.map(async (spec): Promise<[keyof AuxiliaryResources, AuxiliaryResource]> => {
-        const result = await fetchAuxiliaryFile(origin, spec)
+        const result = await fetchAuxiliaryFile(origin, spec, allowPrivateHost)
         return [spec.key, result]
       }),
     )

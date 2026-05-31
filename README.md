@@ -40,7 +40,7 @@ AI answer engines are replacing traditional search for millions of queries. Gett
 |--------|--------|---------------|
 | Structured Data (JSON-LD) | 12% | Presence of LocalBusiness, FAQPage, Service, HowTo schemas |
 | Content Depth | 10% | Word count, heading hierarchy, paragraph structure, lists |
-| AI-Readable Content | 5% | llms.txt, llms-full.txt, robots.txt, sitemap.xml availability |
+| AI-Readable Content | 5% | llms.txt, llms-full.txt, robots.txt, sitemap.xml availability, per-page Markdown source endpoints |
 | E-E-A-T Signals | 8% | Author meta, Person schema credentials, trust pages, reviews |
 | FAQ Content | 8% | FAQPage schema, details/summary blocks, question-style headings |
 | Citations & Authority | 8% | External links, authoritative domains, sameAs references |
@@ -53,13 +53,37 @@ AI answer engines are replacing traditional search for millions of queries. Gett
 | Snippet Eligibility | 6% | `noindex`/`nosnippet`/`max-snippet` directives in meta robots and `X-Robots-Tag` — Google ties AI feature eligibility to these ([source][google-aeo]) |
 | Technical SEO | 5% | H1 presence, image alt text, meta description length, canonical tag |
 | Schema Validity | 5% | Duplicate singleton @types, JSON parse errors, empty JSON-LD blocks |
-| AI Crawler Access | 4% | Per-bot robots.txt rules for GPTBot, ClaudeBot, PerplexityBot, etc. |
+| AI Crawler Access | 4% | Per-bot robots.txt rules for GPTBot, ClaudeBot, PerplexityBot, etc., plus Content Signals directives |
 
-**Optional:** Geographic Signals (7%) — LocalBusiness geo data, address, areaServed. Enable with `--include-geo`. Agent Skill Exposure (6%) — Schema.org Action, MCP, form affordances. Enable with `--include-agent-skills`. Lighthouse (8%) — Performance, Accessibility, and Best Practices scores via Google PageSpeed Insights (mobile strategy). Enable with `--lighthouse`. Adds ~15-30s per audit; set `PAGESPEED_API_KEY` to lift anonymous rate limits.
+**Optional:** Geographic Signals (7%) — LocalBusiness geo data, address, areaServed. Enable with `--include-geo`. Agent Skill Exposure (6%) — Schema.org Action, MCP, A2A agent cards, form affordances. Enable with `--include-agent-skills`. Lighthouse (8%) — Performance, Accessibility, and Best Practices scores via Google PageSpeed Insights (mobile strategy). Enable with `--lighthouse`. Adds ~15-30s per audit; set `PAGESPEED_API_KEY` to lift anonymous rate limits.
 
 [google-aeo]: https://developers.google.com/search/docs/fundamentals/ai-optimization-guide "Google: AI features and your website"
 
 > **Note on Google's guidance.** Google's [AI features and your website][google-aeo] guide says `llms.txt` and heavy structured data aren't required for AI Overviews or AI Mode. We still score them — Google is one engine; ChatGPT, Perplexity, and Claude do rely on them. Snippet eligibility is the one hard gate Google enforces: a page must be indexable and snippet-eligible to appear in AI features.
+
+## specification.website Alignment
+
+aeo-audit's agent-readiness factors map directly onto rules in the platform-agnostic web specification at [specification.website](https://specification.website) (by Joost de Valk, founder of Yoast). The spec is the authoritative reference for *what* good agent-readiness looks like; aeo-audit is the engine that *measures* it on a live URL. The mapping is exported as `FACTOR_SPEC_RULES`:
+
+| aeo-audit factor | specification.website agent-readiness rule(s) |
+|------------------|------------------------------------------------|
+| `structured-data` | Structured data for agents |
+| `ai-readable-content` | /llms.txt · /llms-full.txt · Per-page Markdown source endpoints · HTTP Link headers for discovery |
+| `ai-crawler-access` | robots.txt for AI crawlers · Content Signals in robots.txt |
+| `agent-skill-exposure` | MCP and tool discovery · Agent Skills discovery · A2A agent cards · Web Bot Auth |
+
+Recommendations for these signals cite the exact rule page and its status — e.g. *“See specification.website — "Per-page Markdown source endpoints" (recommended)”* — so an audit doubles as a conformance report against the spec's agent-readiness category.
+
+```ts
+import { FACTOR_SPEC_RULES, SPEC_RULES, specCitation } from '@ainyc/aeo-audit'
+
+SPEC_RULES['content-signals']
+// { slug: 'content-signals', title: 'Content Signals in robots.txt',
+//   status: 'optional', url: 'https://specification.website/spec/agent-readiness/content-signals/' }
+
+specCitation('a2a-agent-cards')
+// 'See specification.website — "A2A agent cards" (optional): https://…/a2a-agent-cards/'
+```
 
 ## CLI Usage
 
@@ -97,6 +121,59 @@ PAGESPEED_API_KEY=xxx npx @ainyc/aeo-audit https://example.com --lighthouse --fo
 npx @ainyc/aeo-audit https://example.com --require-meta
 npx @ainyc/aeo-audit https://example.com --sitemap --require-meta
 ```
+
+### Auditing a Local or Private Target (`--allow-local`)
+
+By default the audit refuses any URL that resolves to a private, loopback, or
+link-local address — the right default for a tool that also runs as a hosted
+service on arbitrary input. To audit your **own** dev or staging server, pass
+`--allow-local` (alias `--allow-private`):
+
+```bash
+# Audit a local dev server (pass the explicit scheme — bare hosts default to https)
+npx @ainyc/aeo-audit http://localhost:3000 --allow-local
+
+# A staging box on a private IP / VPN
+npx @ainyc/aeo-audit http://10.0.5.20 --allow-private
+```
+
+The relaxation is **scoped to the single host you named on the CLI, and only that
+host**. It is evaluated per request hop, so a redirect or a sitemap `<loc>`
+pointing at any *other* private address (cloud metadata at `169.254.169.254`,
+internal services, …) is still blocked. There is no flag that disables the guard
+wholesale, and library/service callers that never set it stay fully protected.
+
+### Static-Output Mode (audit built HTML offline)
+
+Point the CLI at a filesystem path instead of a URL to audit built HTML directly —
+no network, ideal for CI on a `next export` / `dist` / `out` directory:
+
+```bash
+# Audit a whole built directory (aggregated like sitemap mode)
+npx @ainyc/aeo-audit ./out
+
+# Map files to real URLs so canonical / og:url checks are meaningful
+npx @ainyc/aeo-audit ./out --base-url https://example.com
+
+# A single built file
+npx @ainyc/aeo-audit ./dist/index.html
+
+# Gate CI on a missing meta description across the build
+npx @ainyc/aeo-audit ./out --require-meta
+```
+
+A `.html`/`.htm` file produces a single-page report; a directory is walked for
+HTML files and aggregated like sitemap mode (`--limit`, `--top-issues`,
+`--factors`, `--include-geo`, `--include-agent-skills`, and `--require-meta` all
+apply). `index.html` maps to its directory URL (`out/about/index.html` →
+`<base>/about/`); other files drop the extension (`out/blog/post.html` →
+`<base>/blog/post`). `llms.txt`, `llms-full.txt`, `robots.txt`, and `sitemap.xml`
+are read from the directory root when present.
+
+Coverage is **partial by design**: server-only signals (redirects, `X-Robots-Tag`,
+`Last-Modified`, `Link` headers) aren't visible from static files, so factors that
+depend on them score as if the header were absent. Audit the deployed URL for full
+coverage.
 
 ### Platform Detection Mode
 
@@ -161,11 +238,21 @@ npx @ainyc/aeo-audit https://example.com --sitemap --limit 50
 
 # Skip per-page output and show only cross-cutting issues
 npx @ainyc/aeo-audit https://example.com --sitemap --top-issues
+
+# Rewrite each <loc>'s origin to the target you named (audit staging with prod's sitemap)
+npx @ainyc/aeo-audit https://staging.example.com --sitemap --rewrite-sitemap-origin
+
+# Audit a whole local dev server: rewrite the sitemap onto localhost and unblock it
+npx @ainyc/aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local
 ```
 
 Auto-discovery checks `/sitemap.xml` → `/sitemap-index.xml` → `Sitemap:` directives in `/robots.txt`. Astro / Next.js / Vercel sites that only publish `sitemap-index.xml` are now discovered without needing an explicit URL.
 
+`--rewrite-sitemap-origin` re-homes every `<loc>` onto the origin of the target URL you passed (preserving path and query) before crawling. Use it when a sitemap hardcodes the canonical/prod domain but you want to audit a different origin that serves the same paths — a staging host, or a local dev server. Every crawled URL is pinned to the origin you explicitly named, so there's no SSRF cost; combined with `--allow-local` it makes a local dev server's whole sitemap auditable in one command.
+
 When the sitemap has more URLs than `--limit`, the run audits the highest-priority pages and prints a notice to stderr listing how many were skipped and how to audit them all.
+
+The optional in-process factors are honored per page in sitemap mode: pass `--include-geo` and/or `--include-agent-skills` to add them to every audited page. `--lighthouse` is the exception — it cannot be combined with `--sitemap` because each PageSpeed Insights call takes 15-30s.
 
 ### Auxiliary File Diagnostics
 
@@ -187,10 +274,15 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 | `--urls <src>` | In `--detect-platform` mode, run on multiple URLs. `<src>` is a file path (one URL per line), a comma-separated list, or `-` for stdin |
 | `--concurrency <n>` | In `--detect-platform` batch mode, max in-flight fetches (default 5) |
 | `--min-confidence <lvl>` | In platform-detect mode, only report matches at or above this level: `low` (default), `medium`, `high` |
-| `--require-meta` | Exit `1` if any audited page is missing `<meta name="description">`, regardless of the overall score. Works in both single-URL and sitemap modes. |
+| `--require-meta` | Exit `1` if any audited page is missing `<meta name="description">`, regardless of the overall score. Works in single-URL, sitemap, and static-output modes. |
+| `--allow-local` (alias `--allow-private`) | Allow the single target host you named on the CLI to resolve to a private/loopback IP (e.g. `http://localhost:3000`). Scoped to that one host only — redirects and sitemap `<loc>`s to any other private host stay blocked. |
+| `--rewrite-sitemap-origin` | In `--sitemap` mode, rewrite every `<loc>`'s origin to the target URL's origin (preserving path/query) before crawling. For auditing a staging host or local dev server with a sitemap that hardcodes the prod domain. |
+| `--base-url <url>` | In static-output mode, the base URL used to map files to page URLs (e.g. `out/about/index.html` → `<base>/about/`). Default `https://localhost`. |
 | `-h`, `--help` | Show the help message |
 
-Exit code `0` for score >= 70, `1` for < 70 (CI-friendly). In sitemap mode the exit code is based on the aggregate score. When `--require-meta` is passed, exit is forced to `1` if any audited page lacks `<meta name="description">`, regardless of the score-based rule.
+Pass a **filesystem path** (a `.html` file or a directory of built HTML) instead of a URL to run in static-output mode — built HTML is audited offline (partial coverage; no server-only signals).
+
+Exit code `0` for score >= 70, `1` for < 70 (CI-friendly). In sitemap and static-directory modes the exit code is based on the aggregate score. When `--require-meta` is passed, exit is forced to `1` if any audited page lacks `<meta name="description">`, regardless of the score-based rule.
 
 ## Programmatic Usage
 
@@ -206,6 +298,8 @@ const report = await runAeoAudit('https://example.com/specific-page', {
   includeAgentSkills: false, // Include agent skill exposure (default: false)
   includeLighthouse: false,  // Include Lighthouse via PageSpeed Insights (default: false; adds ~15-30s)
   factors: undefined,        // Run all factors (or pass array of factor IDs)
+  allowPrivateHost: undefined, // Permit ONE named host to resolve to a private/loopback IP (e.g. 'localhost').
+                               // Scoped to that exact host; redirects/sitemap entries to other private hosts stay blocked.
 })
 
 console.log(report.overallGrade) // 'A+'
@@ -230,6 +324,26 @@ console.log(report.prioritizedFixes)   // Top 5 fixes ranked by site-wide impact
 ```
 
 Each entry in `crossCuttingIssues[].topIssues` carries a `recommendation` plus the exact `affectedUrls` so you can attribute each problem to specific pages — e.g. "FAQPage duplicate" pointing at every blog post that has it.
+
+### Static output (offline, from disk)
+
+```ts
+import { runStaticAudit } from '@ainyc/aeo-audit'
+
+const result = await runStaticAudit('./out', {
+  baseUrl: 'https://example.com', // maps files to page URLs (default https://localhost)
+  limit: 200,                     // max HTML files when the path is a directory
+})
+
+if (result.kind === 'single') {
+  console.log(result.report.overallGrade)   // single .html file → AuditReport
+} else {
+  console.log(result.report.aggregateGrade) // directory → SitemapAuditReport shape
+  console.log(result.report.crossCuttingIssues)
+}
+```
+
+`runStaticAudit` performs no network I/O. Coverage is partial — server-only signals (redirects, `X-Robots-Tag`, `Last-Modified`, `Link` headers) aren't visible from static files.
 
 TypeScript declaration files are included automatically.
 
