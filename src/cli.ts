@@ -361,9 +361,9 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   try {
     // Static-output mode: the positional arg is a filesystem path, audited offline.
     if (args.url && (await isStaticTarget(args.url))) {
-      if (args.detectPlatform || args.sitemap || args.lighthouse) {
+      if (args.detectPlatform || args.sitemap || args.lighthouse || args.factors?.includes('lighthouse')) {
         console.error(
-          'Error: a filesystem path (static-output mode) cannot be combined with --detect-platform, --sitemap, or --lighthouse. Those modes need a live URL.',
+          'Error: a filesystem path (static-output mode) cannot be combined with --detect-platform, --sitemap, or Lighthouse (--lighthouse or --factors lighthouse). Those modes need a live URL.',
         )
         return 1
       }
