@@ -2,7 +2,7 @@
 
 The most comprehensive open-source technical Answer Engine Optimization (AEO) audit tool. Scores any website across 16 ranking factors that determine whether AI answer engines — ChatGPT, Perplexity, Gemini, Claude — will cite your content.
 
-Website: [ainyc.ai](https://ainyc.ai)
+Website: [canonry.ai](https://canonry.ai)
 
 ## Quick Start
 
