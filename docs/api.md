@@ -33,13 +33,25 @@ const report = await runSitemapAudit('https://example.com', {
   factors: ['schema-validity', 'structured-data'],  // Optional subset
 })
 
-console.log(report.aggregateGrade)   // 'B+'
-console.log(report.pagesAudited)     // 22
+console.log(report.schemaVersion)      // '1.0', JSON shape version (see "Machine-readable output")
+console.log(report.aggregateGrade)     // 'B+'
+console.log(report.pagesAudited)       // 22
+console.log(report.criticalDefects)    // Binary per-page defects (multiple/missing H1, missing title/meta), grouped by defect
 console.log(report.crossCuttingIssues) // Per-factor rollup with affectedUrls for every recommendation
-console.log(report.prioritizedFixes)   // Top 5 fixes ranked by site-wide impact
+console.log(report.prioritizedFixes)   // Ranked PrioritizedFix[]: critical defects first, then cross-cutting by impact
 ```
 
 Each entry in `crossCuttingIssues[].topIssues` carries a `recommendation` plus the exact `affectedUrls` so you can attribute each problem to specific pages, e.g. "FAQPage duplicate" pointing at every blog post that has it.
+
+`criticalDefects` surfaces **binary structural defects by impact, not prevalence**. The cross-cutting rollup ranks by how many pages a factor affects, so an unambiguous one-line-fix defect on a single important page (a homepage split across four `<h1>`s, or a `/contact-us` page with none) would otherwise be averaged into a passing factor grade and excluded from `prioritizedFixes`. Each group names the offending pages (homepage and high sitemap-`priority` pages first), and the critical-severity ones lead `prioritizedFixes`.
+
+### Machine-readable output (for AI agents)
+
+`--format json` and these return values are the contract for programmatic use. The report is built to be acted on, not just rendered:
+
+- **`schemaVersion`** (on `AuditReport` and `SitemapAuditReport`, exported as `SCHEMA_VERSION`) versions the JSON shape independently of the npm version. Pin to it and treat a major bump as breaking; treat its absence as a pre-2.0 report.
+- **`prioritizedFixes: PrioritizedFix[]`** is the ranked, pre-computed to-do list, so an agent need not average factor scores and re-rank. Each fix carries a stable `id` (a defect id like `"multiple-h1"` or a factor id like `"technical-seo"`), `kind`, an optional `severity`, the complete `affectedPages` array (never truncated), `affectsHomepage`, `prevalencePct`, and a human `summary`.
+- **Stable identifiers** on the decision surface (`criticalDefects[].id`, `prioritizedFixes[].id` / `kind`) let integrations key on codes, not on matching message strings.
 
 ## Static output (offline, from disk)
 
@@ -55,6 +67,7 @@ if (result.kind === 'single') {
   console.log(result.report.overallGrade)   // single .html file → AuditReport
 } else {
   console.log(result.report.aggregateGrade) // directory → SitemapAuditReport shape
+  console.log(result.report.criticalDefects)
   console.log(result.report.crossCuttingIssues)
 }
 ```

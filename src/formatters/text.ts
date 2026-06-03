@@ -6,6 +6,7 @@ const YELLOW = '\x1b[33m'
 const RED = '\x1b[31m'
 const CYAN = '\x1b[36m'
 
+import { isHomepageUrl } from '../critical-defects.js'
 import type {
   AuditReport,
   BatchDetectionEntry,
@@ -118,6 +119,26 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
     lines.push(``)
   }
 
+  if (report.criticalDefects.length > 0) {
+    lines.push(`${BOLD}Critical Defects${RESET} ${DIM}(high-impact, shown regardless of prevalence)${RESET}`)
+    lines.push(`${'─'.repeat(70)}`)
+
+    for (const group of report.criticalDefects) {
+      const tag = group.severity === 'critical' ? `${RED}critical${RESET}` : `${YELLOW}warning${RESET}`
+      const count = group.pages.length
+      lines.push(`  [${tag}] ${BOLD}${group.title}${RESET} ${DIM}(${count} page${count === 1 ? '' : 's'})${RESET}`)
+      lines.push(`      ${DIM}→ ${group.recommendation}${RESET}`)
+      // List every affected page — a report must surface all issues, not a sample.
+      for (const page of group.pages) {
+        const home = page.isHomepage ? ` ${CYAN}(homepage)${RESET}` : ''
+        lines.push(`      ${DIM}- ${page.url}${home}: ${page.detail}${RESET}`)
+      }
+    }
+
+    lines.push(`${'─'.repeat(70)}`)
+    lines.push(``)
+  }
+
   if (report.crossCuttingIssues.length > 0) {
     lines.push(`${BOLD}Cross-Cutting Issues${RESET}`)
     lines.push(`${'─'.repeat(70)}`)
@@ -140,9 +161,18 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
   }
 
   if (report.prioritizedFixes.length > 0) {
-    lines.push(`${BOLD}Prioritized Fixes (by site-wide impact)${RESET}`)
+    lines.push(`${BOLD}Prioritized Fixes (critical defects first, then site-wide impact)${RESET}`)
     for (let i = 0; i < report.prioritizedFixes.length; i++) {
-      lines.push(`  ${CYAN}${i + 1}.${RESET} ${report.prioritizedFixes[i]}`)
+      const fix = report.prioritizedFixes[i]
+      const tag = fix.severity ? `[${fix.severity === 'critical' ? RED : YELLOW}${fix.severity}${RESET}] ` : ''
+      const grade = fix.avgGrade ? `${DIM} avg ${fix.avgGrade}${RESET}` : ''
+      lines.push(`  ${CYAN}${i + 1}.${RESET} ${tag}${BOLD}${fix.title}${RESET}${grade} ${DIM}(${fix.prevalencePct}% of pages)${RESET}`)
+      lines.push(`     ${DIM}→ ${fix.recommendation}${RESET}`)
+      // Spell out every affected page — agents and humans both need the full set.
+      for (const url of fix.affectedPages) {
+        const home = isHomepageUrl(url) ? ` ${CYAN}(homepage)${RESET}` : ''
+        lines.push(`       ${DIM}- ${url}${home}${RESET}`)
+      }
     }
     lines.push(``)
   }

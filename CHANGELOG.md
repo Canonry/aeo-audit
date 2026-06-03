@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0 (2026-06-03)
+
+### Breaking
+- **`SitemapAuditReport.prioritizedFixes` is now a structured `PrioritizedFix[]`, not `string[]`.** Each entry is a typed object — `{ kind, id, title, recommendation, severity?, affectedPages, affectsHomepage, prevalencePct, avgGrade?, summary }` — so an AI agent can act on the ranked to-do list without regex-parsing prose. The human-readable one-liner is preserved on `.summary`; migrate by reading `prioritizedFixes.map(f => f.summary)`. The text/markdown reports are unchanged in spirit (they render the structured fixes, now spelling out every affected page).
+- **New `schemaVersion` field on `AuditReport` and `SitemapAuditReport`** (exported `SCHEMA_VERSION`, currently `"1.0"`). It versions the report's JSON shape independently of the npm package version so agent parsers can detect breaking drift instead of failing silently. Treat the absence of the field as "pre-2.0 / legacy shape."
+
+### Added
+- **Critical per-page defects surfaced by impact, not prevalence (#42).** Sitemap and static-directory reports now include a `criticalDefects` rollup and a **Critical Defects** section (text + markdown) that lists binary, one-line-fix structural defects — an `<h1>` count other than one, a missing `<title>`, a missing meta description — **regardless of how few pages exhibit them**. Previously these were detected per page but lost in aggregation: `prioritizedFixes` ranked only by prevalence (so a defect on a single page was structurally excluded), the factor score averaged the defect away to a passing grade, and `crossCuttingIssues` was keyed by factor, never the specific defect. An unambiguous, high-impact defect on the most important page (e.g. a homepage split across four `<h1>`s, or a `/contact-us` page with none) appeared nowhere in the top-level summary. Now each defect names **every** offending page (homepage and high sitemap-`priority` pages first), and critical-severity defects are promoted to the **top** of `prioritizedFixes`. Shown even with `--top-issues`.
+  - The end-of-report summaries no longer truncate: the Critical Defects block and each prioritized fix list **every** affected page (no "+N more"), and `prioritizedFixes` reports every cross-cutting issue ordered by prevalence rather than a top-5 slice — a fix the audit computed always reaches the report.
+  - New `detectCriticalDefects()`, `buildCriticalDefects()`, and `SCHEMA_VERSION` exports plus `CriticalDefect`, `CriticalDefectGroup`, `CriticalDefectAffectedPage`, `CriticalDefectId`, `CriticalDefectSeverity`, and `PrioritizedFix` types. `AuditReport` gains `criticalDefects` and `schemaVersion`; `SitemapAuditReport` gains `criticalDefects` and `schemaVersion`; `SitemapPageResult` gains the page's sitemap `priority`.
+  - Detection is independent of the weighted factor scores, so **no existing audit scores or grades change** (and exit codes are unaffected).
+
 ## 1.13.0 (2026-05-31)
 
 ### Added

@@ -1,3 +1,4 @@
+import { isHomepageUrl } from '../critical-defects.js'
 import type {
   AuditReport,
   BatchDetectionEntry,
@@ -97,6 +98,27 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
     lines.push(``)
   }
 
+  if (report.criticalDefects.length > 0) {
+    lines.push(`## Critical Defects`)
+    lines.push(``)
+    lines.push(`High-impact, binary structural defects — surfaced regardless of how few pages they affect.`)
+    lines.push(``)
+
+    for (const group of report.criticalDefects) {
+      const count = group.pages.length
+      lines.push(`### ${group.title} _(${group.severity}, ${count} page${count === 1 ? '' : 's'})_`)
+      lines.push(``)
+      lines.push(group.recommendation)
+      lines.push(``)
+      // List every affected page — a report must surface all issues, not a sample.
+      for (const page of group.pages) {
+        const home = page.isHomepage ? ' **(homepage)**' : ''
+        lines.push(`- \`${page.url}\`${home} — ${page.detail}`)
+      }
+      lines.push(``)
+    }
+  }
+
   if (report.crossCuttingIssues.length > 0) {
     lines.push(`## Cross-Cutting Issues`)
     lines.push(``)
@@ -130,10 +152,18 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
   }
 
   if (report.prioritizedFixes.length > 0) {
-    lines.push(`## Prioritized Fixes (by site-wide impact)`)
+    lines.push(`## Prioritized Fixes (critical defects first, then site-wide impact)`)
     lines.push(``)
     for (let i = 0; i < report.prioritizedFixes.length; i++) {
-      lines.push(`${i + 1}. ${report.prioritizedFixes[i]}`)
+      const fix = report.prioritizedFixes[i]
+      const tag = fix.severity ? `**[${fix.severity}]** ` : ''
+      const grade = fix.avgGrade ? ` (avg ${fix.avgGrade})` : ''
+      lines.push(`${i + 1}. ${tag}**${fix.title}**${grade} _(${fix.prevalencePct}% of pages)_ — ${fix.recommendation}`)
+      // Spell out every affected page — agents and humans both need the full set.
+      for (const url of fix.affectedPages) {
+        const home = isHomepageUrl(url) ? ' **(homepage)**' : ''
+        lines.push(`   - \`${url}\`${home}`)
+      }
     }
     lines.push(``)
   }

@@ -90,3 +90,50 @@ describe('runStaticAudit', () => {
     })
   })
 })
+
+describe('runStaticAudit critical defects (issue #42)', () => {
+  let dir: string
+
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'aeo-defects-'))
+    // Homepage with two H1s (a split headline) — a single-page defect that the
+    // prevalence ranking would otherwise bury.
+    await writeFile(
+      path.join(dir, 'index.html'),
+      '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Home</title>'
+        + '<meta name="description" content="Home page, long enough to read as a real description for the site."></head>'
+        + '<body><h1>Build</h1><h1>faster</h1><p>Some content for the analyzers.</p></body></html>',
+    )
+    // A clean page so the defect really is low-prevalence.
+    await writeFile(
+      path.join(dir, 'about.html'),
+      '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>About</title>'
+        + '<meta name="description" content="About page, long enough to read as a real description for the site."></head>'
+        + '<body><h1>About</h1><p>Some content for the analyzers.</p></body></html>',
+    )
+  })
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('surfaces the homepage H1 defect in criticalDefects and at the top of prioritizedFixes', async () => {
+    const result = await runStaticAudit(dir, { baseUrl: 'https://example.com' })
+    if (result.kind !== 'multi') throw new Error('expected multi')
+
+    const multipleH1 = result.report.criticalDefects.find((g) => g.id === 'multiple-h1')
+    expect(multipleH1).toBeDefined()
+    expect(multipleH1?.pages[0].url).toBe('https://example.com/')
+    expect(multipleH1?.pages[0].isHomepage).toBe(true)
+
+    // The defect leads the prioritized fixes despite affecting only 1 of 2 pages.
+    const topFix = result.report.prioritizedFixes[0]
+    expect(topFix.kind).toBe('critical-defect')
+    expect(topFix.id).toBe('multiple-h1')
+    expect(topFix.affectsHomepage).toBe(true)
+    expect(topFix.affectedPages).toContain('https://example.com/')
+
+    // The report carries a schema version so agent parsers can detect shape drift.
+    expect(result.report.schemaVersion).toBe('1.0')
+  })
+})

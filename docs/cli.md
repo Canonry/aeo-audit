@@ -21,6 +21,8 @@ npx @ainyc/aeo-audit https://example.com --format json
 npx @ainyc/aeo-audit https://example.com --format markdown
 ```
 
+`--format json` is the contract for programmatic and agent consumers: every report carries a `schemaVersion` (so a parser can detect breaking shape drift) and sitemap reports expose a `criticalDefects` rollup plus a ranked `prioritizedFixes` array of structured objects. See [api.md](api.md#machine-readable-output-for-ai-agents) for the field shapes.
+
 ## Running a subset of factors
 
 ```bash
@@ -76,7 +78,7 @@ npx @ainyc/aeo-audit https://example.com --sitemap https://example.com/sitemap.x
 # Cap the number of pages (default 200, sorted by sitemap priority)
 npx @ainyc/aeo-audit https://example.com --sitemap --limit 50
 
-# Skip per-page output and show only cross-cutting issues
+# Skip per-page output and show only the cross-cutting issues and critical defects
 npx @ainyc/aeo-audit https://example.com --sitemap --top-issues
 
 # Rewrite each <loc>'s origin to the target you named (audit staging with prod's sitemap)
@@ -91,6 +93,8 @@ Auto-discovery checks `/sitemap.xml` → `/sitemap-index.xml` → `Sitemap:` dir
 `--rewrite-sitemap-origin` re-homes every `<loc>` onto the origin of the target URL you passed (preserving path and query) before crawling. Use it when a sitemap hardcodes the canonical/prod domain but you want to audit a different origin that serves the same paths: a staging host, or a local dev server. Every crawled URL is pinned to the origin you explicitly named, so there's no SSRF cost; combined with `--allow-local` it makes a local dev server's whole sitemap auditable in one command.
 
 When the sitemap has more URLs than `--limit`, the run audits the highest-priority pages and prints a notice to stderr listing how many were skipped and how to audit them all.
+
+A **Critical Defects** section lists binary, one-line-fix structural defects (an `<h1>` count other than one, a missing `<title>`, a missing meta description) surfaced **regardless of how few pages they affect**, with the offending pages named (homepage and high sitemap-`priority` pages first). These would otherwise be averaged into a passing factor grade and excluded from the prevalence-ranked fixes; the critical-severity ones also lead the prioritized fix list. The section is shown even with `--top-issues`. See the machine-readable shapes in [api.md](api.md#machine-readable-output-for-ai-agents).
 
 The optional in-process factors are honored per page: pass `--include-geo` and/or `--include-agent-skills` to add them to every audited page. `--lighthouse` is the exception: it cannot be combined with `--sitemap` because each PageSpeed Insights call takes 15-30s.
 
@@ -191,7 +195,7 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 | `--lighthouse` | Include the optional Lighthouse factor (Performance + Accessibility + Best Practices, mobile strategy) via Google PageSpeed Insights. Single-URL only; cannot combine with `--sitemap` or `--detect-platform`. Adds ~15-30s. Set `PAGESPEED_API_KEY` env var to lift anonymous rate limits. |
 | `--sitemap [url]` | Audit all pages from the sitemap. Auto-discovery tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`. Pass an explicit URL to override. |
 | `--limit <n>` | Max pages to audit in sitemap mode (default 200, sorted by sitemap priority) |
-| `--top-issues` | In sitemap mode, skip per-page output and show only cross-cutting issues |
+| `--top-issues` | In sitemap mode, skip per-page output and show only the cross-cutting issues and critical defects |
 | `--detect-platform` | Identify the platform/CMS/framework powering the site instead of running an audit |
 | `--urls <src>` | In `--detect-platform` mode, run on multiple URLs. `<src>` is a file path (one URL per line), a comma-separated list, or `-` for stdin |
 | `--concurrency <n>` | In `--detect-platform` batch mode, max in-flight fetches (default 5) |

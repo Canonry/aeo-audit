@@ -264,7 +264,8 @@ Options:
                           explicit URL to override. Pages are fetched with bounded concurrency (5).
   --limit <n>             Max pages to audit in sitemap mode (default 200, sorted by sitemap priority).
                           When the sitemap exceeds the limit, a notice is printed to stderr.
-  --top-issues            In sitemap mode, skip per-page output and show only cross-cutting issues
+  --top-issues            In sitemap mode, skip per-page output and show only the cross-cutting
+                          issues and critical defects
   --detect-platform       Detect what platform/CMS/framework the site is built on (WordPress,
                           Webflow, Shopify, Next.js, etc.) instead of running a full audit.
   --urls <src>            In --detect-platform mode, run on multiple URLs. <src> can be a path

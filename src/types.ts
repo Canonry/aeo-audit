@@ -123,7 +123,36 @@ export interface AuditMetadata {
   redirectChain: RedirectHop[]
 }
 
+export type CriticalDefectId =
+  | 'missing-h1'
+  | 'multiple-h1'
+  | 'missing-title'
+  | 'missing-meta-description'
+
+export type CriticalDefectSeverity = 'critical' | 'warning'
+
+/**
+ * A binary, page-level structural defect (issue #42). Unlike the weighted factor
+ * scores — which bundle many sub-checks and can average a single bad signal away —
+ * these are detected directly from the DOM and are simply present or not. They are
+ * surfaced separately so a high-impact defect on one important page (e.g. a
+ * homepage with four `<h1>`s) is never hidden by low prevalence or a passing grade.
+ */
+export interface CriticalDefect {
+  id: CriticalDefectId
+  severity: CriticalDefectSeverity
+  /** Page-specific description, e.g. `"4 H1 tags found (expected exactly one)."` */
+  detail: string
+  recommendation: string
+}
+
 export interface AuditReport {
+  /**
+   * Version of the report's JSON shape, independent of the package version, so an
+   * agent parser can detect breaking shape drift. Bumps minor for additive fields,
+   * major for breaking changes. See `SCHEMA_VERSION`.
+   */
+  schemaVersion: string
   url: string
   finalUrl: string
   auditedAt: string
@@ -131,6 +160,8 @@ export interface AuditReport {
   overallGrade: string
   summary: string
   factors: ScoredFactor[]
+  /** Binary structural defects on this page, detected independently of scoring. */
+  criticalDefects: CriticalDefect[]
   metadata: AuditMetadata
 }
 
@@ -172,6 +203,63 @@ export interface SitemapPageResult {
   error?: string
   factors?: ScoredFactor[]
   metadata?: AuditMetadata
+  /** Sitemap `<priority>` for this URL, when the sitemap declared one. Absent in static-output mode. */
+  priority?: number
+}
+
+export interface CriticalDefectAffectedPage {
+  url: string
+  /** Page-specific defect description carried up from the per-page audit. */
+  detail: string
+  /** True when this URL is the site root (`/`). Such pages are ranked first. */
+  isHomepage: boolean
+  /** Sitemap `<priority>` for this URL, when declared. */
+  priority?: number
+}
+
+/**
+ * A single binary defect (issue #42) rolled up across every page that exhibits
+ * it. Keyed by defect rather than by factor, so the specific actionable — and the
+ * exact pages it lives on — survives into the top-level report instead of being
+ * collapsed into a factor average.
+ */
+export interface CriticalDefectGroup {
+  id: CriticalDefectId
+  severity: CriticalDefectSeverity
+  /** Short human label, e.g. `"Multiple H1 tags"`. */
+  title: string
+  recommendation: string
+  /** Affected pages, most important first (homepage, then sitemap priority). */
+  pages: CriticalDefectAffectedPage[]
+}
+
+/**
+ * A single ranked, machine-readable fix — the unit of the prioritized to-do list.
+ * Carries stable identifiers and the complete affected-page set so an agent can
+ * act on it without parsing prose (issue #42). The ranking puts critical per-page
+ * defects first, then cross-cutting factor issues by prevalence.
+ */
+export interface PrioritizedFix {
+  /** Source of this fix: a binary per-page defect, or a cross-cutting factor issue. */
+  kind: 'critical-defect' | 'cross-cutting'
+  /** Stable machine code: a `CriticalDefectId` (e.g. `"multiple-h1"`) or a factor id (e.g. `"technical-seo"`). */
+  id: string
+  /** Short human label, e.g. `"Multiple H1 tags"` or `"Technical SEO"`. */
+  title: string
+  /** The single highest-priority recommendation to apply for this entry. */
+  recommendation: string
+  /** Severity, for critical-defect fixes. Cross-cutting entries are ranked by prevalence instead. */
+  severity?: CriticalDefectSeverity
+  /** Every page this fix applies to — the complete list, never truncated. */
+  affectedPages: string[]
+  /** Whether any affected page is the site homepage. */
+  affectsHomepage: boolean
+  /** Share of audited pages this fix applies to (0–100). */
+  prevalencePct: number
+  /** Average grade across audited pages for the factor (cross-cutting only). */
+  avgGrade?: string
+  /** Ready-to-display one-line headline (does not inline the page list). */
+  summary: string
 }
 
 export interface CrossCuttingIssueDetail {
@@ -191,6 +279,8 @@ export interface CrossCuttingIssue {
 }
 
 export interface SitemapAuditReport {
+  /** Version of the report's JSON shape; see `AuditReport.schemaVersion` and `SCHEMA_VERSION`. */
+  schemaVersion: string
   sitemapUrl: string
   auditedAt: string
   pagesDiscovered: number
@@ -202,8 +292,19 @@ export interface SitemapAuditReport {
   aggregateScore: number
   aggregateGrade: string
   pages: SitemapPageResult[]
+  /**
+   * High-impact binary defects surfaced regardless of prevalence (issue #42).
+   * These do not depend on the prevalence ranking that drives `prioritizedFixes`,
+   * so a defect on a single important page still appears here.
+   */
+  criticalDefects: CriticalDefectGroup[]
   crossCuttingIssues: CrossCuttingIssue[]
-  prioritizedFixes: string[]
+  /**
+   * The ranked, machine-readable to-do list: critical per-page defects first, then
+   * cross-cutting factor issues by prevalence. Each entry carries stable ids and the
+   * full affected-page set so an agent can act without parsing prose.
+   */
+  prioritizedFixes: PrioritizedFix[]
 }
 
 export interface SitemapAuditPlan {

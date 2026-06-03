@@ -18,6 +18,7 @@ function factor(overrides: Partial<ScoredFactor> & { id: string; name: string })
 
 function report(url: string, factors: ScoredFactor[]): AuditReport {
   return {
+    schemaVersion: '1.0',
     url,
     finalUrl: url,
     auditedAt: '2026-04-18T00:00:00.000Z',
@@ -25,6 +26,7 @@ function report(url: string, factors: ScoredFactor[]): AuditReport {
     overallGrade: 'C',
     summary: '',
     factors,
+    criticalDefects: [],
     metadata: {
       fetchTimeMs: 0,
       pageTitle: '',
