@@ -2,7 +2,7 @@
 name: aeo
 description: Run AEO audits, fix site issues, validate schema, generate llms.txt, and compare sites.
 homepage: https://ainyc.ai
-repository: https://github.com/AINYC/aeo-audit
+repository: https://github.com/Canonry/aeo-audit
 allowed-tools:
   - Bash(npx @ainyc/aeo-audit@1 *)
   - Read

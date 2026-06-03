@@ -76,10 +76,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AINYC/aeo-audit.git"
+    "url": "https://github.com/Canonry/aeo-audit.git"
   },
   "homepage": "https://ainyc.ai",
   "bugs": {
-    "url": "https://github.com/AINYC/aeo-audit/issues"
+    "url": "https://github.com/Canonry/aeo-audit/issues"
   }
 }

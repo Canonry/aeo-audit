@@ -32,7 +32,7 @@ ClawHub package: [arberx/aeo](https://clawhub.ai/arberx/aeo)
 
 ```bash
 # Personal install
-git clone https://github.com/AINYC/aeo-audit.git /tmp/aeo-audit
+git clone https://github.com/Canonry/aeo-audit.git /tmp/aeo-audit
 cp -r /tmp/aeo-audit/skills/aeo ~/.claude/skills/
 
 # Or project-level

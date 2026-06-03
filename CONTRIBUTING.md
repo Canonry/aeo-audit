@@ -3,7 +3,7 @@
 ## Getting Started
 
 ```bash
-git clone https://github.com/AINYC/aeo-audit.git
+git clone https://github.com/Canonry/aeo-audit.git
 cd aeo-audit
 pnpm install
 pnpm run typecheck

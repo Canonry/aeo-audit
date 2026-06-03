@@ -59,7 +59,7 @@ Modes: audit, fix, schema, `llms.txt`, monitor. See the [skill guide](docs/skill
 ## Contributing
 
 ```bash
-git clone https://github.com/AINYC/aeo-audit.git && cd aeo-audit
+git clone https://github.com/Canonry/aeo-audit.git && cd aeo-audit
 pnpm install && pnpm run typecheck && pnpm run build && pnpm test && pnpm lint
 ```
 
