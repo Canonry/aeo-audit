@@ -57,18 +57,18 @@ export function analyzeEntityConsistency(context: AuditContext): AnalysisResult 
   const uniqueCandidates = [...new Set(normalizedCandidates)]
 
   if (!uniqueCandidates.length) {
-    findings.push({ type: 'missing', message: 'Could not determine a consistent business entity name.' })
+    findings.push({ type: 'missing', code: 'entity-consistency.name.missing', message: 'Could not determine a consistent business entity name.' })
     recommendations.push('Expose business name consistently in title tags and JSON-LD.')
   } else if (uniqueCandidates.length === 1) {
     score += 40
-    findings.push({ type: 'found', message: 'Business naming looks consistent across key metadata.' })
+    findings.push({ type: 'found', code: 'entity-consistency.name.single', message: 'Business naming looks consistent across key metadata.' })
   } else if (uniqueCandidates.length === 2) {
     score += 24
-    findings.push({ type: 'info', message: 'Minor business name inconsistencies found across metadata.' })
+    findings.push({ type: 'info', code: 'entity-consistency.name.moderate', message: 'Minor business name inconsistencies found across metadata.' })
     recommendations.push('Align title, og:title, and schema name fields to the same canonical brand name.')
   } else {
     score += 12
-    findings.push({ type: 'missing', message: 'Business naming appears inconsistent across sources.' })
+    findings.push({ type: 'missing', code: 'entity-consistency.name.multiple', message: 'Business naming appears inconsistent across sources.' })
     recommendations.push('Standardize brand/entity naming in HTML metadata and JSON-LD.')
   }
 
@@ -76,18 +76,18 @@ export function analyzeEntityConsistency(context: AuditContext): AnalysisResult 
   const rawTitle = (context.pageTitle || '').trim()
   if (rawTitle.length > 0 && rawTitle.length <= 70) {
     score += 10
-    findings.push({ type: 'found', message: `Page title is ${rawTitle.length} characters (within 70-char limit).` })
+    findings.push({ type: 'found', code: 'entity-consistency.title.ok', message: `Page title is ${rawTitle.length} characters (within 70-char limit).` })
   } else if (rawTitle.length > 70) {
-    findings.push({ type: 'info', message: `Page title is ${rawTitle.length} characters (exceeds 70-char limit).` })
+    findings.push({ type: 'info', code: 'entity-consistency.title.long', message: `Page title is ${rawTitle.length} characters (exceeds 70-char limit).` })
     recommendations.push('Shorten the page title to 70 characters or fewer to avoid truncation in AI citations.')
   }
 
   const canonicalHref = context.$('link[rel="canonical"]').attr('href')
   if (canonicalHref) {
     score += 20
-    findings.push({ type: 'found', message: 'Canonical URL tag is present.' })
+    findings.push({ type: 'found', code: 'entity-consistency.canonical.present', message: 'Canonical URL tag is present.' })
   } else {
-    findings.push({ type: 'missing', message: 'Canonical URL tag is missing.' })
+    findings.push({ type: 'missing', code: 'entity-consistency.canonical.missing', message: 'Canonical URL tag is missing.' })
     recommendations.push('Add a canonical link tag to declare the primary page URL.')
   }
 
@@ -105,13 +105,13 @@ export function analyzeEntityConsistency(context: AuditContext): AnalysisResult 
 
   if (emailOverlap || phoneOverlap) {
     score += 40
-    findings.push({ type: 'found', message: 'Contact information appears consistent between schema and page content.' })
+    findings.push({ type: 'found', code: 'entity-consistency.contact.ok', message: 'Contact information appears consistent between schema and page content.' })
   } else if (schemaContacts.emails.length || schemaContacts.phones.length) {
     score += 16
-    findings.push({ type: 'info', message: 'Schema contact details were found but consistency is unclear in visible content.' })
+    findings.push({ type: 'info', code: 'entity-consistency.contact.partial', message: 'Schema contact details were found but consistency is unclear in visible content.' })
     recommendations.push('Mirror key contact details in visible content and JSON-LD.')
   } else {
-    findings.push({ type: 'missing', message: 'No reliable contact details found in structured data.' })
+    findings.push({ type: 'missing', code: 'entity-consistency.contact.missing', message: 'No reliable contact details found in structured data.' })
     recommendations.push('Add email/telephone contact fields in LocalBusiness schema.')
   }
 

@@ -26,7 +26,7 @@ function factor(overrides: Partial<ScoredFactor> & { id: string; name: string })
 
 function auditReport(overrides: Partial<AuditReport> = {}): AuditReport {
   return {
-    schemaVersion: '1.0',
+    schemaVersion: '1.1',
     url: 'https://example.com/',
     finalUrl: 'https://example.com/',
     auditedAt: '2026-04-18T00:00:00.000Z',
@@ -91,7 +91,7 @@ describe('agentSummaryFromSitemap', () => {
     prioritizedFixes: PrioritizedFix[],
   ): SitemapAuditReport {
     return {
-      schemaVersion: '1.0',
+      schemaVersion: '1.1',
       sitemapUrl: 'https://example.com/sitemap.xml',
       auditedAt: '2026-04-18T00:00:00.000Z',
       pagesDiscovered: 25,
@@ -153,7 +153,7 @@ describe('formatAgent / formatSitemapAgent', () => {
 
   it('formatSitemapAgent emits valid JSON', () => {
     const report: SitemapAuditReport = {
-      schemaVersion: '1.0',
+      schemaVersion: '1.1',
       sitemapUrl: 'https://example.com/sitemap.xml',
       auditedAt: '2026-04-18T00:00:00.000Z',
       pagesDiscovered: 1,

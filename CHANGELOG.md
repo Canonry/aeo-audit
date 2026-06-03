@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0 (2026-06-03)
+
+### Added
+- **Stable finding codes.** Every `AuditFinding` now carries a `code` namespaced as `<factor-id>.<check>[.<variant>]` (e.g. `technical-seo.h1.multiple`, `schema-validity.singleton.duplicate`), so agents and integrations key on a stable machine identifier instead of regex-matching the human `message` (which can change between releases). 212 codes across all 19 analyzers; the full registry is in [docs/finding-codes.md](docs/finding-codes.md). Codes follow a documented convention and are unique across the tool (enforced by a test). `AuditFinding.code` is required, so the compiler guarantees no finding ships without one.
+- `hasMissingMetaDescription` (the `--require-meta` gate) now keys on `technical-seo.meta-description.missing` rather than a message prefix — the first consumer migrated to codes.
+
+### Changed
+- **`schemaVersion` bumped to `1.1`** (additive: findings gained the `code` field). Report shapes are otherwise unchanged.
+
 ## 2.0.0 (2026-06-03)
 
 ### Breaking

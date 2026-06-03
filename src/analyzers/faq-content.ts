@@ -9,21 +9,21 @@ export function analyzeFaqContent(context: AuditContext): AnalysisResult {
   const schemaTypes = extractSchemaTypes(context.structuredData)
   if (schemaTypes.has('FAQPage')) {
     score += 34
-    findings.push({ type: 'found', message: 'FAQPage schema detected.' })
+    findings.push({ type: 'found', code: 'faq-content.faqpage.present', message: 'FAQPage schema detected.' })
   } else {
-    findings.push({ type: 'missing', message: 'FAQPage schema not detected.' })
+    findings.push({ type: 'missing', code: 'faq-content.faqpage.missing', message: 'FAQPage schema not detected.' })
     recommendations.push('Add FAQPage schema for key question-and-answer content.')
   }
 
   const detailsCount = context.$('details > summary').length
   if (detailsCount >= 3) {
     score += 24
-    findings.push({ type: 'found', message: `Detected ${detailsCount} FAQ details blocks.` })
+    findings.push({ type: 'found', code: 'faq-content.details.multiple', message: `Detected ${detailsCount} FAQ details blocks.` })
   } else if (detailsCount > 0) {
     score += 14
-    findings.push({ type: 'info', message: `Detected ${detailsCount} details-based FAQ block(s).` })
+    findings.push({ type: 'info', code: 'faq-content.details.single', message: `Detected ${detailsCount} details-based FAQ block(s).` })
   } else {
-    findings.push({ type: 'info', message: 'No details/summary FAQ blocks detected.' })
+    findings.push({ type: 'info', code: 'faq-content.details.none', message: 'No details/summary FAQ blocks detected.' })
   }
 
   let questionHeadingCount = 0
@@ -36,12 +36,12 @@ export function analyzeFaqContent(context: AuditContext): AnalysisResult {
 
   if (questionHeadingCount >= 3) {
     score += 24
-    findings.push({ type: 'found', message: 'Multiple question-style headings detected.' })
+    findings.push({ type: 'found', code: 'faq-content.headings.multiple', message: 'Multiple question-style headings detected.' })
   } else if (questionHeadingCount > 0) {
     score += 12
-    findings.push({ type: 'info', message: 'A small number of question headings detected.' })
+    findings.push({ type: 'info', code: 'faq-content.headings.low', message: 'A small number of question headings detected.' })
   } else {
-    findings.push({ type: 'missing', message: 'No explicit question headings detected.' })
+    findings.push({ type: 'missing', code: 'faq-content.headings.missing', message: 'No explicit question headings detected.' })
     recommendations.push('Use question-style headings to match conversational prompts.')
   }
 
@@ -52,12 +52,12 @@ export function analyzeFaqContent(context: AuditContext): AnalysisResult {
 
   if (qaPairs >= 3) {
     score += 18
-    findings.push({ type: 'found', message: 'FAQ content includes multiple question-answer pairs.' })
+    findings.push({ type: 'found', code: 'faq-content.qa-pairs.multiple', message: 'FAQ content includes multiple question-answer pairs.' })
   } else if (qaPairs > 0) {
     score += 10
-    findings.push({ type: 'info', message: 'FAQ pairs exist but are limited in count.' })
+    findings.push({ type: 'info', code: 'faq-content.qa-pairs.low', message: 'FAQ pairs exist but are limited in count.' })
   } else {
-    findings.push({ type: 'info', message: 'Question-answer pairing appears limited.' })
+    findings.push({ type: 'info', code: 'faq-content.qa-pairs.none', message: 'Question-answer pairing appears limited.' })
   }
 
   return {

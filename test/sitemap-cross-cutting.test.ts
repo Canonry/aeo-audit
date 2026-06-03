@@ -18,7 +18,7 @@ function factor(overrides: Partial<ScoredFactor> & { id: string; name: string })
 
 function report(url: string, factors: ScoredFactor[]): AuditReport {
   return {
-    schemaVersion: '1.0',
+    schemaVersion: '1.1',
     url,
     finalUrl: url,
     auditedAt: '2026-04-18T00:00:00.000Z',

@@ -18,12 +18,12 @@ export function analyzeDefinitionBlocks(context: AuditContext): AnalysisResult {
 
   if (definitionHeadingCount >= 2) {
     score += 30
-    findings.push({ type: 'found', message: 'Multiple definition-style headings detected.' })
+    findings.push({ type: 'found', code: 'definition-blocks.headings.multiple', message: 'Multiple definition-style headings detected.' })
   } else if (definitionHeadingCount === 1) {
     score += 18
-    findings.push({ type: 'info', message: 'One definition-style heading detected.' })
+    findings.push({ type: 'info', code: 'definition-blocks.headings.single', message: 'One definition-style heading detected.' })
   } else {
-    findings.push({ type: 'missing', message: 'No definition-style headings detected.' })
+    findings.push({ type: 'missing', code: 'definition-blocks.headings.missing', message: 'No definition-style headings detected.' })
     recommendations.push('Add sections like "What is..." and "How to..." for direct-answer relevance.')
   }
 
@@ -37,26 +37,26 @@ export function analyzeDefinitionBlocks(context: AuditContext): AnalysisResult {
 
   if (stepLists > 0) {
     score += 24
-    findings.push({ type: 'found', message: 'Numbered step-by-step list(s) detected.' })
+    findings.push({ type: 'found', code: 'definition-blocks.lists.found', message: 'Numbered step-by-step list(s) detected.' })
   } else {
-    findings.push({ type: 'info', message: 'No substantial ordered step lists detected.' })
+    findings.push({ type: 'info', code: 'definition-blocks.lists.none', message: 'No substantial ordered step lists detected.' })
     recommendations.push('Include ordered steps for procedural topics.')
   }
 
   const schemaTypes = extractSchemaTypes(context.structuredData)
   if (schemaTypes.has('HowTo')) {
     score += 26
-    findings.push({ type: 'found', message: 'HowTo schema detected.' })
+    findings.push({ type: 'found', code: 'definition-blocks.schema.found', message: 'HowTo schema detected.' })
   } else {
-    findings.push({ type: 'missing', message: 'HowTo schema not detected.' })
+    findings.push({ type: 'missing', code: 'definition-blocks.schema.missing', message: 'HowTo schema not detected.' })
     recommendations.push('Add HowTo schema where instructional content exists.')
   }
 
   if (context.$('dl').length > 0) {
     score += 20
-    findings.push({ type: 'found', message: 'Definition list (<dl>) elements detected.' })
+    findings.push({ type: 'found', code: 'definition-blocks.dl.found', message: 'Definition list (<dl>) elements detected.' })
   } else {
-    findings.push({ type: 'info', message: 'No <dl> definition lists detected.' })
+    findings.push({ type: 'info', code: 'definition-blocks.dl.none', message: 'No <dl> definition lists detected.' })
   }
 
   return {

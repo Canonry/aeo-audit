@@ -185,9 +185,9 @@ export function hasMissingMetaDescription(factors: ScoredFactor[] | undefined): 
   if (!factors) return false
   const tech = factors.find((f) => f.id === 'technical-seo')
   if (!tech) return false
-  return tech.findings.some(
-    (f) => f.type === 'missing' && f.message.startsWith('No meta description found'),
-  )
+  // Key on the stable finding code rather than the message prefix — that's the
+  // whole point of finding codes: gates don't break when copy changes.
+  return tech.findings.some((f) => f.code === 'technical-seo.meta-description.missing')
 }
 
 export function parseUrlList(text: string): string[] {

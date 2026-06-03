@@ -138,6 +138,7 @@ export function analyzeSnippetEligibility(context: AuditContext): AnalysisResult
   if (sources.length === 0) {
     findings.push({
       type: 'found',
+      code: 'snippet-eligibility.directives.none',
       message: 'No restrictive indexing directives found. Page is eligible for indexing and AI snippet features per Google.',
     })
     return { score: 100, findings, recommendations }
@@ -151,6 +152,7 @@ export function analyzeSnippetEligibility(context: AuditContext): AnalysisResult
     const label = directives.none ? '"none" (implies noindex, nofollow)' : '"noindex"'
     findings.push({
       type: 'missing',
+      code: 'snippet-eligibility.noindex.present',
       message: `Page declares ${label} (${directives.raw}). Google explicitly requires a page to be indexed to appear in AI Overviews and AI Mode.`,
     })
     recommendations.push(
@@ -162,6 +164,7 @@ export function analyzeSnippetEligibility(context: AuditContext): AnalysisResult
     score = 0
     findings.push({
       type: 'missing',
+      code: 'snippet-eligibility.nosnippet.present',
       message: `Page declares "nosnippet" (${directives.raw}). Per Google's AI optimization guide, "a page must be indexed and eligible to be shown in Google Search with a snippet" to appear in AI features — nosnippet makes the page ineligible.`,
     })
     recommendations.push(
@@ -173,6 +176,7 @@ export function analyzeSnippetEligibility(context: AuditContext): AnalysisResult
     score = 0
     findings.push({
       type: 'missing',
+      code: 'snippet-eligibility.max-snippet.zero',
       message: `Page declares "max-snippet:0" (${directives.raw}), which is equivalent to nosnippet and blocks Google's AI features.`,
     })
     recommendations.push(
@@ -182,6 +186,7 @@ export function analyzeSnippetEligibility(context: AuditContext): AnalysisResult
     score = Math.min(score, 60)
     findings.push({
       type: 'info',
+      code: 'snippet-eligibility.max-snippet.low',
       message: `Page declares "max-snippet:${directives.maxSnippet}" — Google can use at most ${directives.maxSnippet} characters of preview text, which heavily constrains AI snippets.`,
     })
     recommendations.push(
@@ -193,18 +198,21 @@ export function analyzeSnippetEligibility(context: AuditContext): AnalysisResult
     if (directives.noarchive) {
       findings.push({
         type: 'info',
+        code: 'snippet-eligibility.noarchive.present',
         message: 'Page declares "noarchive" — Google won\'t show a cached copy, but this does not block AI features. Safe to keep if intentional.',
       })
     }
     if (directives.noimageindex) {
       findings.push({
         type: 'info',
+        code: 'snippet-eligibility.noimageindex.present',
         message: 'Page declares "noimageindex" — images on this page won\'t be indexed. This does not block AI text features.',
       })
     }
     if (findings.length === 0) {
       findings.push({
         type: 'found',
+        code: 'snippet-eligibility.directives.not-restrictive',
         message: `Indexing directives present but not restrictive: "${directives.raw}".`,
       })
     }

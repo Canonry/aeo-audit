@@ -33,7 +33,7 @@ const report = await runSitemapAudit('https://example.com', {
   factors: ['schema-validity', 'structured-data'],  // Optional subset
 })
 
-console.log(report.schemaVersion)      // '1.0', JSON shape version (see "Machine-readable output")
+console.log(report.schemaVersion)      // '1.1', JSON shape version (see "Machine-readable output")
 console.log(report.aggregateGrade)     // 'B+'
 console.log(report.pagesAudited)       // 22
 console.log(report.criticalDefects)    // Binary per-page defects (multiple/missing H1, missing title/meta), grouped by defect
@@ -51,7 +51,7 @@ Each entry in `crossCuttingIssues[].topIssues` carries a `recommendation` plus t
 
 - **`schemaVersion`** (on `AuditReport` and `SitemapAuditReport`, exported as `SCHEMA_VERSION`) versions the JSON shape independently of the npm version. Pin to it and treat a major bump as breaking; treat its absence as a pre-2.0 report.
 - **`prioritizedFixes: PrioritizedFix[]`** is the ranked, pre-computed to-do list, so an agent need not average factor scores and re-rank. Each fix carries a stable `id` (a defect id like `"multiple-h1"` or a factor id like `"technical-seo"`), `kind`, an optional `severity`, the complete `affectedPages` array (never truncated), `affectsHomepage`, `prevalencePct`, and a human `summary`.
-- **Stable identifiers** on the decision surface (`criticalDefects[].id`, `prioritizedFixes[].id` / `kind`) let integrations key on codes, not on matching message strings.
+- **Stable identifiers** everywhere: the decision surface (`criticalDefects[].id`, `prioritizedFixes[].id` / `kind`) and every individual factor finding (`factors[].findings[].code`, e.g. `technical-seo.h1.multiple`) carry stable codes, so integrations key on codes, not on matching message strings. The full code registry is in [finding-codes.md](finding-codes.md).
 
 ## Static output (offline, from disk)
 
