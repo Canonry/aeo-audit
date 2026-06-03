@@ -363,7 +363,12 @@ function buildPrioritizedFixes(
   const crossCuttingFixes: PrioritizedFix[] = issues.map((issue): PrioritizedFix => {
     const top = issue.topIssues[0]
     const recommendation = issue.topRecommendations[0] ?? top?.recommendation ?? 'Review and improve this factor.'
-    const affectedPages = top?.affectedUrls ?? []
+    // Union every recommendation's pages — not just the top one's — so reach,
+    // prevalence, and the homepage flag describe the whole factor, which is what
+    // the entry is identified by (factorId / factorName). Sorted homepage-first.
+    const affectedPages = [...new Set(issue.topIssues.flatMap((d) => d.affectedUrls))].sort(
+      (a, b) => Number(isHomepageUrl(b)) - Number(isHomepageUrl(a)) || a.localeCompare(b),
+    )
     const affectsHomepage = affectedPages.some(isHomepageUrl)
     const count = affectedPages.length
     return {

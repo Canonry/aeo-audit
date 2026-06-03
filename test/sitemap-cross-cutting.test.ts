@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { buildCrossCuttingIssues } from '../src/sitemap.js'
+import { buildCrossCuttingIssues, buildPrioritizedFixes } from '../src/sitemap.js'
 import type { AuditReport, ScoredFactor } from '../src/types.js'
 
 function factor(overrides: Partial<ScoredFactor> & { id: string; name: string }): ScoredFactor {
@@ -91,5 +91,39 @@ describe('buildCrossCuttingIssues', () => {
     ]
 
     expect(buildCrossCuttingIssues(pages)).toHaveLength(0)
+  })
+})
+
+describe('buildPrioritizedFixes', () => {
+  it('unions every recommendation, so a homepage hit by a non-top recommendation still flips affectsHomepage', () => {
+    const metaRec = 'Expand the meta description to 150–160 characters.' // top: two non-homepage pages
+    const canonicalRec = 'Add <link rel="canonical" ...>' // homepage only
+
+    const pages: AuditReport[] = [
+      report('https://example.com/a', [
+        factor({ id: 'technical-seo', name: 'Technical SEO', score: 50, recommendations: [metaRec] }),
+      ]),
+      report('https://example.com/b', [
+        factor({ id: 'technical-seo', name: 'Technical SEO', score: 55, recommendations: [metaRec] }),
+      ]),
+      report('https://example.com/', [
+        factor({ id: 'technical-seo', name: 'Technical SEO', score: 50, recommendations: [canonicalRec] }),
+      ]),
+    ]
+
+    const fixes = buildPrioritizedFixes(buildCrossCuttingIssues(pages), pages.length)
+    const tech = fixes.find((f) => f.id === 'technical-seo')
+    expect(tech).toBeDefined()
+
+    // The top recommendation (most pages) hits /a and /b, not the homepage; the homepage
+    // is only hit by the canonical recommendation. Reach must union both, so the homepage
+    // is included, flagged, and counted — not dropped because it wasn't the top sub-issue.
+    expect(tech?.affectsHomepage).toBe(true)
+    expect(tech?.affectedPages).toEqual([
+      'https://example.com/',
+      'https://example.com/a',
+      'https://example.com/b',
+    ])
+    expect(tech?.prevalencePct).toBe(100)
   })
 })
