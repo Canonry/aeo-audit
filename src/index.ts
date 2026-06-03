@@ -37,12 +37,14 @@ import type {
 export { runSitemapAudit } from './sitemap.js'
 export { runStaticAudit } from './static-audit.js'
 export { detectCriticalDefects, buildCriticalDefects } from './critical-defects.js'
+export { agentSummaryFromAudit, agentSummaryFromSitemap } from './agent-summary.js'
 export { SCHEMA_VERSION } from './schema.js'
 export { detectPlatform, detectPlatformBatch } from './detect-platform.js'
 export { SPEC_RULES, FACTOR_SPEC_RULES, SPEC_SITE, specCitation } from './spec-references.js'
 export type { SpecRule, SpecRuleId, SpecStatus } from './spec-references.js'
 export type { SitemapAuditReport, SitemapAuditOptions } from './types.js'
 export type {
+  AgentSummary,
   CriticalDefect,
   CriticalDefectAffectedPage,
   CriticalDefectGroup,

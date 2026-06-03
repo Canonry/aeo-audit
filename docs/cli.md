@@ -19,9 +19,14 @@ npx @ainyc/aeo-audit https://example.com --format json
 
 # Markdown report
 npx @ainyc/aeo-audit https://example.com --format markdown
+
+# Agent summary: the slim JSON decision, not the full report
+npx @ainyc/aeo-audit https://example.com --sitemap --format agent
 ```
 
 `--format json` is the contract for programmatic and agent consumers: every report carries a `schemaVersion` (so a parser can detect breaking shape drift) and sitemap reports expose a `criticalDefects` rollup plus a ranked `prioritizedFixes` array of structured objects. See [api.md](api.md#machine-readable-output-for-ai-agents) for the field shapes.
+
+`--format agent` returns just the decision, not the report: `{ schemaVersion, tool, mode, url, score, grade, pass, criticalDefectCount, issues }`, where `issues` is the ranked `PrioritizedFix[]` (critical defects first, then cross-cutting by prevalence). It omits the per-factor and per-page detail so an agent can act without averaging and re-ranking scores itself. Works for single-URL, sitemap, and static-output audits; in `--detect-platform` mode it falls back to the structured JSON.
 
 ## Running a subset of factors
 
@@ -188,7 +193,7 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 
 | Flag | Description |
 |------|-------------|
-| `--format <type>` | Output format: `text` (default), `json`, `markdown` |
+| `--format <type>` | Output format: `text` (default), `json`, `markdown`, `agent`. `agent` emits the slim JSON decision (score, pass gate, `criticalDefectCount`, ranked `issues`) for AI agents. |
 | `--factors <list>` | Comma-separated factor IDs to run (runs all if omitted) |
 | `--include-geo` | Include the optional geographic signals factor |
 | `--include-agent-skills` | Include the optional agent skill exposure factor |

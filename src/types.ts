@@ -262,6 +262,31 @@ export interface PrioritizedFix {
   summary: string
 }
 
+/**
+ * The slim, pre-computed decision an agent consumes via `--format agent`: the
+ * score, the pass/fail gate, and the ranked fix list, with none of the per-factor
+ * or per-page detail. Same underlying data as the full report, shaped as a
+ * decision an agent can act on directly instead of re-ranking factor scores.
+ */
+export interface AgentSummary {
+  /** Report schema version (see `AuditReport.schemaVersion`). */
+  schemaVersion: string
+  /** Package identity, for consumers aggregating output from multiple tools. */
+  tool: string
+  /** `single` for a one-URL/one-file audit, `sitemap` for a multi-page run. */
+  mode: 'single' | 'sitemap'
+  /** The audited page URL (single) or the sitemap/root URL (multi). */
+  url: string
+  score: number
+  grade: string
+  /** True when the score meets the >= 70 gate (the default exit-0 threshold). */
+  pass: boolean
+  /** Number of critical-severity binary defects (e.g. a missing or duplicated H1). */
+  criticalDefectCount: number
+  /** The ranked to-do list: critical defects first, then cross-cutting by prevalence. */
+  issues: PrioritizedFix[]
+}
+
 export interface CrossCuttingIssueDetail {
   recommendation: string
   affectedUrls: string[]
