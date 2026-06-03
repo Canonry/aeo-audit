@@ -1,4 +1,4 @@
-# @ainyc/aeo-audit
+# @Canonry/aeo-audit
 
 [![npm version](https://img.shields.io/npm/v/@ainyc/aeo-audit)](https://www.npmjs.com/package/@ainyc/aeo-audit) [![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
