@@ -25,18 +25,18 @@ export function analyzeNamedEntities(context: AuditContext): AnalysisResult {
 
     if (occurrences >= 3) {
       score += 36
-      findings.push({ type: 'found', message: `Brand/entity name appears ${occurrences} times in content.` })
+      findings.push({ type: 'found', code: 'named-entities.brand-name.strong', message: `Brand/entity name appears ${occurrences} times in content.` })
     } else if (occurrences > 0) {
       score += 20
-      findings.push({ type: 'info', message: `Brand/entity name appears ${occurrences} time(s) in content.` })
+      findings.push({ type: 'info', code: 'named-entities.brand-name.low', message: `Brand/entity name appears ${occurrences} time(s) in content.` })
       recommendations.push('Use consistent brand naming throughout key content sections.')
     } else {
       score += 6
-      findings.push({ type: 'missing', message: 'Brand/entity name not clearly present in visible text.' })
+      findings.push({ type: 'missing', code: 'named-entities.brand-name.missing', message: 'Brand/entity name not clearly present in visible text.' })
       recommendations.push('Include business/entity name in key headings and explanatory text.')
     }
   } else {
-    findings.push({ type: 'missing', message: 'Could not infer a primary business/entity name.' })
+    findings.push({ type: 'missing', code: 'named-entities.entity-name.missing', message: 'Could not infer a primary business/entity name.' })
     recommendations.push('Ensure schema and titles expose a clear entity name.')
   }
 
@@ -56,23 +56,23 @@ export function analyzeNamedEntities(context: AuditContext): AnalysisResult {
 
   if (knowsAboutCount > 0 || founderCount > 0) {
     score += 34
-    findings.push({ type: 'found', message: 'Schema includes entity knowledge/founder signals.' })
+    findings.push({ type: 'found', code: 'named-entities.knows-about.present', message: 'Schema includes entity knowledge/founder signals.' })
   } else {
     score += 10
-    findings.push({ type: 'info', message: 'No explicit knowsAbout/founder entity signals in schema.' })
+    findings.push({ type: 'info', code: 'named-entities.knows-about.missing', message: 'No explicit knowsAbout/founder entity signals in schema.' })
     recommendations.push('Add knowsAbout and founder/person associations in schema where relevant.')
   }
 
   const density = properNounDensity(text)
   if (density >= 0.08) {
     score += 30
-    findings.push({ type: 'found', message: 'Proper noun density indicates strong entity context.' })
+    findings.push({ type: 'found', code: 'named-entities.proper-noun-density.strong', message: 'Proper noun density indicates strong entity context.' })
   } else if (density >= 0.04) {
     score += 18
-    findings.push({ type: 'info', message: 'Moderate proper noun density detected.' })
+    findings.push({ type: 'info', code: 'named-entities.proper-noun-density.moderate', message: 'Moderate proper noun density detected.' })
   } else {
     score += 8
-    findings.push({ type: 'info', message: 'Low proper noun density detected.' })
+    findings.push({ type: 'info', code: 'named-entities.proper-noun-density.low', message: 'Low proper noun density detected.' })
     recommendations.push('Add explicit entities: brands, places, people, and product/service names.')
   }
 

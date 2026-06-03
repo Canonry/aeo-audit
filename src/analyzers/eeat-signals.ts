@@ -35,13 +35,13 @@ export function analyzeEeatSignals(context: AuditContext): AnalysisResult {
 
   if (credentialedPersons.length > 0) {
     score += 25
-    findings.push({ type: 'found', message: 'Person schema with credentials detected.' })
+    findings.push({ type: 'found', code: 'eeat-signals.author.credentialed', message: 'Person schema with credentials detected.' })
   } else if (persons.length > 0) {
     score += 12
-    findings.push({ type: 'info', message: 'Person schema found but lacks credential properties.' })
+    findings.push({ type: 'info', code: 'eeat-signals.author.no-credentials', message: 'Person schema found but lacks credential properties.' })
     recommendations.push('Add jobTitle, alumniOf, or hasCredential to Person schema.')
   } else {
-    findings.push({ type: 'missing', message: 'No Person schema found.' })
+    findings.push({ type: 'missing', code: 'eeat-signals.author.missing', message: 'No Person schema found.' })
     recommendations.push('Add Person schema with expertise signals for key team members.')
   }
 
@@ -49,9 +49,9 @@ export function analyzeEeatSignals(context: AuditContext): AnalysisResult {
   const authorMeta = context.$('meta[name="author"]').attr('content')
   if (authorMeta && authorMeta.trim()) {
     score += 15
-    findings.push({ type: 'found', message: `Author meta tag found: "${authorMeta.trim()}".` })
+    findings.push({ type: 'found', code: 'eeat-signals.author-meta.found', message: `Author meta tag found: "${authorMeta.trim()}".` })
   } else {
-    findings.push({ type: 'missing', message: 'No <meta name="author"> tag detected.' })
+    findings.push({ type: 'missing', code: 'eeat-signals.author-meta.missing', message: 'No <meta name="author"> tag detected.' })
     recommendations.push('Add a meta author tag to identify content authorship.')
   }
 
@@ -59,9 +59,9 @@ export function analyzeEeatSignals(context: AuditContext): AnalysisResult {
   const schemaTypes = extractSchemaTypes(context.structuredData)
   if (schemaTypes.has('Review') || schemaTypes.has('AggregateRating')) {
     score += 20
-    findings.push({ type: 'found', message: 'Review or AggregateRating schema detected.' })
+    findings.push({ type: 'found', code: 'eeat-signals.review.found', message: 'Review or AggregateRating schema detected.' })
   } else {
-    findings.push({ type: 'info', message: 'No Review or AggregateRating schema found.' })
+    findings.push({ type: 'info', code: 'eeat-signals.review.missing', message: 'No Review or AggregateRating schema found.' })
     recommendations.push('Add Review or AggregateRating schema if customer reviews exist.')
   }
 
@@ -81,13 +81,13 @@ export function analyzeEeatSignals(context: AuditContext): AnalysisResult {
 
   if (trustLinkCount >= 2) {
     score += 15
-    findings.push({ type: 'found', message: 'Trust page links detected (privacy, terms, about).' })
+    findings.push({ type: 'found', code: 'eeat-signals.trust-links.strong', message: 'Trust page links detected (privacy, terms, about).' })
   } else if (trustLinkCount === 1) {
     score += 8
-    findings.push({ type: 'info', message: 'Some trust page links detected.' })
+    findings.push({ type: 'info', code: 'eeat-signals.trust-links.partial', message: 'Some trust page links detected.' })
     recommendations.push('Add links to privacy policy, terms of service, and about page.')
   } else {
-    findings.push({ type: 'missing', message: 'No trust page links detected.' })
+    findings.push({ type: 'missing', code: 'eeat-signals.trust-links.missing', message: 'No trust page links detected.' })
     recommendations.push('Add footer links to privacy, terms, and about pages.')
   }
 
@@ -105,13 +105,13 @@ export function analyzeEeatSignals(context: AuditContext): AnalysisResult {
 
   if (orgWithPeople.length > 0) {
     score += 25
-    findings.push({ type: 'found', message: 'Organization schema includes founder/employee signals.' })
+    findings.push({ type: 'found', code: 'eeat-signals.organization.with-people', message: 'Organization schema includes founder/employee signals.' })
   } else if (orgs.length > 0) {
     score += 10
-    findings.push({ type: 'info', message: 'Organization schema found but lacks people associations.' })
+    findings.push({ type: 'info', code: 'eeat-signals.organization.no-people', message: 'Organization schema found but lacks people associations.' })
     recommendations.push('Add founder or employee properties to Organization schema.')
   } else {
-    findings.push({ type: 'missing', message: 'No Organization schema detected.' })
+    findings.push({ type: 'missing', code: 'eeat-signals.organization.missing', message: 'No Organization schema detected.' })
   }
 
   return {

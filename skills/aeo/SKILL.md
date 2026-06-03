@@ -128,7 +128,7 @@ Returns:
 Use `--format json` for the full report, or **`--format agent`** for just the decision: `{ schemaVersion, tool, mode, url, score, grade, pass, criticalDefectCount, issues }`, where `issues` is the ranked `prioritizedFixes` and the per-factor/per-page detail is omitted. Prefer `--format agent` when you only need to decide and act. Key fields for acting on the result without parsing prose:
 - `schemaVersion` (on every audit report) versions the JSON shape independently of the package version — pin to it and treat a major bump as breaking; absence means a pre-2.0 report.
 - `prioritizedFixes` is a ranked array of objects, each with a stable `id`, `kind`, optional `severity`, the complete `affectedPages` list (never truncated), `affectsHomepage`, `prevalencePct`, and a human `summary`. It's the pre-computed to-do list — no need to re-rank factor scores yourself.
-- Stable identifiers (`criticalDefects[].id`, `prioritizedFixes[].id`) let integrations key on codes rather than message strings.
+- Stable identifiers everywhere — `criticalDefects[].id`, `prioritizedFixes[].id`, and every factor finding's `code` (e.g. `technical-seo.h1.multiple`) — let integrations key on codes rather than message strings.
 
 #### Auxiliary File Diagnostics
 

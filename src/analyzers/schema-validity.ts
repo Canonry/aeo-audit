@@ -21,6 +21,7 @@ export function analyzeSchemaValidity(context: AuditContext): AnalysisResult {
   if (totalBlocks === 0) {
     findings.push({
       type: 'info',
+      code: 'schema-validity.json-ld.none',
       message: 'No JSON-LD blocks found; nothing to validate. Presence of structured data is scored by the structured-data factor.',
     })
     return { score: 100, findings, recommendations }
@@ -33,6 +34,7 @@ export function analyzeSchemaValidity(context: AuditContext): AnalysisResult {
       score -= 5
       findings.push({
         type: 'missing',
+        code: 'schema-validity.block.empty',
         message: `JSON-LD block #${block.index + 1} is empty or whitespace-only.`,
       })
       recommendations.push(`Remove the empty <script type="application/ld+json"> block at position ${block.index + 1}, or populate it with valid JSON-LD.`)
@@ -44,6 +46,7 @@ export function analyzeSchemaValidity(context: AuditContext): AnalysisResult {
       score -= 15
       findings.push({
         type: 'missing',
+        code: 'schema-validity.block.invalid',
         message: `JSON-LD block #${block.index + 1} has invalid JSON syntax: ${block.parseError}`,
       })
       recommendations.push(`Fix JSON syntax error in block #${block.index + 1} (${block.parseError}). Invalid JSON is silently dropped by Google and AI crawlers.`)
@@ -68,6 +71,7 @@ export function analyzeSchemaValidity(context: AuditContext): AnalysisResult {
       score -= 25
       findings.push({
         type: 'missing',
+        code: 'schema-validity.singleton.duplicate',
         message: `Duplicate singleton @type "${type}" appears ${positions.length} times (blocks #${positions.join(', #')}). Google Search Console flags this as "Duplicate field ${type}" and invalidates rich results.`,
       })
       recommendations.push(`Remove duplicate "${type}" — keep one canonical block. Duplicate "${type}" entries cause Google to drop both from rich results.`)
@@ -88,6 +92,7 @@ export function analyzeSchemaValidity(context: AuditContext): AnalysisResult {
   if (findings.length === 0) {
     findings.push({
       type: 'found',
+      code: 'schema-validity.block.valid',
       message: `All ${totalBlocks} JSON-LD block(s) are valid and unique.`,
     })
   }

@@ -4,6 +4,13 @@ export type FindingType = 'found' | 'missing' | 'info' | 'timeout' | 'unreachabl
 
 export interface AuditFinding {
   type: FindingType
+  /**
+   * Stable machine code for this finding, namespaced as
+   * `<factor-id>.<check>[.<variant>]` (e.g. `technical-seo.h1.multiple`). Lets an
+   * agent key on the specific finding rather than regex-matching `message`. Codes
+   * are stable across releases; the full registry lives in docs/finding-codes.md.
+   */
+  code: string
   message: string
 }
 

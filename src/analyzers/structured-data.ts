@@ -21,9 +21,9 @@ export function analyzeStructuredData(context: AuditContext): AnalysisResult {
 
   if (structuredData.length > 0) {
     score += 30
-    findings.push({ type: 'found', message: `Detected ${structuredData.length} JSON-LD block(s).` })
+    findings.push({ type: 'found', code: 'structured-data.json-ld.found', message: `Detected ${structuredData.length} JSON-LD block(s).` })
   } else {
-    findings.push({ type: 'missing', message: 'No JSON-LD structured data found.' })
+    findings.push({ type: 'missing', code: 'structured-data.json-ld.missing', message: 'No JSON-LD structured data found.' })
     // Issue #33: recommend schemas that fit the detected site category instead
     // of always suggesting LocalBusiness/Service (which is wrong for SaaS,
     // dev tools, blogs, e-commerce, etc.).
@@ -33,9 +33,9 @@ export function analyzeStructuredData(context: AuditContext): AnalysisResult {
   for (const type of PRIORITY_TYPES) {
     if (schemaTypes.has(type)) {
       score += 12
-      findings.push({ type: 'found', message: `${type} schema detected.` })
+      findings.push({ type: 'found', code: 'structured-data.schema.found', message: `${type} schema detected.` })
     } else {
-      findings.push({ type: 'missing', message: `${type} schema not found.` })
+      findings.push({ type: 'missing', code: 'structured-data.schema.missing', message: `${type} schema not found.` })
     }
   }
 
@@ -45,13 +45,13 @@ export function analyzeStructuredData(context: AuditContext): AnalysisResult {
 
   if (avgProperties >= 8) {
     score += 22
-    findings.push({ type: 'found', message: 'Structured data has strong property depth.' })
+    findings.push({ type: 'found', code: 'structured-data.schema-depth.strong', message: 'Structured data has strong property depth.' })
   } else if (avgProperties >= 4) {
     score += 12
-    findings.push({ type: 'info', message: 'Structured data exists but could be more detailed.' })
+    findings.push({ type: 'info', code: 'structured-data.schema-depth.moderate', message: 'Structured data exists but could be more detailed.' })
     recommendations.push('Expand schema properties (contact, areaServed, sameAs, etc.).')
   } else if (structuredData.length) {
-    findings.push({ type: 'info', message: 'Structured data appears shallow.' })
+    findings.push({ type: 'info', code: 'structured-data.schema-depth.low', message: 'Structured data appears shallow.' })
     recommendations.push('Increase schema completeness with richer properties.')
   }
 

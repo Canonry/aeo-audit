@@ -44,7 +44,7 @@ const HEAD = '<title>Page</title><meta name="description" content="A clear and s
 
 function report(url: string, criticalDefects: CriticalDefect[]): AuditReport {
   return {
-    schemaVersion: '1.0',
+    schemaVersion: '1.1',
     url,
     finalUrl: url,
     auditedAt: '2026-04-18T00:00:00.000Z',
@@ -293,7 +293,7 @@ describe('formatters list every affected page (no truncation)', () => {
     prioritizedFixes: PrioritizedFix[] = [],
   ): SitemapAuditReport {
     return {
-      schemaVersion: '1.0',
+      schemaVersion: '1.1',
       sitemapUrl: 'https://example.com/sitemap.xml',
       auditedAt: '2026-04-18T00:00:00.000Z',
       pagesDiscovered: 0,

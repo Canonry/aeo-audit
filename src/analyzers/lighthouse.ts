@@ -98,7 +98,7 @@ export async function analyzeLighthouse(context: AuditContext): Promise<Analysis
 
     return {
       score: 0,
-      findings: [{ type: isAbort ? 'timeout' : 'unreachable', message }],
+      findings: [{ type: isAbort ? 'timeout' : 'unreachable', code: 'lighthouse.psi.unreachable', message }],
       recommendations: [
         'Confirm the URL is publicly reachable from Google\'s infrastructure (PSI cannot audit localhost or auth-walled pages). Set PAGESPEED_API_KEY to lift anonymous rate limits.',
       ],
@@ -114,7 +114,7 @@ export async function analyzeLighthouse(context: AuditContext): Promise<Analysis
     const label = category?.title ?? id
 
     if (typeof rawScore !== 'number') {
-      findings.push({ type: 'info', message: `Lighthouse did not return a score for ${label}.` })
+      findings.push({ type: 'info', code: 'lighthouse.category.missing', message: `Lighthouse did not return a score for ${label}.` })
       continue
     }
 
@@ -122,6 +122,7 @@ export async function analyzeLighthouse(context: AuditContext): Promise<Analysis
     categoryScores.push(percent)
     findings.push({
       type: classifyByScore(percent),
+      code: 'lighthouse.category.score',
       message: `${label}: ${percent}/100`,
     })
   }
@@ -129,7 +130,7 @@ export async function analyzeLighthouse(context: AuditContext): Promise<Analysis
   if (categoryScores.length === 0) {
     return {
       score: 0,
-      findings: [...findings, { type: 'unreachable', message: 'Lighthouse returned no category scores.' }],
+      findings: [...findings, { type: 'unreachable', code: 'lighthouse.category.none', message: 'Lighthouse returned no category scores.' }],
       recommendations: ['Confirm the URL is publicly reachable from Google PageSpeed Insights.'],
     }
   }

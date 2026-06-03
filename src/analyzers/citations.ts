@@ -58,13 +58,13 @@ export function analyzeCitations(context: AuditContext): AnalysisResult {
 
   if (externalLinks.length >= 8) {
     score += 30
-    findings.push({ type: 'found', message: `Strong external citation coverage (${externalLinks.length} links).` })
+    findings.push({ type: 'found', code: 'citations.external-links.strong', message: `Strong external citation coverage (${externalLinks.length} links).` })
   } else if (externalLinks.length >= 3) {
     score += 18
-    findings.push({ type: 'info', message: `Moderate external citation coverage (${externalLinks.length} links).` })
+    findings.push({ type: 'info', code: 'citations.external-links.moderate', message: `Moderate external citation coverage (${externalLinks.length} links).` })
   } else {
     score += 6
-    findings.push({ type: 'missing', message: 'Limited external citations detected.' })
+    findings.push({ type: 'missing', code: 'citations.external-links.low', message: 'Limited external citations detected.' })
     recommendations.push('Reference authoritative third-party sources to strengthen trust signals.')
   }
 
@@ -76,10 +76,10 @@ export function analyzeCitations(context: AuditContext): AnalysisResult {
 
   if (authoritativeLinks.length > 0) {
     score += 24
-    findings.push({ type: 'found', message: 'Authoritative domain citations detected (.gov/.edu/Wikipedia).' })
+    findings.push({ type: 'found', code: 'citations.authoritative-domains.found', message: 'Authoritative domain citations detected (.gov/.edu/Wikipedia).' })
   } else {
     score += 8
-    findings.push({ type: 'info', message: 'No clearly authoritative domains detected in external links.' })
+    findings.push({ type: 'info', code: 'citations.authoritative-domains.none', message: 'No clearly authoritative domains detected in external links.' })
   }
 
   let sameAsCount = 0
@@ -94,13 +94,13 @@ export function analyzeCitations(context: AuditContext): AnalysisResult {
 
   if (sameAsCount >= 3) {
     score += 24
-    findings.push({ type: 'found', message: `Structured data includes ${sameAsCount} sameAs link(s).` })
+    findings.push({ type: 'found', code: 'citations.sameas.strong', message: `Structured data includes ${sameAsCount} sameAs link(s).` })
   } else if (sameAsCount > 0) {
     score += 14
-    findings.push({ type: 'info', message: `Structured data includes ${sameAsCount} sameAs link(s).` })
+    findings.push({ type: 'info', code: 'citations.sameas.moderate', message: `Structured data includes ${sameAsCount} sameAs link(s).` })
   } else {
     score += 4
-    findings.push({ type: 'missing', message: 'No sameAs references found in structured data.' })
+    findings.push({ type: 'missing', code: 'citations.sameas.missing', message: 'No sameAs references found in structured data.' })
     recommendations.push('Add sameAs references for key profiles/directories in JSON-LD.')
   }
 
@@ -111,13 +111,13 @@ export function analyzeCitations(context: AuditContext): AnalysisResult {
 
   if (quality >= 0.75) {
     score += 22
-    findings.push({ type: 'found', message: 'External anchor text quality is strong.' })
+    findings.push({ type: 'found', code: 'citations.anchor-text.strong', message: 'External anchor text quality is strong.' })
   } else if (quality >= 0.45) {
     score += 12
-    findings.push({ type: 'info', message: 'Anchor text quality is moderate.' })
+    findings.push({ type: 'info', code: 'citations.anchor-text.moderate', message: 'Anchor text quality is moderate.' })
   } else {
     score += 6
-    findings.push({ type: 'info', message: 'Anchor text quality is weak or generic.' })
+    findings.push({ type: 'info', code: 'citations.anchor-text.low', message: 'Anchor text quality is weak or generic.' })
     recommendations.push('Use descriptive external anchor text instead of generic labels.')
   }
 

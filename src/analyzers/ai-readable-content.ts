@@ -26,6 +26,7 @@ function pushDiagnosticFindings(
   if (diagnostics.contentNegotiation) {
     findings.push({
       type: 'info',
+      code: 'ai-readable-content.content-negotiation.found',
       message: `${label} returns a non-2xx response when fetched with \`Accept: text/markdown\` — content negotiation hides it from AI content extraction tools that prefer markdown.`,
     })
     recommendations.push(
@@ -42,27 +43,27 @@ function scoreAuxState(
   recommendations: string[],
 ): number {
   if (!auxEntry || auxEntry.state === 'missing') {
-    findings.push({ type: 'missing', message: missingMessage })
+    findings.push({ type: 'missing', code: 'ai-readable-content.aux-resource.missing', message: missingMessage })
     recommendations.push(`Create ${missingMessage.split(' ')[0]} at your site root.`)
     return 0
   }
 
   if (auxEntry.state === 'timeout') {
-    findings.push({ type: 'timeout', message: unavailableMessage })
+    findings.push({ type: 'timeout', code: 'ai-readable-content.aux-resource.timeout', message: unavailableMessage })
     return 8
   }
 
   if (auxEntry.state === 'unreachable') {
-    findings.push({ type: 'unreachable', message: unavailableMessage })
+    findings.push({ type: 'unreachable', code: 'ai-readable-content.aux-resource.unreachable', message: unavailableMessage })
     return 8
   }
 
   if (auxEntry.state === 'not-html') {
-    findings.push({ type: 'info', message: `${missingMessage.split(' ')[0]} returned an unexpected content type.` })
+    findings.push({ type: 'info', code: 'ai-readable-content.aux-resource.not-html', message: `${missingMessage.split(' ')[0]} returned an unexpected content type.` })
     return 10
   }
 
-  findings.push({ type: 'found', message: `${missingMessage.split(' ')[0]} is available.` })
+  findings.push({ type: 'found', code: 'ai-readable-content.aux-resource.found', message: `${missingMessage.split(' ')[0]} is available.` })
   return 24
 }
 
@@ -86,9 +87,9 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
     const wordCount = countWords(auxiliary.llmsTxt.body || '')
     if (wordCount >= 100) {
       score += 8
-      findings.push({ type: 'found', message: '/llms.txt has useful content depth.' })
+      findings.push({ type: 'found', code: 'ai-readable-content.llms-txt.strong', message: '/llms.txt has useful content depth.' })
     } else {
-      findings.push({ type: 'info', message: '/llms.txt is present but short.' })
+      findings.push({ type: 'info', code: 'ai-readable-content.llms-txt.short', message: '/llms.txt is present but short.' })
       recommendations.push('Expand /llms.txt with concise service and entity context.')
     }
   }
@@ -107,9 +108,9 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
     const wordCount = countWords(auxiliary.llmsFullTxt.body || '')
     if (wordCount >= 200) {
       score += 10
-      findings.push({ type: 'found', message: '/llms-full.txt has strong long-form coverage.' })
+      findings.push({ type: 'found', code: 'ai-readable-content.llms-full-txt.strong', message: '/llms-full.txt has strong long-form coverage.' })
     } else {
-      findings.push({ type: 'info', message: '/llms-full.txt exists but lacks detail.' })
+      findings.push({ type: 'info', code: 'ai-readable-content.llms-full-txt.short', message: '/llms-full.txt exists but lacks detail.' })
       recommendations.push('Add complete offerings, FAQ, and service-area coverage to /llms-full.txt.')
     }
   }
@@ -118,12 +119,12 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
   const robotsState = auxiliary.robotsTxt?.state
   if (robotsState === 'ok') {
     score += 16
-    findings.push({ type: 'found', message: 'robots.txt is accessible.' })
+    findings.push({ type: 'found', code: 'ai-readable-content.robots-txt.found', message: 'robots.txt is accessible.' })
   } else if (robotsState === 'timeout' || robotsState === 'unreachable') {
     score += 6
-    findings.push({ type: robotsState, message: 'Could not reliably fetch /robots.txt.' })
+    findings.push({ type: robotsState, code: 'ai-readable-content.robots-txt.unreachable', message: 'Could not reliably fetch /robots.txt.' })
   } else {
-    findings.push({ type: 'missing', message: '/robots.txt is missing.' })
+    findings.push({ type: 'missing', code: 'ai-readable-content.robots-txt.missing', message: '/robots.txt is missing.' })
     recommendations.push('Add a robots.txt file.')
   }
   pushDiagnosticFindings('/robots.txt', auxiliary.robotsTxt, findings, recommendations)
@@ -132,12 +133,12 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
   const sitemapState = auxiliary.sitemapXml?.state
   if (sitemapState === 'ok') {
     score += 16
-    findings.push({ type: 'found', message: 'sitemap.xml is accessible.' })
+    findings.push({ type: 'found', code: 'ai-readable-content.sitemap.found', message: 'sitemap.xml is accessible.' })
   } else if (sitemapState === 'timeout' || sitemapState === 'unreachable') {
     score += 6
-    findings.push({ type: sitemapState, message: 'Could not reliably fetch /sitemap.xml.' })
+    findings.push({ type: sitemapState, code: 'ai-readable-content.sitemap.unreachable', message: 'Could not reliably fetch /sitemap.xml.' })
   } else {
-    findings.push({ type: 'missing', message: '/sitemap.xml is missing.' })
+    findings.push({ type: 'missing', code: 'ai-readable-content.sitemap.missing', message: '/sitemap.xml is missing.' })
     recommendations.push('Add a sitemap.xml file.')
   }
   pushDiagnosticFindings('/sitemap.xml', auxiliary.sitemapXml, findings, recommendations)
@@ -146,9 +147,9 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
   const llmsLink = context.$('link[href*="llms.txt"]').length > 0
   if (llmsLink) {
     score += 10
-    findings.push({ type: 'found', message: 'HTML head links to llms.txt.' })
+    findings.push({ type: 'found', code: 'ai-readable-content.llms-txt-link.found', message: 'HTML head links to llms.txt.' })
   } else {
-    findings.push({ type: 'info', message: 'No llms.txt link detected in <head>.' })
+    findings.push({ type: 'info', code: 'ai-readable-content.llms-txt-link.missing', message: 'No llms.txt link detected in <head>.' })
     recommendations.push('Add a <link> reference to /llms.txt in your document head.')
   }
 
@@ -160,9 +161,9 @@ export function analyzeAiReadableContent(context: AuditContext): AnalysisResult 
   const markdownLinkHeader = /type="?text\/markdown"?/i.test(linkHeader)
   if (markdownLinkTag || markdownLinkHeader) {
     score += 10
-    findings.push({ type: 'found', message: 'Per-page Markdown source endpoint advertised (text/markdown alternate) — agents can fetch unrendered source.' })
+    findings.push({ type: 'found', code: 'ai-readable-content.markdown-endpoint.found', message: 'Per-page Markdown source endpoint advertised (text/markdown alternate) — agents can fetch unrendered source.' })
   } else {
-    findings.push({ type: 'info', message: 'No per-page Markdown source endpoint advertised (text/markdown alternate link or Link header).' })
+    findings.push({ type: 'info', code: 'ai-readable-content.markdown-endpoint.missing', message: 'No per-page Markdown source endpoint advertised (text/markdown alternate link or Link header).' })
     recommendations.push(
       `Expose a Markdown version of each page (a .md URL or content negotiation) and advertise it via <link rel="alternate" type="text/markdown">. ${specCitation('markdown-source-endpoints')}`,
     )
