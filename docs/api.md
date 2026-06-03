@@ -33,7 +33,7 @@ const report = await runSitemapAudit('https://example.com', {
   factors: ['schema-validity', 'structured-data'],  // Optional subset
 })
 
-console.log(report.schemaVersion)      // '1.0', JSON shape version (see "Machine-readable output")
+console.log(report.schemaVersion)      // '1.1', JSON shape version (see "Machine-readable output")
 console.log(report.aggregateGrade)     // 'B+'
 console.log(report.pagesAudited)       // 22
 console.log(report.criticalDefects)    // Binary per-page defects (multiple/missing H1, missing title/meta), grouped by defect
