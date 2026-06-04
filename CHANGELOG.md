@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.1.0 (2026-06-03)
+
+### Added
+- **Stable finding codes.** Every `AuditFinding` now carries a `code` namespaced as `<factor-id>.<check>[.<variant>]` (e.g. `technical-seo.h1.multiple`, `schema-validity.singleton.duplicate`), so agents and integrations key on a stable machine identifier instead of regex-matching the human `message` (which can change between releases). 212 codes across all 19 analyzers; the full registry is in [docs/finding-codes.md](docs/finding-codes.md). Codes follow a documented convention and are unique across the tool (enforced by a test). `AuditFinding.code` is required, so the compiler guarantees no finding ships without one.
+- `hasMissingMetaDescription` (the `--require-meta` gate) now keys on `technical-seo.meta-description.missing` rather than a message prefix — the first consumer migrated to codes.
+
+### Changed
+- **`schemaVersion` bumped to `1.1`** (additive: findings gained the `code` field). Report shapes are otherwise unchanged.
+
+## 2.0.0 (2026-06-03)
+
+### Breaking
+- **`SitemapAuditReport.prioritizedFixes` is now a structured `PrioritizedFix[]`, not `string[]`.** Each entry is a typed object — `{ kind, id, title, recommendation, severity?, affectedPages, affectsHomepage, prevalencePct, avgGrade?, summary }` — so an AI agent can act on the ranked to-do list without regex-parsing prose. The human-readable one-liner is preserved on `.summary`; migrate by reading `prioritizedFixes.map(f => f.summary)`. The text/markdown reports are unchanged in spirit (they render the structured fixes, now spelling out every affected page).
+- **New `schemaVersion` field on `AuditReport` and `SitemapAuditReport`** (exported `SCHEMA_VERSION`, currently `"1.0"`). It versions the report's JSON shape independently of the npm package version so agent parsers can detect breaking drift instead of failing silently. Treat the absence of the field as "pre-2.0 / legacy shape."
+
+### Added
+- **`--format agent` — a slim, agent-native decision output.** Returns `{ schemaVersion, tool, mode, url, score, grade, pass, criticalDefectCount, issues }` as JSON, where `issues` is the ranked `PrioritizedFix[]`, omitting the per-factor and per-page detail an agent would otherwise have to average and re-rank. Works for single-URL, sitemap, and static-output audits (single-page reuses the same critical-defect and cross-cutting aggregation over a one-page "site"); `--detect-platform` falls back to structured JSON. New `agentSummaryFromAudit()` / `agentSummaryFromSitemap()` exports, `AgentSummary` type, and `formatAgent` / `formatSitemapAgent` formatters.
+- **Critical per-page defects surfaced by impact, not prevalence (#42).** Sitemap and static-directory reports now include a `criticalDefects` rollup and a **Critical Defects** section (text + markdown) that lists binary, one-line-fix structural defects — an `<h1>` count other than one, a missing `<title>`, a missing meta description — **regardless of how few pages exhibit them**. Previously these were detected per page but lost in aggregation: `prioritizedFixes` ranked only by prevalence (so a defect on a single page was structurally excluded), the factor score averaged the defect away to a passing grade, and `crossCuttingIssues` was keyed by factor, never the specific defect. An unambiguous, high-impact defect on the most important page (e.g. a homepage split across four `<h1>`s, or a `/contact-us` page with none) appeared nowhere in the top-level summary. Now each defect names **every** offending page (homepage and high sitemap-`priority` pages first), and critical-severity defects are promoted to the **top** of `prioritizedFixes`. Shown even with `--top-issues`.
+  - The end-of-report summaries no longer truncate: the Critical Defects block and each prioritized fix list **every** affected page (no "+N more"), and `prioritizedFixes` reports every cross-cutting issue ordered by prevalence rather than a top-5 slice — a fix the audit computed always reaches the report.
+  - New `detectCriticalDefects()`, `buildCriticalDefects()`, and `SCHEMA_VERSION` exports plus `CriticalDefect`, `CriticalDefectGroup`, `CriticalDefectAffectedPage`, `CriticalDefectId`, `CriticalDefectSeverity`, and `PrioritizedFix` types. `AuditReport` gains `criticalDefects` and `schemaVersion`; `SitemapAuditReport` gains `criticalDefects` and `schemaVersion`; `SitemapPageResult` gains the page's sitemap `priority`.
+  - Detection is independent of the weighted factor scores, so **no existing audit scores or grades change** (and exit codes are unaffected).
+
 ## 1.13.0 (2026-05-31)
 
 ### Added

@@ -23,6 +23,7 @@ import {
   formatSitemapText,
   formatText,
 } from './formatters/text.js'
+import { formatAgent, formatSitemapAgent } from './formatters/agent.js'
 import type {
   BatchPlatformDetectionReport,
   PlatformConfidence,
@@ -33,28 +34,35 @@ import type {
   SitemapPageResult,
 } from './types.js'
 
+// `agent` is the slim machine-readable decision (score, pass gate, ranked fixes)
+// for audits. Platform-detection output has no decision list, so there `agent`
+// falls back to the already-structured JSON.
 const FORMATTERS = {
   json: formatJson,
   markdown: formatMarkdown,
   text: formatText,
+  agent: formatAgent,
 }
 
 const SITEMAP_FORMATTERS = {
   json: (report: SitemapAuditReport, _topIssuesOnly: boolean) => formatSitemapJson(report),
   markdown: (report: SitemapAuditReport, topIssuesOnly: boolean) => formatSitemapMarkdown(report, topIssuesOnly),
   text: (report: SitemapAuditReport, topIssuesOnly: boolean) => formatSitemapText(report, topIssuesOnly),
+  agent: (report: SitemapAuditReport, _topIssuesOnly: boolean) => formatSitemapAgent(report),
 }
 
 const PLATFORM_FORMATTERS = {
   json: (report: PlatformDetectionReport) => formatPlatformJson(report),
   markdown: (report: PlatformDetectionReport) => formatPlatformMarkdown(report),
   text: (report: PlatformDetectionReport) => formatPlatformText(report),
+  agent: (report: PlatformDetectionReport) => formatPlatformJson(report),
 }
 
 const BATCH_PLATFORM_FORMATTERS = {
   json: (report: BatchPlatformDetectionReport) => formatBatchPlatformJson(report),
   markdown: (report: BatchPlatformDetectionReport) => formatBatchPlatformMarkdown(report),
   text: (report: BatchPlatformDetectionReport) => formatBatchPlatformText(report),
+  agent: (report: BatchPlatformDetectionReport) => formatBatchPlatformJson(report),
 }
 
 type FormatterName = keyof typeof FORMATTERS
@@ -177,9 +185,9 @@ export function hasMissingMetaDescription(factors: ScoredFactor[] | undefined): 
   if (!factors) return false
   const tech = factors.find((f) => f.id === 'technical-seo')
   if (!tech) return false
-  return tech.findings.some(
-    (f) => f.type === 'missing' && f.message.startsWith('No meta description found'),
-  )
+  // Key on the stable finding code rather than the message prefix — that's the
+  // whole point of finding codes: gates don't break when copy changes.
+  return tech.findings.some((f) => f.code === 'technical-seo.meta-description.missing')
 }
 
 export function parseUrlList(text: string): string[] {
@@ -251,7 +259,10 @@ Pass a URL to audit a live site, or a filesystem path (a .html file or a
 directory of built HTML, e.g. ./out) to audit static output offline.
 
 Options:
-  --format <type>         Output format: text (default), json, markdown
+  --format <type>         Output format: text (default), json, markdown, agent.
+                          'agent' emits a slim JSON decision (score, pass gate,
+                          criticalDefectCount, ranked issues[]) for AI agents —
+                          none of the per-factor/per-page detail.
   --factors <list>        Comma-separated factor IDs to run (runs all if omitted)
   --include-geo           Include optional geographic signals factor
   --include-agent-skills  Include optional agent skill exposure factor (Schema.org Action, MCP, form affordances)
@@ -264,7 +275,8 @@ Options:
                           explicit URL to override. Pages are fetched with bounded concurrency (5).
   --limit <n>             Max pages to audit in sitemap mode (default 200, sorted by sitemap priority).
                           When the sitemap exceeds the limit, a notice is printed to stderr.
-  --top-issues            In sitemap mode, skip per-page output and show only cross-cutting issues
+  --top-issues            In sitemap mode, skip per-page output and show only the cross-cutting
+                          issues and critical defects
   --detect-platform       Detect what platform/CMS/framework the site is built on (WordPress,
                           Webflow, Shopify, Next.js, etc.) instead of running a full audit.
   --urls <src>            In --detect-platform mode, run on multiple URLs. <src> can be a path
@@ -292,6 +304,8 @@ Options:
 Examples:
   aeo-audit https://example.com
   aeo-audit https://example.com --format json
+  aeo-audit https://example.com --format agent
+  aeo-audit https://example.com --sitemap --format agent
   aeo-audit https://example.com --factors structured-data,faq-content
   aeo-audit https://example.com --factors schema-validity
   aeo-audit https://example.com --include-geo
@@ -334,7 +348,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   }
 
   if (!isFormatterName(args.format)) {
-    console.error(`Error: Unknown format "${args.format}". Use: text, json, markdown`)
+    console.error(`Error: Unknown format "${args.format}". Use: text, json, markdown, agent`)
     return 1
   }
 

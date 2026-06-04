@@ -9,7 +9,8 @@
 - Audit **built HTML offline** in CI: a `next export` / `dist` / `out` directory, no network. [Static output](docs/cli.md#static-output-mode)
 - Detect the **platform / CMS / framework**: WordPress, Webflow, Shopify, Next.js, Vercel. [Platform detection](docs/cli.md#platform-detection)
 - Opt in to **Lighthouse, geographic, and agent-skill** factors. [Optional factors](docs/scoring.md#optional-factors)
-- `text`, `json`, and `markdown` output with **CI-friendly exit codes**. [CLI reference](docs/cli.md)
+- `text`, `json`, `markdown`, and `agent` output with **CI-friendly exit codes**. [CLI reference](docs/cli.md)
+- **Agent-native output**: a versioned `schemaVersion`, a slim `--format agent` decision, ranked structured fixes, and stable [finding codes](docs/finding-codes.md) so integrations key on codes, not prose. [API](docs/api.md#machine-readable-output-for-ai-agents)
 - Use as a **library** ([API](docs/api.md)) or from Claude Code via the **`/aeo` skill** ([skill](docs/skill.md)).
 
 Website: [canonry.ai](https://canonry.ai)

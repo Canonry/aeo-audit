@@ -3,6 +3,8 @@ import path from 'node:path'
 import { AeoAuditError } from './errors.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { auditHtmlPage } from './index.js'
+import { buildCriticalDefects } from './critical-defects.js'
+import { SCHEMA_VERSION } from './schema.js'
 import { buildCrossCuttingIssues, buildPrioritizedFixes, mapWithConcurrency } from './sitemap.js'
 import { scoreToGrade } from './scoring.js'
 import type {
@@ -272,10 +274,14 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     ? Math.round(successScores.reduce((a, b) => a + b, 0) / successScores.length)
     : 0
 
+  // Static output has no sitemap <priority>, so the rollup ranks by homepage
+  // (derived from the file path → URL) only — no priority map is passed.
+  const criticalDefects = buildCriticalDefects(successReports)
   const crossCuttingIssues = buildCrossCuttingIssues(successReports)
-  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length)
+  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length, criticalDefects)
 
   const report: SitemapAuditReport = {
+    schemaVersion: SCHEMA_VERSION,
     sitemapUrl: resolved,
     auditedAt: new Date().toISOString(),
     pagesDiscovered: discovered,
@@ -287,6 +293,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     aggregateScore,
     aggregateGrade: scoreToGrade(aggregateScore),
     pages: pageResults,
+    criticalDefects,
     crossCuttingIssues,
     prioritizedFixes,
   }

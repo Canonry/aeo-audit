@@ -15,13 +15,13 @@ export function analyzeContentExtractability(context: AuditContext): AnalysisRes
 
     if (ratio > 0.3) {
       score += 25
-      findings.push({ type: 'found', message: `Strong content-to-markup ratio (${(ratio * 100).toFixed(0)}%).` })
+      findings.push({ type: 'found', code: 'content-extractability.content-ratio.strong', message: `Strong content-to-markup ratio (${(ratio * 100).toFixed(0)}%).` })
     } else if (ratio > 0.15) {
       score += 15
-      findings.push({ type: 'info', message: `Moderate content-to-markup ratio (${(ratio * 100).toFixed(0)}%).` })
+      findings.push({ type: 'info', code: 'content-extractability.content-ratio.moderate', message: `Moderate content-to-markup ratio (${(ratio * 100).toFixed(0)}%).` })
     } else {
       score += 5
-      findings.push({ type: 'info', message: `Low content-to-markup ratio (${(ratio * 100).toFixed(0)}%).` })
+      findings.push({ type: 'info', code: 'content-extractability.content-ratio.low', message: `Low content-to-markup ratio (${(ratio * 100).toFixed(0)}%).` })
       recommendations.push('Reduce boilerplate HTML and increase content density.')
     }
   }
@@ -38,14 +38,14 @@ export function analyzeContentExtractability(context: AuditContext): AnalysisRes
 
   if (citableBlocks >= 5) {
     score += 25
-    findings.push({ type: 'found', message: `${citableBlocks} citation-ready text blocks found (40-200 words each).` })
+    findings.push({ type: 'found', code: 'content-extractability.citable-blocks.strong', message: `${citableBlocks} citation-ready text blocks found (40-200 words each).` })
   } else if (citableBlocks >= 2) {
     score += 15
-    findings.push({ type: 'info', message: `${citableBlocks} citation-ready text blocks found.` })
+    findings.push({ type: 'info', code: 'content-extractability.citable-blocks.moderate', message: `${citableBlocks} citation-ready text blocks found.` })
     recommendations.push('Add more substantive paragraphs (40-200 words) for citation extraction.')
   } else {
     score += 5
-    findings.push({ type: 'missing', message: 'Few citation-ready text blocks detected.' })
+    findings.push({ type: 'missing', code: 'content-extractability.citable-blocks.missing', message: 'Few citation-ready text blocks detected.' })
     recommendations.push('Structure content into focused paragraphs of 40-200 words each.')
   }
 
@@ -64,11 +64,11 @@ export function analyzeContentExtractability(context: AuditContext): AnalysisRes
 
   if (paywallSignals.length > 0) {
     score -= 20
-    findings.push({ type: 'missing', message: `Content gate signals detected: ${paywallSignals.join(', ')}.` })
+    findings.push({ type: 'missing', code: 'content-extractability.paywall.found', message: `Content gate signals detected: ${paywallSignals.join(', ')}.` })
     recommendations.push('Ensure primary content is accessible without login/subscription for AI crawlers.')
   } else {
     score += 10
-    findings.push({ type: 'found', message: 'No paywall or content gate signals detected.' })
+    findings.push({ type: 'found', code: 'content-extractability.paywall.none', message: 'No paywall or content gate signals detected.' })
   }
 
   // Ad density
@@ -77,14 +77,14 @@ export function analyzeContentExtractability(context: AuditContext): AnalysisRes
 
   if (adCount >= 5) {
     score -= 15
-    findings.push({ type: 'info', message: `High ad element density detected (${adCount} elements).` })
+    findings.push({ type: 'info', code: 'content-extractability.ad-density.high', message: `High ad element density detected (${adCount} elements).` })
     recommendations.push('Reduce ad density to improve content extractability for AI crawlers.')
   } else if (adCount > 0) {
     score += 5
-    findings.push({ type: 'info', message: `Low ad density (${adCount} elements).` })
+    findings.push({ type: 'info', code: 'content-extractability.ad-density.low', message: `Low ad density (${adCount} elements).` })
   } else {
     score += 10
-    findings.push({ type: 'found', message: 'No ad elements detected.' })
+    findings.push({ type: 'found', code: 'content-extractability.ad-density.none', message: 'No ad elements detected.' })
   }
 
   // Direct answer blocks (content immediately following H2/H3 that's 1-3 sentences)
@@ -102,12 +102,12 @@ export function analyzeContentExtractability(context: AuditContext): AnalysisRes
 
   if (directAnswerCount >= 3) {
     score += 15
-    findings.push({ type: 'found', message: `${directAnswerCount} direct-answer blocks follow headings.` })
+    findings.push({ type: 'found', code: 'content-extractability.direct-answer.strong', message: `${directAnswerCount} direct-answer blocks follow headings.` })
   } else if (directAnswerCount >= 1) {
     score += 8
-    findings.push({ type: 'info', message: `${directAnswerCount} direct-answer block(s) follow headings.` })
+    findings.push({ type: 'info', code: 'content-extractability.direct-answer.moderate', message: `${directAnswerCount} direct-answer block(s) follow headings.` })
   } else {
-    findings.push({ type: 'info', message: 'No clear direct-answer blocks following headings.' })
+    findings.push({ type: 'info', code: 'content-extractability.direct-answer.none', message: 'No clear direct-answer blocks following headings.' })
     recommendations.push('Place concise 1-3 sentence answers immediately after H2/H3 headings.')
   }
 

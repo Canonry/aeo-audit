@@ -124,15 +124,15 @@ export function analyzeAgentSkillExposure(context: AuditContext): AnalysisResult
     if (wellFormed.length > 0) {
       score += 35
       const types = [...new Set(wellFormed.map((a) => a.type))].slice(0, 3).join(', ')
-      findings.push({ type: 'found', message: `Schema.org Action markup declared with target and inputs: ${types}.` })
+      findings.push({ type: 'found', code: 'agent-skill-exposure.schema-action.well-formed', message: `Schema.org Action markup declared with target and inputs: ${types}.` })
     } else {
       score += 18
       const types = [...new Set(actions.map((a) => a.type))].slice(0, 3).join(', ')
-      findings.push({ type: 'info', message: `Schema.org Action types present (${types}) but missing target/urlTemplate or query-input/object shape.` })
+      findings.push({ type: 'info', code: 'agent-skill-exposure.schema-action.partial', message: `Schema.org Action types present (${types}) but missing target/urlTemplate or query-input/object shape.` })
       recommendations.push('Add target (with urlTemplate) and query-input/object to Action schema so agents know how to invoke it.')
     }
   } else {
-    findings.push({ type: 'missing', message: 'No Schema.org Action markup detected (PotentialAction / SearchAction / OrderAction / etc.).' })
+    findings.push({ type: 'missing', code: 'agent-skill-exposure.schema-action.missing', message: 'No Schema.org Action markup detected (PotentialAction / SearchAction / OrderAction / etc.).' })
     recommendations.push('Declare interactive affordances with Schema.org Action markup (e.g. SearchAction with urlTemplate and query-input) so agents can invoke them as tools.')
   }
 
@@ -149,9 +149,9 @@ export function analyzeAgentSkillExposure(context: AuditContext): AnalysisResult
       : mcpMeta.length
         ? `<meta name="${mcpMeta.attr('name')}">`
         : 'Link header'
-    findings.push({ type: 'found', message: `Agent protocol discovery present (${src}).` })
+    findings.push({ type: 'found', code: 'agent-skill-exposure.mcp-discovery.found', message: `Agent protocol discovery present (${src}).` })
   } else {
-    findings.push({ type: 'missing', message: 'No MCP / WebMCP / ai-plugin discovery link or header.' })
+    findings.push({ type: 'missing', code: 'agent-skill-exposure.mcp-discovery.missing', message: 'No MCP / WebMCP / ai-plugin discovery link or header.' })
     recommendations.push('Expose an MCP server card via <link rel="mcp" href="/.well-known/mcp.json"> or a Link header so agents can discover your tools.')
   }
 
@@ -166,9 +166,9 @@ export function analyzeAgentSkillExposure(context: AuditContext): AnalysisResult
   const agentCardHeader = /rel="?(agent-card|a2a)"?/i.test(linkHeader)
   if (agentCardLink.length || agentCardMeta.length || agentCardHeader) {
     score += 12
-    findings.push({ type: 'found', message: 'A2A agent card discovery present — agents can fetch an agent card to negotiate capabilities.' })
+    findings.push({ type: 'found', code: 'agent-skill-exposure.a2a-agent-card.found', message: 'A2A agent card discovery present — agents can fetch an agent card to negotiate capabilities.' })
   } else {
-    findings.push({ type: 'info', message: 'No A2A agent card discovery (no link/meta/Link header pointing to an agent card).' })
+    findings.push({ type: 'info', code: 'agent-skill-exposure.a2a-agent-card.missing', message: 'No A2A agent card discovery (no link/meta/Link header pointing to an agent card).' })
     recommendations.push(
       `Publish an A2A agent card and advertise it via <link rel="agent-card" href="/.well-known/agent.json"> or a Link header. ${specCitation('a2a-agent-cards')}`,
     )
@@ -180,9 +180,9 @@ export function analyzeAgentSkillExposure(context: AuditContext): AnalysisResult
   ).first()
   if (openapiLink.length) {
     score += 10
-    findings.push({ type: 'found', message: `Service description link found (type="${openapiLink.attr('type') || 'unspecified'}").` })
+    findings.push({ type: 'found', code: 'agent-skill-exposure.openapi.found', message: `Service description link found (type="${openapiLink.attr('type') || 'unspecified'}").` })
   } else {
-    findings.push({ type: 'info', message: 'No OpenAPI / service-description link found.' })
+    findings.push({ type: 'info', code: 'agent-skill-exposure.openapi.missing', message: 'No OpenAPI / service-description link found.' })
     recommendations.push('Link to an OpenAPI document via <link rel="describedby" type="application/openapi+json"> so agents can see the underlying endpoint shape.')
   }
 
@@ -191,9 +191,9 @@ export function analyzeAgentSkillExposure(context: AuditContext): AnalysisResult
   const itemtypeCount = $('[itemtype]').length
   if (itempropCount >= 3 || itemtypeCount >= 1) {
     score += 10
-    findings.push({ type: 'found', message: `Microdata present (${itempropCount} itemprop, ${itemtypeCount} itemtype) — helps agents map semantic meaning.` })
+    findings.push({ type: 'found', code: 'agent-skill-exposure.microdata.found', message: `Microdata present (${itempropCount} itemprop, ${itemtypeCount} itemtype) — helps agents map semantic meaning.` })
   } else {
-    findings.push({ type: 'info', message: 'Little or no microdata (itemprop / itemtype) found on the page.' })
+    findings.push({ type: 'info', code: 'agent-skill-exposure.microdata.missing', message: 'Little or no microdata (itemprop / itemtype) found on the page.' })
   }
 
   // ── Form structural fallback (up to 25) ─────────────────────────────────
@@ -207,7 +207,7 @@ export function analyzeAgentSkillExposure(context: AuditContext): AnalysisResult
   })
 
   if (candidateForms.length === 0) {
-    findings.push({ type: 'info', message: 'No interactive forms detected on this page.' })
+    findings.push({ type: 'info', code: 'agent-skill-exposure.forms.none', message: 'No interactive forms detected on this page.' })
   } else {
     const perFormScores: number[] = []
     candidateForms.each((_, el) => {
@@ -218,12 +218,12 @@ export function analyzeAgentSkillExposure(context: AuditContext): AnalysisResult
     score += formContribution
 
     if (avg >= 80) {
-      findings.push({ type: 'found', message: `${candidateForms.length} form(s) with strong agent-usable structure (labels, autocomplete, semantic types).` })
+      findings.push({ type: 'found', code: 'agent-skill-exposure.forms.strong', message: `${candidateForms.length} form(s) with strong agent-usable structure (labels, autocomplete, semantic types).` })
     } else if (avg >= 40) {
-      findings.push({ type: 'info', message: `${candidateForms.length} form(s) partially agent-usable. Average structure score ${Math.round(avg)}/100.` })
+      findings.push({ type: 'info', code: 'agent-skill-exposure.forms.partial', message: `${candidateForms.length} form(s) partially agent-usable. Average structure score ${Math.round(avg)}/100.` })
       recommendations.push('Strengthen forms with aria-label / <label for>, autocomplete tokens (email, tel, street-address…), and semantic input types (email, tel, number, date).')
     } else {
-      findings.push({ type: 'missing', message: `${candidateForms.length} form(s) have weak structure for agent use (avg ${Math.round(avg)}/100). Inputs lack labels, autocomplete, or semantic types.` })
+      findings.push({ type: 'missing', code: 'agent-skill-exposure.forms.weak', message: `${candidateForms.length} form(s) have weak structure for agent use (avg ${Math.round(avg)}/100). Inputs lack labels, autocomplete, or semantic types.` })
       recommendations.push('Add <label for> or aria-label to every input, set autocomplete tokens, and use semantic input types so agents can identify each field without guessing.')
     }
   }

@@ -116,11 +116,11 @@ export function analyzeAiCrawlerAccess(context: AuditContext): AnalysisResult {
     if (robotsState === 'missing') {
       // No robots.txt means everything is allowed
       score += 80
-      findings.push({ type: 'info', message: 'No robots.txt found — AI crawlers are implicitly allowed.' })
+      findings.push({ type: 'info', code: 'ai-crawler-access.robots-txt.missing', message: 'No robots.txt found — AI crawlers are implicitly allowed.' })
       recommendations.push('Add a robots.txt that explicitly allows AI crawlers for clarity.')
     } else {
       score += 30
-      findings.push({ type: robotsState === 'timeout' ? 'timeout' : 'unreachable', message: 'Could not reliably fetch robots.txt.' })
+      findings.push({ type: robotsState === 'timeout' ? 'timeout' : 'unreachable', code: 'ai-crawler-access.robots-txt.unreachable', message: 'Could not reliably fetch robots.txt.' })
     }
 
     return { score: clampScore(score), findings, recommendations }
@@ -146,10 +146,10 @@ export function analyzeAiCrawlerAccess(context: AuditContext): AnalysisResult {
     if (allowed) {
       _allowedCount += 1
       score += crawler.points
-      findings.push({ type: 'found', message: `${crawler.name} is allowed by robots.txt.` })
+      findings.push({ type: 'found', code: 'ai-crawler-access.crawler.allowed', message: `${crawler.name} is allowed by robots.txt.` })
     } else {
       blockedBots.push(crawler.name)
-      findings.push({ type: 'missing', message: `${crawler.name} is blocked by robots.txt.` })
+      findings.push({ type: 'missing', code: 'ai-crawler-access.crawler.blocked', message: `${crawler.name} is blocked by robots.txt.` })
     }
   }
 
@@ -160,14 +160,14 @@ export function analyzeAiCrawlerAccess(context: AuditContext): AnalysisResult {
   // Bonus for explicit sitemap directive
   if (robotsTxt.toLowerCase().includes('sitemap:')) {
     score += 18
-    findings.push({ type: 'found', message: 'Sitemap directive found in robots.txt.' })
+    findings.push({ type: 'found', code: 'ai-crawler-access.sitemap.found', message: 'Sitemap directive found in robots.txt.' })
   }
 
   // Content Signals — machine-readable AI usage preferences in robots.txt
   // (specification.website: content-signals).
   if (/^\s*content-signal\s*:/im.test(robotsTxt)) {
     score += 8
-    findings.push({ type: 'found', message: 'robots.txt declares Content-Signal directives — AI search/input/train preferences are machine-readable.' })
+    findings.push({ type: 'found', code: 'ai-crawler-access.content-signal.found', message: 'robots.txt declares Content-Signal directives — AI search/input/train preferences are machine-readable.' })
   } else {
     recommendations.push(
       `Declare AI usage preferences with a Content-Signal directive in robots.txt (e.g. "Content-Signal: search=yes, ai-input=yes, ai-train=no"). ${specCitation('content-signals')}`,

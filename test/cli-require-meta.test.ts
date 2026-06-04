@@ -43,7 +43,9 @@ describe('hasMissingMetaDescription', () => {
   it('returns true when technical-seo has a missing-meta-description finding', () => {
     expect(
       hasMissingMetaDescription([
-        technicalSeoFactor([{ type: 'missing', message: 'No meta description found.' }]),
+        technicalSeoFactor([
+          { type: 'missing', code: 'technical-seo.meta-description.missing', message: 'No meta description found.' },
+        ]),
       ]),
     ).toBe(true)
   })
@@ -52,7 +54,7 @@ describe('hasMissingMetaDescription', () => {
     expect(
       hasMissingMetaDescription([
         technicalSeoFactor([
-          { type: 'found', message: 'Meta description present (152 chars).' },
+          { type: 'found', code: 'technical-seo.meta-description.present', message: 'Meta description present (152 chars).' },
         ]),
       ]),
     ).toBe(false)
@@ -64,6 +66,7 @@ describe('hasMissingMetaDescription', () => {
         technicalSeoFactor([
           {
             type: 'info',
+            code: 'technical-seo.meta-description.short',
             message: 'Meta description is too short (90 chars; target 150–160): "..."',
           },
         ]),
@@ -71,11 +74,11 @@ describe('hasMissingMetaDescription', () => {
     ).toBe(false)
   })
 
-  it('returns false when finding type is missing but unrelated message', () => {
+  it('returns false when a different finding is missing but the meta-description code is absent', () => {
     expect(
       hasMissingMetaDescription([
         technicalSeoFactor([
-          { type: 'missing', message: 'No canonical tag found.' },
+          { type: 'missing', code: 'technical-seo.canonical.missing', message: 'No canonical tag found.' },
         ]),
       ]),
     ).toBe(false)

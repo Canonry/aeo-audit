@@ -1,10 +1,14 @@
 import { AeoAuditError } from './errors.js'
+import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { runAeoAudit } from './index.js'
+import { SCHEMA_VERSION } from './schema.js'
 import { scoreToGrade } from './scoring.js'
 import type {
   AuditReport,
+  CriticalDefectGroup,
   CrossCuttingIssue,
+  PrioritizedFix,
   RunAeoAuditOptions,
   SitemapAuditOptions,
   SitemapAuditReport,
@@ -322,14 +326,65 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
   return issues
 }
 
-function buildPrioritizedFixes(issues: CrossCuttingIssue[], totalPages: number): string[] {
-  return issues
-    .slice(0, 5)
-    .map((issue) => {
-      const pct = Math.round((issue.affectedPages / totalPages) * 100)
-      const rec = issue.topRecommendations[0] || 'Review and improve this factor.'
-      return `${issue.factorName} (avg ${issue.avgGrade}, affects ${pct}% of pages): ${rec}`
+function buildPrioritizedFixes(
+  issues: CrossCuttingIssue[],
+  totalPages: number,
+  criticalDefects: CriticalDefectGroup[] = [],
+): PrioritizedFix[] {
+  const pct = (n: number): number => (totalPages > 0 ? Math.round((n / totalPages) * 100) : 0)
+
+  // Lead with high-impact binary defects (issue #42). These are excluded from the
+  // prevalence ranking below because they typically hit only one or two pages, but
+  // they're unambiguous and one-line-fixable, so they belong at the top. Only
+  // critical-severity defects are promoted; warnings (e.g. a missing meta
+  // description) already flow into the prevalence ranking via factor recommendations.
+  const criticalFixes: PrioritizedFix[] = criticalDefects
+    .filter((group) => group.severity === 'critical')
+    .map((group): PrioritizedFix => {
+      const affectedPages = group.pages.map((p) => p.url)
+      const affectsHomepage = group.pages.some((p) => p.isHomepage)
+      const count = affectedPages.length
+      return {
+        kind: 'critical-defect',
+        id: group.id,
+        title: group.title,
+        recommendation: group.recommendation,
+        severity: group.severity,
+        affectedPages,
+        affectsHomepage,
+        prevalencePct: pct(count),
+        summary: `${group.title} (${group.severity}) — ${count} page${count === 1 ? '' : 's'}${affectsHomepage ? ', incl. homepage' : ''}: ${group.recommendation}`,
+      }
     })
+
+  // Report every cross-cutting issue, ordered by prevalence — not a top-N slice.
+  // A fix the report computed must reach the report; truncating the tail silently
+  // drops real issues a consumer reading only this section would never see.
+  const crossCuttingFixes: PrioritizedFix[] = issues.map((issue): PrioritizedFix => {
+    const top = issue.topIssues[0]
+    const recommendation = issue.topRecommendations[0] ?? top?.recommendation ?? 'Review and improve this factor.'
+    // Union every recommendation's pages — not just the top one's — so reach,
+    // prevalence, and the homepage flag describe the whole factor, which is what
+    // the entry is identified by (factorId / factorName). Sorted homepage-first.
+    const affectedPages = [...new Set(issue.topIssues.flatMap((d) => d.affectedUrls))].sort(
+      (a, b) => Number(isHomepageUrl(b)) - Number(isHomepageUrl(a)) || a.localeCompare(b),
+    )
+    const affectsHomepage = affectedPages.some(isHomepageUrl)
+    const count = affectedPages.length
+    return {
+      kind: 'cross-cutting',
+      id: issue.factorId,
+      title: issue.factorName,
+      recommendation,
+      affectedPages,
+      affectsHomepage,
+      prevalencePct: pct(count),
+      avgGrade: issue.avgGrade,
+      summary: `${issue.factorName} (avg ${issue.avgGrade}) — ${count} page${count === 1 ? '' : 's'}: ${recommendation}`,
+    }
+  })
+
+  return [...criticalFixes, ...crossCuttingFixes]
 }
 
 export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptions = {}): Promise<SitemapAuditReport> {
@@ -430,6 +485,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
             status: 'success',
             factors: report.factors,
             metadata: report.metadata,
+            priority: entry.priority,
           },
           report,
         }
@@ -442,6 +498,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
             overallGrade: 'F',
             status: 'error',
             error: message,
+            priority: entry.priority,
           },
           report: null,
         }
@@ -460,10 +517,19 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     ? Math.round(successScores.reduce((a, b) => a + b, 0) / successScores.length)
     : 0
 
+  // Map each successful page's final URL to its sitemap priority so the critical
+  // defect rollup can rank affected pages by importance (issue #42).
+  const priorityByUrl = new Map<string, number | undefined>()
+  for (const page of pageResults) {
+    if (page.status === 'success') priorityByUrl.set(page.url, page.priority)
+  }
+
+  const criticalDefects = buildCriticalDefects(successReports, priorityByUrl)
   const crossCuttingIssues = buildCrossCuttingIssues(successReports)
-  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length)
+  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length, criticalDefects)
 
   return {
+    schemaVersion: SCHEMA_VERSION,
     sitemapUrl,
     auditedAt: new Date().toISOString(),
     pagesDiscovered: discovered,
@@ -475,6 +541,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     aggregateScore,
     aggregateGrade: scoreToGrade(aggregateScore),
     pages: pageResults,
+    criticalDefects,
     crossCuttingIssues,
     prioritizedFixes,
   }

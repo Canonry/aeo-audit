@@ -21,6 +21,8 @@ import { analyzeSnippetEligibility } from './analyzers/snippet-eligibility.js'
 import { analyzeAgentSkillExposure } from './analyzers/agent-skill-exposure.js'
 import { analyzeLighthouse } from './analyzers/lighthouse.js'
 import { getVisibleText, parseJsonLdScripts, countWords } from './analyzers/helpers.js'
+import { detectCriticalDefects } from './critical-defects.js'
+import { SCHEMA_VERSION } from './schema.js'
 import { FACTOR_DEFINITIONS, OPTIONAL_FACTOR_DEFINITIONS, scoreFactors } from './scoring.js'
 import type {
   Analyzer,
@@ -34,10 +36,22 @@ import type {
 
 export { runSitemapAudit } from './sitemap.js'
 export { runStaticAudit } from './static-audit.js'
+export { detectCriticalDefects, buildCriticalDefects } from './critical-defects.js'
+export { agentSummaryFromAudit, agentSummaryFromSitemap } from './agent-summary.js'
+export { SCHEMA_VERSION } from './schema.js'
 export { detectPlatform, detectPlatformBatch } from './detect-platform.js'
 export { SPEC_RULES, FACTOR_SPEC_RULES, SPEC_SITE, specCitation } from './spec-references.js'
 export type { SpecRule, SpecRuleId, SpecStatus } from './spec-references.js'
 export type { SitemapAuditReport, SitemapAuditOptions } from './types.js'
+export type {
+  AgentSummary,
+  CriticalDefect,
+  CriticalDefectAffectedPage,
+  CriticalDefectGroup,
+  CriticalDefectId,
+  CriticalDefectSeverity,
+  PrioritizedFix,
+} from './types.js'
 export type { StaticAuditOptions, StaticAuditResult } from './static-audit.js'
 export type {
   BatchDetectionEntry,
@@ -175,6 +189,7 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
   const { overallScore, overallGrade, factors } = scoreFactors(rawFactorResults)
 
   return {
+    schemaVersion: SCHEMA_VERSION,
     url: page.inputUrl,
     finalUrl: page.finalUrl,
     auditedAt: new Date().toISOString(),
@@ -182,6 +197,7 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
     overallGrade,
     summary: buildSummary(factors, overallGrade),
     factors,
+    criticalDefects: detectCriticalDefects(context),
     metadata: {
       fetchTimeMs: page.fetchTimeMs,
       pageTitle: context.pageTitle,

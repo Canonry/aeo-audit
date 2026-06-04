@@ -49,17 +49,17 @@ export function analyzeContentFreshness(context: AuditContext): AnalysisResult {
 
     if (months <= 3) {
       score += 35
-      findings.push({ type: 'found', message: 'Structured data indicates recent updates (<= 3 months).' })
+      findings.push({ type: 'found', code: 'content-freshness.date-modified.recent', message: 'Structured data indicates recent updates (<= 3 months).' })
     } else if (months <= 12) {
       score += 22
-      findings.push({ type: 'info', message: 'Structured data indicates updates within the last year.' })
+      findings.push({ type: 'info', code: 'content-freshness.date-modified.moderate', message: 'Structured data indicates updates within the last year.' })
     } else {
       score += 10
-      findings.push({ type: 'info', message: 'Structured data suggests content may be stale.' })
+      findings.push({ type: 'info', code: 'content-freshness.date-modified.stale', message: 'Structured data suggests content may be stale.' })
       recommendations.push('Refresh key pages and update dateModified in structured data.')
     }
   } else {
-    findings.push({ type: 'missing', message: 'No dateModified field detected in structured data.' })
+    findings.push({ type: 'missing', code: 'content-freshness.date-modified.missing', message: 'No dateModified field detected in structured data.' })
     recommendations.push('Add dateModified to relevant structured data entities.')
   }
 
@@ -69,13 +69,13 @@ export function analyzeContentFreshness(context: AuditContext): AnalysisResult {
     const months = monthsAgo(parsedHeaderDate)
     if (months <= 3) {
       score += 20
-      findings.push({ type: 'found', message: 'HTTP Last-Modified header is recent.' })
+      findings.push({ type: 'found', code: 'content-freshness.last-modified.recent', message: 'HTTP Last-Modified header is recent.' })
     } else {
       score += 12
-      findings.push({ type: 'info', message: 'HTTP Last-Modified header exists but is older.' })
+      findings.push({ type: 'info', code: 'content-freshness.last-modified.older', message: 'HTTP Last-Modified header exists but is older.' })
     }
   } else {
-    findings.push({ type: 'info', message: 'No usable Last-Modified response header detected.' })
+    findings.push({ type: 'info', code: 'content-freshness.last-modified.missing', message: 'No usable Last-Modified response header detected.' })
   }
 
   const sitemapState = context.auxiliary?.sitemapXml?.state
@@ -87,24 +87,24 @@ export function analyzeContentFreshness(context: AuditContext): AnalysisResult {
       const months = monthsAgo(sitemapDate)
       if (months <= 3) {
         score += 22
-        findings.push({ type: 'found', message: 'Sitemap lastmod indicates recent updates.' })
+        findings.push({ type: 'found', code: 'content-freshness.sitemap.recent', message: 'Sitemap lastmod indicates recent updates.' })
       } else {
         score += 12
-        findings.push({ type: 'info', message: 'Sitemap lastmod exists but may be stale.' })
+        findings.push({ type: 'info', code: 'content-freshness.sitemap.stale', message: 'Sitemap lastmod exists but may be stale.' })
       }
     } else {
       score += 4
-      findings.push({ type: 'info', message: 'Sitemap found but no matching lastmod for this URL.' })
+      findings.push({ type: 'info', code: 'content-freshness.sitemap.no-match', message: 'Sitemap found but no matching lastmod for this URL.' })
       recommendations.push('Add a <lastmod> entry for this URL in sitemap.xml.')
     }
   } else if (sitemapState === 'timeout') {
     score += 8
-    findings.push({ type: 'timeout', message: 'Could not reliably fetch sitemap.xml.' })
+    findings.push({ type: 'timeout', code: 'content-freshness.sitemap.timeout', message: 'Could not reliably fetch sitemap.xml.' })
   } else if (sitemapState === 'unreachable') {
     score += 8
-    findings.push({ type: 'unreachable', message: 'Could not reliably fetch sitemap.xml.' })
+    findings.push({ type: 'unreachable', code: 'content-freshness.sitemap.unreachable', message: 'Could not reliably fetch sitemap.xml.' })
   } else {
-    findings.push({ type: 'missing', message: 'sitemap.xml is missing or inaccessible.' })
+    findings.push({ type: 'missing', code: 'content-freshness.sitemap.missing', message: 'sitemap.xml is missing or inaccessible.' })
   }
 
   const yearMatch = context.textContent.match(/(?:©|copyright)?\s*(20\d{2})/i)
@@ -113,14 +113,14 @@ export function analyzeContentFreshness(context: AuditContext): AnalysisResult {
     const currentYear = new Date().getUTCFullYear()
     if (year >= currentYear - 1) {
       score += 23
-      findings.push({ type: 'found', message: `Recent copyright year detected (${year}).` })
+      findings.push({ type: 'found', code: 'content-freshness.copyright.recent', message: `Recent copyright year detected (${year}).` })
     } else {
       score += 12
-      findings.push({ type: 'info', message: `Older copyright year detected (${year}).` })
+      findings.push({ type: 'info', code: 'content-freshness.copyright.older', message: `Older copyright year detected (${year}).` })
     }
   } else {
     score += 6
-    findings.push({ type: 'info', message: 'No copyright year signal detected.' })
+    findings.push({ type: 'info', code: 'content-freshness.copyright.missing', message: 'No copyright year signal detected.' })
   }
 
   return {

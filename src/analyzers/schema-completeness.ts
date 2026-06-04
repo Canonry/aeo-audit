@@ -51,7 +51,7 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
   const detection = detectSiteCategory(context)
 
   if (!structuredData.length) {
-    findings.push({ type: 'missing', message: 'No structured data found to evaluate completeness.' })
+    findings.push({ type: 'missing', code: 'schema-completeness.schema.none', message: 'No structured data found to evaluate completeness.' })
     // Issue #33: tailor the missing-schema recommendation to the detected
     // category so the suggestion is actually applicable.
     recommendations.push(
@@ -79,15 +79,15 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
     const pct = best.score
     if (pct >= 0.75) {
       checksScore += 100
-      findings.push({ type: 'found', message: `LocalBusiness schema is ${Math.round(pct * 100)}% complete.` })
+      findings.push({ type: 'found', code: 'schema-completeness.local-business.strong', message: `LocalBusiness schema is ${Math.round(pct * 100)}% complete.` })
     } else if (pct >= 0.5) {
       checksScore += 60
       const missing = LOCAL_BUSINESS_PROPS.filter((p) => !best.item?.[p])
-      findings.push({ type: 'info', message: `LocalBusiness schema is ${Math.round(pct * 100)}% complete.` })
+      findings.push({ type: 'info', code: 'schema-completeness.local-business.partial', message: `LocalBusiness schema is ${Math.round(pct * 100)}% complete.` })
       recommendations.push(`Add missing LocalBusiness properties: ${missing.join(', ')}.`)
     } else {
       checksScore += 25
-      findings.push({ type: 'missing', message: `LocalBusiness schema is only ${Math.round(pct * 100)}% complete.` })
+      findings.push({ type: 'missing', code: 'schema-completeness.local-business.low', message: `LocalBusiness schema is only ${Math.round(pct * 100)}% complete.` })
       recommendations.push('Expand LocalBusiness schema with address, telephone, openingHours, geo, etc.')
     }
   }
@@ -110,15 +110,15 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
 
         if (substantiveAnswers.length >= FAQ_MIN_PAIRS) {
           checksScore += 100
-          findings.push({ type: 'found', message: `FAQPage has ${questions.length} Q&A pairs with substantive answers.` })
+          findings.push({ type: 'found', code: 'schema-completeness.faqpage.strong', message: `FAQPage has ${questions.length} Q&A pairs with substantive answers.` })
         } else {
           checksScore += 65
-          findings.push({ type: 'info', message: `FAQPage has ${questions.length} questions but some answers are thin.` })
+          findings.push({ type: 'info', code: 'schema-completeness.faqpage.partial', message: `FAQPage has ${questions.length} questions but some answers are thin.` })
           recommendations.push('Expand FAQ answers to at least 15 words each for citation readiness.')
         }
       } else {
         checksScore += 35
-        findings.push({ type: 'info', message: `FAQPage has only ${questions.length} Q&A pair(s) (recommend >= ${FAQ_MIN_PAIRS}).` })
+        findings.push({ type: 'info', code: 'schema-completeness.faqpage.low', message: `FAQPage has only ${questions.length} Q&A pair(s) (recommend >= ${FAQ_MIN_PAIRS}).` })
         recommendations.push(`Add at least ${FAQ_MIN_PAIRS} question-answer pairs to FAQPage schema.`)
       }
     }
@@ -135,10 +135,10 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
 
       if (stepsWithText.length >= HOWTO_MIN_STEPS) {
         checksScore += 100
-        findings.push({ type: 'found', message: `HowTo schema has ${stepsWithText.length} detailed steps.` })
+        findings.push({ type: 'found', code: 'schema-completeness.howto.strong', message: `HowTo schema has ${stepsWithText.length} detailed steps.` })
       } else {
         checksScore += 40
-        findings.push({ type: 'info', message: `HowTo schema has only ${stepsWithText.length} step(s).` })
+        findings.push({ type: 'info', code: 'schema-completeness.howto.partial', message: `HowTo schema has only ${stepsWithText.length} step(s).` })
         recommendations.push(`Add at least ${HOWTO_MIN_STEPS} steps with descriptive text to HowTo schema.`)
       }
     }
@@ -156,15 +156,15 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
     const pct = best.score
     if (pct >= 0.7) {
       checksScore += 100
-      findings.push({ type: 'found', message: `Organization schema is ${Math.round(pct * 100)}% complete.` })
+      findings.push({ type: 'found', code: 'schema-completeness.organization.strong', message: `Organization schema is ${Math.round(pct * 100)}% complete.` })
     } else if (pct >= 0.4) {
       checksScore += 55
       const missing = ORGANIZATION_PROPS.filter((p) => !best.item?.[p])
-      findings.push({ type: 'info', message: `Organization schema is ${Math.round(pct * 100)}% complete.` })
+      findings.push({ type: 'info', code: 'schema-completeness.organization.partial', message: `Organization schema is ${Math.round(pct * 100)}% complete.` })
       recommendations.push(`Add missing Organization properties: ${missing.join(', ')}.`)
     } else {
       checksScore += 20
-      findings.push({ type: 'missing', message: `Organization schema is only ${Math.round(pct * 100)}% complete.` })
+      findings.push({ type: 'missing', code: 'schema-completeness.organization.low', message: `Organization schema is only ${Math.round(pct * 100)}% complete.` })
     }
   }
 
@@ -173,10 +173,10 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
     const avgProps = structuredData.reduce((sum, item) => sum + Object.keys(item).length, 0) / structuredData.length
     if (avgProps >= 8) {
       score = 70
-      findings.push({ type: 'info', message: 'Structured data has reasonable depth but uses no recognized high-priority schema types.' })
+      findings.push({ type: 'info', code: 'schema-completeness.schema-depth.moderate', message: 'Structured data has reasonable depth but uses no recognized high-priority schema types.' })
     } else {
       score = 30
-      findings.push({ type: 'info', message: 'Structured data present but shallow and uses no recognized schema types.' })
+      findings.push({ type: 'info', code: 'schema-completeness.schema-depth.low', message: 'Structured data present but shallow and uses no recognized schema types.' })
     }
 
     // Issue #33: recommendation reflects the detected site category instead of

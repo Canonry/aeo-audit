@@ -52,6 +52,7 @@ If no mode is provided, default to `audit`.
 - `audit https://example.com --sitemap`
 - `audit https://example.com --sitemap --limit 10`
 - `audit https://example.com --sitemap --top-issues`
+- `audit https://example.com --sitemap --format agent` (slim decision for agents)
 - `audit https://example.com --lighthouse`
 - `audit https://example.com --require-meta`
 - `audit https://example.com --sitemap --require-meta`
@@ -108,7 +109,7 @@ npx @ainyc/aeo-audit@1 "<url>" --sitemap --top-issues --format json
 Flags:
 - `--sitemap [url]` — auto-discover the sitemap (tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`) or provide an explicit URL
 - `--limit <n>` — cap pages audited (default 200, sorted by sitemap priority)
-- `--top-issues` — skip per-page output, show only cross-cutting patterns
+- `--top-issues` — skip per-page output, show only cross-cutting patterns and critical defects
 - `--rewrite-sitemap-origin` — rewrite every `<loc>`'s origin to the target URL's origin (preserving path/query) before crawling. Use when the sitemap hardcodes the prod/canonical domain but you want to audit a staging host or local dev server.
 - `--require-meta` — force exit `1` if any audited page is missing `<meta name="description">`, regardless of overall score (useful as a CI gate)
 - `--include-geo` / `--include-agent-skills` — honored per page in sitemap mode (adds the optional geographic-signals / agent-skill-exposure factors). `--lighthouse` is not available with `--sitemap`.
@@ -117,9 +118,17 @@ Pages are audited with bounded concurrency (5 in flight) to avoid hammering the 
 
 Returns:
 - Per-page scores and grades
+- **Critical defects** — binary, one-line-fix structural defects (an `<h1>` count other than one, a missing `<title>`, a missing meta description) surfaced **regardless of how few pages they affect**, with the offending pages named (homepage and high sitemap-`priority` pages first). These would otherwise be averaged into a passing factor grade; the JSON field is `criticalDefects` and critical-severity ones are also promoted to the top of `prioritizedFixes`. Shown even with `--top-issues`.
 - Cross-cutting issues (factors failing across multiple pages)
 - Aggregate score and grade
-- Prioritized fixes ranked by site-wide impact
+- Prioritized fixes (critical defects first, then ranked by site-wide impact)
+
+#### Machine-readable output (for agents)
+
+Use `--format json` for the full report, or **`--format agent`** for just the decision: `{ schemaVersion, tool, mode, url, score, grade, pass, criticalDefectCount, issues }`, where `issues` is the ranked `prioritizedFixes` and the per-factor/per-page detail is omitted. Prefer `--format agent` when you only need to decide and act. Key fields for acting on the result without parsing prose:
+- `schemaVersion` (on every audit report) versions the JSON shape independently of the package version — pin to it and treat a major bump as breaking; absence means a pre-2.0 report.
+- `prioritizedFixes` is a ranked array of objects, each with a stable `id`, `kind`, optional `severity`, the complete `affectedPages` list (never truncated), `affectsHomepage`, `prevalencePct`, and a human `summary`. It's the pre-computed to-do list — no need to re-rank factor scores yourself.
+- Stable identifiers everywhere — `criticalDefects[].id`, `prioritizedFixes[].id`, and every factor finding's `code` (e.g. `technical-seo.h1.multiple`) — let integrations key on codes rather than message strings.
 
 #### Auxiliary File Diagnostics
 
