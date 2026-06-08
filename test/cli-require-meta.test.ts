@@ -11,8 +11,6 @@ function technicalSeoFactor(
     name: 'Technical SEO',
     weight: 5,
     score: 50,
-    grade: 'D',
-    status: 'partial',
     findings,
     recommendations: [],
   }
@@ -31,8 +29,6 @@ describe('hasMissingMetaDescription', () => {
           name: 'Structured Data',
           weight: 10,
           score: 80,
-          grade: 'B',
-          status: 'pass',
           findings: [],
           recommendations: [],
         },

@@ -18,7 +18,6 @@ const report = await runAeoAudit('https://example.com/specific-page', {
                                // Scoped to that exact host; redirects/sitemap entries to other private hosts stay blocked.
 })
 
-console.log(report.overallGrade) // 'A+'
 console.log(report.overallScore) // 98
 console.log(report.factors)      // Array of factor results with scores, findings, recommendations
 ```
@@ -33,8 +32,8 @@ const report = await runSitemapAudit('https://example.com', {
   factors: ['schema-validity', 'structured-data'],  // Optional subset
 })
 
-console.log(report.schemaVersion)      // '1.1', JSON shape version (see "Machine-readable output")
-console.log(report.aggregateGrade)     // 'B+'
+console.log(report.schemaVersion)      // '2.0', JSON shape version (see "Machine-readable output")
+console.log(report.aggregateScore)     // 84
 console.log(report.pagesAudited)       // 22
 console.log(report.criticalDefects)    // Binary per-page defects (multiple/missing H1, missing title/meta), grouped by defect
 console.log(report.crossCuttingIssues) // Per-factor rollup with affectedUrls for every recommendation
@@ -43,7 +42,7 @@ console.log(report.prioritizedFixes)   // Ranked PrioritizedFix[]: critical defe
 
 Each entry in `crossCuttingIssues[].topIssues` carries a `recommendation` plus the exact `affectedUrls` so you can attribute each problem to specific pages, e.g. "FAQPage duplicate" pointing at every blog post that has it.
 
-`criticalDefects` surfaces **binary structural defects by impact, not prevalence**. The cross-cutting rollup ranks by how many pages a factor affects, so an unambiguous one-line-fix defect on a single important page (a homepage split across four `<h1>`s, or a `/contact-us` page with none) would otherwise be averaged into a passing factor grade and excluded from `prioritizedFixes`. Each group names the offending pages (homepage and high sitemap-`priority` pages first), and the critical-severity ones lead `prioritizedFixes`.
+`criticalDefects` surfaces **binary structural defects by impact, not prevalence**. The cross-cutting rollup ranks by how many pages a factor affects, so an unambiguous one-line-fix defect on a single important page (a homepage split across four `<h1>`s, or a `/contact-us` page with none) would otherwise be averaged into a passing factor score and excluded from `prioritizedFixes`. Each group names the offending pages (homepage and high sitemap-`priority` pages first), and the critical-severity ones lead `prioritizedFixes`.
 
 ### Machine-readable output (for AI agents)
 
@@ -64,9 +63,9 @@ const result = await runStaticAudit('./out', {
 })
 
 if (result.kind === 'single') {
-  console.log(result.report.overallGrade)   // single .html file → AuditReport
+  console.log(result.report.overallScore)   // single .html file → AuditReport
 } else {
-  console.log(result.report.aggregateGrade) // directory → SitemapAuditReport shape
+  console.log(result.report.aggregateScore) // directory → SitemapAuditReport shape
   console.log(result.report.criticalDefects)
   console.log(result.report.crossCuttingIssues)
 }

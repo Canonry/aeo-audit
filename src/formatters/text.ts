@@ -15,19 +15,18 @@ import type {
   PlatformCategory,
   PlatformConfidence,
   PlatformDetectionReport,
-  ScoredFactor,
   SitemapAuditReport,
 } from '../types.js'
 
-function gradeColor(grade: string): string {
-  if (grade.startsWith('A')) return GREEN
-  if (grade.startsWith('B')) return YELLOW
+function scoreColor(score: number): string {
+  if (score >= 70) return GREEN
+  if (score >= 40) return YELLOW
   return RED
 }
 
-function statusIcon(status: ScoredFactor['status']): string {
-  if (status === 'pass') return `${GREEN}✓${RESET}`
-  if (status === 'partial') return `${YELLOW}~${RESET}`
+function scoreIcon(score: number): string {
+  if (score >= 70) return `${GREEN}✓${RESET}`
+  if (score >= 40) return `${YELLOW}~${RESET}`
   return `${RED}✗${RESET}`
 }
 
@@ -40,12 +39,12 @@ function bar(score: number, width = 20): string {
 export function formatText(report: AuditReport): string {
   const lines = []
 
-  const gc = gradeColor(report.overallGrade)
+  const sc = scoreColor(report.overallScore)
   lines.push(``)
   lines.push(`${BOLD}AEO Audit Report${RESET}`)
   lines.push(`${DIM}${report.finalUrl}${RESET}`)
   lines.push(``)
-  lines.push(`  ${BOLD}Grade:${RESET} ${gc}${BOLD}${report.overallGrade}${RESET}  ${bar(report.overallScore, 30)} ${report.overallScore}/100`)
+  lines.push(`  ${BOLD}Score:${RESET} ${sc}${BOLD}${report.overallScore}/100${RESET}  ${bar(report.overallScore, 30)}`)
   lines.push(``)
   lines.push(`${BOLD}Factors${RESET}`)
   lines.push(`${'─'.repeat(70)}`)
@@ -53,10 +52,10 @@ export function formatText(report: AuditReport): string {
   const sorted = [...report.factors].sort((a, b) => b.score - a.score)
 
   for (const factor of sorted) {
-    const icon = statusIcon(factor.status)
-    const fc = gradeColor(factor.grade)
+    const icon = scoreIcon(factor.score)
+    const fc = scoreColor(factor.score)
     const name = factor.name.padEnd(30)
-    lines.push(`  ${icon} ${name} ${bar(factor.score)} ${fc}${factor.grade.padEnd(3)}${RESET} ${DIM}(${factor.weight}%)${RESET}`)
+    lines.push(`  ${icon} ${name} ${bar(factor.score)} ${fc}${String(factor.score).padStart(3)}${RESET} ${DIM}(${factor.weight}%)${RESET}`)
   }
 
   lines.push(`${'─'.repeat(70)}`)
@@ -87,12 +86,12 @@ export function formatText(report: AuditReport): string {
 export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = false): string {
   const lines = []
 
-  const gc = gradeColor(report.aggregateGrade)
+  const sc = scoreColor(report.aggregateScore)
   lines.push(``)
   lines.push(`${BOLD}AEO Sitemap Audit Report${RESET}`)
   lines.push(`${DIM}${report.sitemapUrl}${RESET}`)
   lines.push(``)
-  lines.push(`  ${BOLD}Aggregate Grade:${RESET} ${gc}${BOLD}${report.aggregateGrade}${RESET}  ${bar(report.aggregateScore, 30)} ${report.aggregateScore}/100`)
+  lines.push(`  ${BOLD}Aggregate Score:${RESET} ${sc}${BOLD}${report.aggregateScore}/100${RESET}  ${bar(report.aggregateScore, 30)}`)
   lines.push(`  ${DIM}${report.pagesAudited} pages audited of ${report.pagesDiscovered} discovered (${report.pagesFiltered} filtered, ${report.pagesTruncated} truncated by --limit ${report.effectiveLimit})${RESET}`)
   if (report.pagesTruncated > 0) {
     lines.push(`  ${DIM}Note: ${report.pagesTruncated} additional pages skipped by --limit. Pass --limit ${Math.max(report.pagesDiscovered, 9999)} to audit them all.${RESET}`)
@@ -110,8 +109,8 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
         lines.push(`  ${RED}✗${RESET} ${url.padEnd(50)} ${RED}error${RESET}`)
       } else {
         const url = page.url.length > 50 ? page.url.slice(0, 47) + '...' : page.url
-        const pgc = gradeColor(page.overallGrade)
-        lines.push(`  ${statusIcon(page.overallScore >= 70 ? 'pass' : page.overallScore >= 40 ? 'partial' : 'fail')} ${url.padEnd(50)} ${bar(page.overallScore, 15)} ${pgc}${page.overallGrade.padEnd(3)}${RESET}`)
+        const pgc = scoreColor(page.overallScore)
+        lines.push(`  ${scoreIcon(page.overallScore)} ${url.padEnd(50)} ${bar(page.overallScore, 15)} ${pgc}${String(page.overallScore).padStart(3)}${RESET}`)
       }
     }
 
@@ -145,8 +144,8 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
 
     for (const issue of report.crossCuttingIssues) {
       const pct = Math.round((issue.affectedPages / issue.totalPages) * 100)
-      const igc = gradeColor(issue.avgGrade)
-      lines.push(`  ${igc}${issue.avgGrade.padEnd(3)}${RESET} ${issue.factorName.padEnd(32)} ${DIM}avg ${issue.avgScore}/100, affects ${pct}% of pages${RESET}`)
+      const igc = scoreColor(issue.avgScore)
+      lines.push(`  ${igc}${issue.factorName.padEnd(32)}${RESET} ${DIM}avg ${issue.avgScore}/100, affects ${pct}% of pages${RESET}`)
 
       for (const detail of issue.topIssues) {
         lines.push(`      ${DIM}• ${detail.recommendation}${RESET} ${DIM}(${detail.affectedUrls.length}/${issue.totalPages} pages)${RESET}`)
@@ -165,8 +164,8 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
     for (let i = 0; i < report.prioritizedFixes.length; i++) {
       const fix = report.prioritizedFixes[i]
       const tag = fix.severity ? `[${fix.severity === 'critical' ? RED : YELLOW}${fix.severity}${RESET}] ` : ''
-      const grade = fix.avgGrade ? `${DIM} avg ${fix.avgGrade}${RESET}` : ''
-      lines.push(`  ${CYAN}${i + 1}.${RESET} ${tag}${BOLD}${fix.title}${RESET}${grade} ${DIM}(${fix.prevalencePct}% of pages)${RESET}`)
+      const avg = fix.avgScore !== undefined ? `${DIM} avg ${fix.avgScore}/100${RESET}` : ''
+      lines.push(`  ${CYAN}${i + 1}.${RESET} ${tag}${BOLD}${fix.title}${RESET}${avg} ${DIM}(${fix.prevalencePct}% of pages)${RESET}`)
       lines.push(`     ${DIM}→ ${fix.recommendation}${RESET}`)
       // Spell out every affected page — agents and humans both need the full set.
       for (const url of fix.affectedPages) {

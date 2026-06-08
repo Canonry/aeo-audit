@@ -4,7 +4,7 @@
 
 **The most comprehensive open-source technical AEO (Answer Engine Optimization) audit tool.** Scores any website across 16 ranking factors that decide whether AI answer engines (ChatGPT, Perplexity, Gemini, Claude) will cite your content.
 
-- Grade any URL across **16 AEO factors**: structured data, `llms.txt`, E-E-A-T, extractability, snippet eligibility, and more. [Scoring](docs/scoring.md)
+- Score any URL across **16 AEO factors**: structured data, `llms.txt`, E-E-A-T, extractability, snippet eligibility, and more. [Scoring](docs/scoring.md)
 - Audit a **whole site** from its sitemap; per-page findings roll up into ranked fixes. [Sitemap mode](docs/cli.md#sitemap-mode)
 - Audit **built HTML offline** in CI: a `next export` / `dist` / `out` directory, no network. [Static output](docs/cli.md#static-output-mode)
 - Detect the **platform / CMS / framework**: WordPress, Webflow, Shopify, Next.js, Vercel. [Platform detection](docs/cli.md#platform-detection)
@@ -21,7 +21,7 @@ Website: [canonry.ai](https://canonry.ai)
 npx @ainyc/aeo-audit https://example.com
 ```
 
-Prints a graded report. Common variations:
+Prints a scored report. Common variations:
 
 ```bash
 # Every page in the sitemap, site-wide issues only
@@ -51,7 +51,7 @@ Modes: audit, fix, schema, `llms.txt`, monitor. See the [skill guide](docs/skill
 | Doc | What's in it |
 |---|---|
 | [CLI reference](docs/cli.md) | Every flag, mode, and exit code |
-| [Scoring](docs/scoring.md) | The 16 factors, weights, grading scale |
+| [Scoring](docs/scoring.md) | The 16 factors, weights, score bands |
 | [Programmatic API](docs/api.md) | `runAeoAudit`, `runSitemapAudit`, `runStaticAudit` |
 | [Skill](docs/skill.md) | `/aeo` modes and install |
 | [Changelog](CHANGELOG.md) | Release history |

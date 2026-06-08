@@ -3,7 +3,6 @@ import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { runAeoAudit } from './index.js'
 import { SCHEMA_VERSION } from './schema.js'
-import { scoreToGrade } from './scoring.js'
 import type {
   AuditReport,
   CriticalDefectGroup,
@@ -312,7 +311,6 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
       factorId,
       factorName: entry.name,
       avgScore,
-      avgGrade: scoreToGrade(avgScore),
       affectedPages,
       totalPages: successPages.length,
       topRecommendations: sortedIssues.slice(0, 3).map((i) => i.recommendation),
@@ -379,8 +377,8 @@ function buildPrioritizedFixes(
       affectedPages,
       affectsHomepage,
       prevalencePct: pct(count),
-      avgGrade: issue.avgGrade,
-      summary: `${issue.factorName} (avg ${issue.avgGrade}) — ${count} page${count === 1 ? '' : 's'}: ${recommendation}`,
+      avgScore: issue.avgScore,
+      summary: `${issue.factorName} (avg ${issue.avgScore}/100) — ${count} page${count === 1 ? '' : 's'}: ${recommendation}`,
     }
   })
 
@@ -481,7 +479,6 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
           pageResult: {
             url: report.finalUrl,
             overallScore: report.overallScore,
-            overallGrade: report.overallGrade,
             status: 'success',
             factors: report.factors,
             metadata: report.metadata,
@@ -495,7 +492,6 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
           pageResult: {
             url: entry.loc,
             overallScore: 0,
-            overallGrade: 'F',
             status: 'error',
             error: message,
             priority: entry.priority,
@@ -539,7 +535,6 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     pagesTruncated: truncated,
     effectiveLimit,
     aggregateScore,
-    aggregateGrade: scoreToGrade(aggregateScore),
     pages: pageResults,
     criticalDefects,
     crossCuttingIssues,

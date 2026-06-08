@@ -12,7 +12,7 @@ ClawHub package: [arberx/aeo](https://clawhub.ai/arberx/aeo)
 
 ## Modes
 
-- `audit`: grading and diagnosis
+- `audit`: scoring and diagnosis
 - `fix`: code changes after an audit
 - `schema`: JSON-LD validation
 - `llms`: generate `llms.txt` and `llms-full.txt`

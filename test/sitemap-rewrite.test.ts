@@ -25,7 +25,6 @@ function fakeReport(url: string) {
     finalUrl: url,
     auditedAt: '2026-01-01T00:00:00.000Z',
     overallScore: 90,
-    overallGrade: 'A-',
     summary: '',
     factors: [],
     metadata: {

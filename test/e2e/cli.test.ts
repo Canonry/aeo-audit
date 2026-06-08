@@ -179,10 +179,9 @@ test('compiled CLI returns the expected JSON report for the fixture site', async
   assert.equal(report.finalUrl, FIXTURE_ORIGIN)
   assert.equal(report.auditedAt, FIXED_NOW)
   assert.equal(report.overallScore, 76)
-  assert.equal(report.overallGrade, 'C')
   assert.equal(
     report.summary,
-    'Overall grade C. Strongest signals: AI-Readable Content, Schema Validity. Biggest opportunities: Schema Completeness, E-E-A-T Signals.',
+    'Overall score 76/100. Strongest signals: AI-Readable Content, Schema Validity. Biggest opportunities: Schema Completeness, E-E-A-T Signals.',
   )
   assert.deepEqual(report.metadata, {
     fetchTimeMs: 0,
@@ -200,27 +199,25 @@ test('compiled CLI returns the expected JSON report for the fixture site', async
     report.factors.map((factor) => ({
       id: factor.id,
       score: factor.score,
-      grade: factor.grade,
-      status: factor.status,
     })),
     [
-      { id: 'structured-data', score: 78, grade: 'C+', status: 'pass' },
-      { id: 'content-depth', score: 59, grade: 'F', status: 'partial' },
-      { id: 'ai-readable-content', score: 100, grade: 'A+', status: 'pass' },
-      { id: 'eeat-signals', score: 25, grade: 'F', status: 'fail' },
-      { id: 'faq-content', score: 82, grade: 'B-', status: 'pass' },
-      { id: 'citations', score: 66, grade: 'D', status: 'partial' },
-      { id: 'schema-completeness', score: 45, grade: 'F', status: 'partial' },
-      { id: 'schema-validity', score: 100, grade: 'A+', status: 'pass' },
-      { id: 'entity-consistency', score: 94, grade: 'A', status: 'pass' },
-      { id: 'content-freshness', score: 82, grade: 'B-', status: 'pass' },
-      { id: 'content-extractability', score: 48, grade: 'F', status: 'partial' },
-      { id: 'definition-blocks', score: 100, grade: 'A+', status: 'pass' },
-      { id: 'ai-crawler-access', score: 100, grade: 'A+', status: 'pass' },
-      { id: 'named-entities', score: 84, grade: 'B', status: 'pass' },
-      { id: 'technical-seo', score: 80, grade: 'B-', status: 'pass' },
-      { id: 'snippet-eligibility', score: 100, grade: 'A+', status: 'pass' },
-      { id: 'geographic-signals', score: 94, grade: 'A', status: 'pass' },
+      { id: 'structured-data', score: 78 },
+      { id: 'content-depth', score: 59 },
+      { id: 'ai-readable-content', score: 100 },
+      { id: 'eeat-signals', score: 25 },
+      { id: 'faq-content', score: 82 },
+      { id: 'citations', score: 66 },
+      { id: 'schema-completeness', score: 45 },
+      { id: 'schema-validity', score: 100 },
+      { id: 'entity-consistency', score: 94 },
+      { id: 'content-freshness', score: 82 },
+      { id: 'content-extractability', score: 48 },
+      { id: 'definition-blocks', score: 100 },
+      { id: 'ai-crawler-access', score: 100 },
+      { id: 'named-entities', score: 84 },
+      { id: 'technical-seo', score: 80 },
+      { id: 'snippet-eligibility', score: 100 },
+      { id: 'geographic-signals', score: 94 },
     ],
   )
 })

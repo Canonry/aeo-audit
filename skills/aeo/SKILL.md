@@ -37,7 +37,7 @@ npx @ainyc/aeo-audit@1 "<url>" [flags] --format json
 
 ## Modes
 
-- `audit`: grade and diagnose a site
+- `audit`: score and diagnose a site
 - `fix`: apply code changes after an audit
 - `schema`: validate JSON-LD and entity consistency
 - `llms`: create or improve `llms.txt` and `llms-full.txt`
@@ -84,7 +84,7 @@ Use for broad requests such as "audit this site" or "why am I not being cited?"
    npx @ainyc/aeo-audit@1 "<url>" [flags] --format json
    ```
 2. Return:
-   - Overall grade and score
+   - Overall score
    - Short summary
    - Factor breakdown
    - Top strengths
@@ -117,15 +117,15 @@ Flags:
 Pages are audited with bounded concurrency (5 in flight) to avoid hammering the target origin.
 
 Returns:
-- Per-page scores and grades
-- **Critical defects** — binary, one-line-fix structural defects (an `<h1>` count other than one, a missing `<title>`, a missing meta description) surfaced **regardless of how few pages they affect**, with the offending pages named (homepage and high sitemap-`priority` pages first). These would otherwise be averaged into a passing factor grade; the JSON field is `criticalDefects` and critical-severity ones are also promoted to the top of `prioritizedFixes`. Shown even with `--top-issues`.
+- Per-page scores
+- **Critical defects** — binary, one-line-fix structural defects (an `<h1>` count other than one, a missing `<title>`, a missing meta description) surfaced **regardless of how few pages they affect**, with the offending pages named (homepage and high sitemap-`priority` pages first). These would otherwise be averaged into a passing factor score; the JSON field is `criticalDefects` and critical-severity ones are also promoted to the top of `prioritizedFixes`. Shown even with `--top-issues`.
 - Cross-cutting issues (factors failing across multiple pages)
-- Aggregate score and grade
+- Aggregate score
 - Prioritized fixes (critical defects first, then ranked by site-wide impact)
 
 #### Machine-readable output (for agents)
 
-Use `--format json` for the full report, or **`--format agent`** for just the decision: `{ schemaVersion, tool, mode, url, score, grade, pass, criticalDefectCount, issues }`, where `issues` is the ranked `prioritizedFixes` and the per-factor/per-page detail is omitted. Prefer `--format agent` when you only need to decide and act. Key fields for acting on the result without parsing prose:
+Use `--format json` for the full report, or **`--format agent`** for just the decision: `{ schemaVersion, tool, mode, url, score, pass, criticalDefectCount, issues }`, where `issues` is the ranked `prioritizedFixes` and the per-factor/per-page detail is omitted. Prefer `--format agent` when you only need to decide and act. Key fields for acting on the result without parsing prose:
 - `schemaVersion` (on every audit report) versions the JSON shape independently of the package version — pin to it and treat a major bump as breaking; absence means a pre-2.0 report.
 - `prioritizedFixes` is a ranked array of objects, each with a stable `id`, `kind`, optional `severity`, the complete `affectedPages` list (never truncated), `affectsHomepage`, `prevalencePct`, and a human `summary`. It's the pre-computed to-do list — no need to re-rank factor scores yourself.
 - Stable identifiers everywhere — `criticalDefects[].id`, `prioritizedFixes[].id`, and every factor finding's `code` (e.g. `technical-seo.h1.multiple`) — let integrations key on codes rather than message strings.
@@ -220,7 +220,7 @@ Use when the user wants code changes applied after the audit.
    ```bash
    npx @ainyc/aeo-audit@1 "<url>" [flags] --format json
    ```
-2. Find factors with status `partial` or `fail`.
+2. Find factors scoring below 70 (lowest first).
 3. Apply targeted fixes in the current codebase.
 4. Prioritize:
    - Structured data and schema completeness

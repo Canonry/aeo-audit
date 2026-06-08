@@ -134,7 +134,7 @@ test('structured data analyzer detects nested HowTo schema', () => {
   expect(howToFinding?.type).toBe('found')
 })
 
-test('scoring engine computes grades and statuses', () => {
+test('scoring engine clamps factor scores and computes a weighted overall', () => {
   const scored = scoreFactors([
     {
       id: 'structured-data',
@@ -154,7 +154,7 @@ test('scoring engine computes grades and statuses', () => {
     },
   ])
 
-  expect(scored.factors[0].status).toBe('pass')
-  expect(scored.factors[1].status).toBe('fail')
-  expect(typeof scored.overallGrade).toBe('string')
+  expect(scored.factors[0].score).toBe(80)
+  expect(scored.factors[1].score).toBe(20)
+  expect(typeof scored.overallScore).toBe('number')
 })

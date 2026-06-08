@@ -89,16 +89,16 @@ const ALL_FACTOR_IDS = new Set([
   ...OPTIONAL_FACTOR_DEFINITIONS.map((d) => d.id),
 ])
 
-function buildSummary(factors: ScoredFactor[], overallGrade: string): string {
+function buildSummary(factors: ScoredFactor[], overallScore: number): string {
   if (!factors.length) {
-    return `Overall grade ${overallGrade}. No factors evaluated.`
+    return `Overall score ${overallScore}/100. No factors evaluated.`
   }
 
   const ranked = [...factors].sort((a, b) => b.score - a.score)
   const strengths = ranked.slice(0, 2).map((factor) => factor.name)
   const weaknesses = ranked.slice(-2).map((factor) => factor.name)
 
-  return `Overall grade ${overallGrade}. Strongest signals: ${strengths.join(', ')}. Biggest opportunities: ${weaknesses.join(', ')}.`
+  return `Overall score ${overallScore}/100. Strongest signals: ${strengths.join(', ')}. Biggest opportunities: ${weaknesses.join(', ')}.`
 }
 
 function assertValidFactorIds(selectedFactors: string[]): void {
@@ -186,7 +186,7 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
     }),
   )
 
-  const { overallScore, overallGrade, factors } = scoreFactors(rawFactorResults)
+  const { overallScore, factors } = scoreFactors(rawFactorResults)
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -194,8 +194,7 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
     finalUrl: page.finalUrl,
     auditedAt: new Date().toISOString(),
     overallScore,
-    overallGrade,
-    summary: buildSummary(factors, overallGrade),
+    summary: buildSummary(factors, overallScore),
     factors,
     criticalDefects: detectCriticalDefects(context),
     metadata: {

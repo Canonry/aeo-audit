@@ -6,7 +6,6 @@ import { auditHtmlPage } from './index.js'
 import { buildCriticalDefects } from './critical-defects.js'
 import { SCHEMA_VERSION } from './schema.js'
 import { buildCrossCuttingIssues, buildPrioritizedFixes, mapWithConcurrency } from './sitemap.js'
-import { scoreToGrade } from './scoring.js'
 import type {
   AuditReport,
   AuxiliaryResources,
@@ -247,7 +246,6 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
           pageResult: {
             url: report.finalUrl,
             overallScore: report.overallScore,
-            overallGrade: report.overallGrade,
             status: 'success',
             factors: report.factors,
             metadata: report.metadata,
@@ -257,7 +255,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return {
-          pageResult: { url, overallScore: 0, overallGrade: 'F', status: 'error', error: message },
+          pageResult: { url, overallScore: 0, status: 'error', error: message },
           report: null,
         }
       }
@@ -291,7 +289,6 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     pagesTruncated: truncated,
     effectiveLimit,
     aggregateScore,
-    aggregateGrade: scoreToGrade(aggregateScore),
     pages: pageResults,
     criticalDefects,
     crossCuttingIssues,

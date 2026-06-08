@@ -49,7 +49,6 @@ function report(url: string, criticalDefects: CriticalDefect[]): AuditReport {
     finalUrl: url,
     auditedAt: '2026-04-18T00:00:00.000Z',
     overallScore: 75,
-    overallGrade: 'C',
     summary: '',
     factors: [],
     criticalDefects,
@@ -222,7 +221,6 @@ describe('buildPrioritizedFixes with critical defects', () => {
       factorId: factorName.toLowerCase().replace(/\s+/g, '-'),
       factorName,
       avgScore: 40,
-      avgGrade: 'F',
       affectedPages,
       totalPages: 25,
       topRecommendations: [rec],
@@ -245,7 +243,7 @@ describe('buildPrioritizedFixes with critical defects', () => {
       kind: 'cross-cutting',
       id: 'technical-seo',
       title: 'Technical SEO',
-      avgGrade: 'F',
+      avgScore: 40,
     })
     expect(typeof fixes[0].summary).toBe('string')
     expect(typeof fixes[0].prevalencePct).toBe('number')
@@ -303,7 +301,6 @@ describe('formatters list every affected page (no truncation)', () => {
       pagesTruncated: 0,
       effectiveLimit: 200,
       aggregateScore: 50,
-      aggregateGrade: 'F',
       pages: [],
       criticalDefects,
       crossCuttingIssues: [],
@@ -345,8 +342,7 @@ describe('formatters list every affected page (no truncation)', () => {
     affectedPages: manyPages.map((p) => p.url),
     affectsHomepage: false,
     prevalencePct: 100,
-    avgGrade: 'F',
-    summary: 'Technical SEO (avg F) — 14 pages: Add a meta description.',
+    summary: 'Technical SEO (avg 40/100) — 14 pages: Add a meta description.',
   }
 
   it('spells out every page of each prioritized fix in text output', () => {

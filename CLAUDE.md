@@ -32,7 +32,7 @@ pnpm lint           # Run linter
 ```
 src/
   index.ts           # Main entry: runAeoAudit(url, options)
-  scoring.ts         # Factor definitions, weights, grade calculation
+  scoring.ts         # Factor definitions, weights, score calculation
   fetch-page.ts      # URL fetching with SSRF protection
   errors.ts          # AeoAuditError class
   cli.ts             # CLI argument parsing
