@@ -15,7 +15,7 @@ export function formatMarkdown(report: AuditReport): string {
   lines.push(`# AEO Audit Report`)
   lines.push(``)
   lines.push(`**URL:** ${report.finalUrl}`)
-  lines.push(`**Overall Grade:** ${report.overallGrade} (${report.overallScore}/100)`)
+  lines.push(`**Overall Score:** ${report.overallScore}/100`)
   lines.push(`**Audited:** ${report.auditedAt}`)
   lines.push(``)
   lines.push(`## Summary`)
@@ -24,11 +24,11 @@ export function formatMarkdown(report: AuditReport): string {
   lines.push(``)
   lines.push(`## Factor Breakdown`)
   lines.push(``)
-  lines.push(`| Factor | Weight | Score | Grade | Status |`)
-  lines.push(`|--------|--------|-------|-------|--------|`)
+  lines.push(`| Factor | Weight | Score |`)
+  lines.push(`|--------|--------|-------|`)
 
   for (const factor of report.factors) {
-    lines.push(`| ${factor.name} | ${factor.weight}% | ${factor.score} | ${factor.grade} | ${factor.status} |`)
+    lines.push(`| ${factor.name} | ${factor.weight}% | ${factor.score} |`)
   }
 
   lines.push(``)
@@ -40,7 +40,7 @@ export function formatMarkdown(report: AuditReport): string {
   lines.push(`## Strengths`)
   lines.push(``)
   for (const factor of strengths) {
-    lines.push(`- **${factor.name}** (${factor.grade}): ${factor.findings.filter((f) => f.type === 'found').map((f) => f.message).join(' ')}`)
+    lines.push(`- **${factor.name}** (${factor.score}/100): ${factor.findings.filter((f) => f.type === 'found').map((f) => f.message).join(' ')}`)
   }
 
   lines.push(``)
@@ -48,7 +48,7 @@ export function formatMarkdown(report: AuditReport): string {
   lines.push(``)
   for (const factor of opportunities) {
     const recs = factor.recommendations.slice(0, 2)
-    lines.push(`- **${factor.name}** (${factor.grade}): ${recs.join(' ')}`)
+    lines.push(`- **${factor.name}** (${factor.score}/100): ${recs.join(' ')}`)
   }
 
   lines.push(``)
@@ -71,7 +71,7 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
   lines.push(`# AEO Sitemap Audit Report`)
   lines.push(``)
   lines.push(`**Sitemap:** ${report.sitemapUrl}`)
-  lines.push(`**Aggregate Grade:** ${report.aggregateGrade} (${report.aggregateScore}/100)`)
+  lines.push(`**Aggregate Score:** ${report.aggregateScore}/100`)
   lines.push(`**Pages:** ${report.pagesAudited} audited of ${report.pagesDiscovered} discovered (${report.pagesFiltered} filtered as non-HTML, ${report.pagesTruncated} truncated by --limit ${report.effectiveLimit})`)
   if (report.pagesTruncated > 0) {
     lines.push(``)
@@ -83,15 +83,15 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
   if (!topIssuesOnly) {
     lines.push(`## Per-Page Scores`)
     lines.push(``)
-    lines.push(`| URL | Score | Grade | Status |`)
-    lines.push(`|-----|-------|-------|--------|`)
+    lines.push(`| URL | Score | Status |`)
+    lines.push(`|-----|-------|--------|`)
 
     for (const page of report.pages) {
       const url = page.url.length > 60 ? page.url.slice(0, 57) + '...' : page.url
       if (page.status === 'error') {
-        lines.push(`| ${url} | - | - | error: ${page.error} |`)
+        lines.push(`| ${url} | - | error: ${page.error} |`)
       } else {
-        lines.push(`| ${url} | ${page.overallScore} | ${page.overallGrade} | ${page.status} |`)
+        lines.push(`| ${url} | ${page.overallScore} | ${page.status} |`)
       }
     }
 
@@ -122,12 +122,12 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
   if (report.crossCuttingIssues.length > 0) {
     lines.push(`## Cross-Cutting Issues`)
     lines.push(``)
-    lines.push(`| Factor | Avg Score | Avg Grade | Affected Pages |`)
-    lines.push(`|--------|-----------|-----------|----------------|`)
+    lines.push(`| Factor | Avg Score | Affected Pages |`)
+    lines.push(`|--------|-----------|----------------|`)
 
     for (const issue of report.crossCuttingIssues) {
       const pct = Math.round((issue.affectedPages / issue.totalPages) * 100)
-      lines.push(`| ${issue.factorName} | ${issue.avgScore} | ${issue.avgGrade} | ${issue.affectedPages}/${issue.totalPages} (${pct}%) |`)
+      lines.push(`| ${issue.factorName} | ${issue.avgScore} | ${issue.affectedPages}/${issue.totalPages} (${pct}%) |`)
     }
 
     lines.push(``)
@@ -157,8 +157,8 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
     for (let i = 0; i < report.prioritizedFixes.length; i++) {
       const fix = report.prioritizedFixes[i]
       const tag = fix.severity ? `**[${fix.severity}]** ` : ''
-      const grade = fix.avgGrade ? ` (avg ${fix.avgGrade})` : ''
-      lines.push(`${i + 1}. ${tag}**${fix.title}**${grade} _(${fix.prevalencePct}% of pages)_ — ${fix.recommendation}`)
+      const avg = fix.avgScore !== undefined ? ` (avg ${fix.avgScore}/100)` : ''
+      lines.push(`${i + 1}. ${tag}**${fix.title}**${avg} _(${fix.prevalencePct}% of pages)_ — ${fix.recommendation}`)
       // Spell out every affected page — agents and humans both need the full set.
       for (const url of fix.affectedPages) {
         const home = isHomepageUrl(url) ? ' **(homepage)**' : ''

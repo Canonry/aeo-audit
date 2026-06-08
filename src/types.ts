@@ -112,10 +112,12 @@ export interface RawFactorResult extends AnalysisResult {
   weight: number
 }
 
-export interface ScoredFactor extends RawFactorResult {
-  grade: string
-  status: 'pass' | 'partial' | 'fail'
-}
+/**
+ * A factor with its score finalized (clamped to 0–100). Structurally identical to
+ * `RawFactorResult`: the audit reports a raw 0–100 score per factor, with no
+ * derived letter grade or pass/partial/fail band.
+ */
+export type ScoredFactor = RawFactorResult
 
 export interface AuditMetadata {
   fetchTimeMs: number
@@ -143,7 +145,7 @@ export type CriticalDefectSeverity = 'critical' | 'warning'
  * scores — which bundle many sub-checks and can average a single bad signal away —
  * these are detected directly from the DOM and are simply present or not. They are
  * surfaced separately so a high-impact defect on one important page (e.g. a
- * homepage with four `<h1>`s) is never hidden by low prevalence or a passing grade.
+ * homepage with four `<h1>`s) is never hidden by low prevalence or a passing score.
  */
 export interface CriticalDefect {
   id: CriticalDefectId
@@ -164,7 +166,6 @@ export interface AuditReport {
   finalUrl: string
   auditedAt: string
   overallScore: number
-  overallGrade: string
   summary: string
   factors: ScoredFactor[]
   /** Binary structural defects on this page, detected independently of scoring. */
@@ -180,7 +181,6 @@ export interface FactorDefinition {
 
 export interface ScoredFactorSummary {
   overallScore: number
-  overallGrade: string
   factors: ScoredFactor[]
 }
 
@@ -205,7 +205,6 @@ export type Analyzer = (context: AuditContext) => AnalysisResult | Promise<Analy
 export interface SitemapPageResult {
   url: string
   overallScore: number
-  overallGrade: string
   status: 'success' | 'error'
   error?: string
   factors?: ScoredFactor[]
@@ -263,8 +262,8 @@ export interface PrioritizedFix {
   affectsHomepage: boolean
   /** Share of audited pages this fix applies to (0–100). */
   prevalencePct: number
-  /** Average grade across audited pages for the factor (cross-cutting only). */
-  avgGrade?: string
+  /** Average factor score (0–100) across audited pages (cross-cutting only). */
+  avgScore?: number
   /** Ready-to-display one-line headline (does not inline the page list). */
   summary: string
 }
@@ -285,7 +284,6 @@ export interface AgentSummary {
   /** The audited page URL (single) or the sitemap/root URL (multi). */
   url: string
   score: number
-  grade: string
   /** True when the score meets the >= 70 gate (the default exit-0 threshold). */
   pass: boolean
   /** Number of critical-severity binary defects (e.g. a missing or duplicated H1). */
@@ -303,7 +301,6 @@ export interface CrossCuttingIssue {
   factorId: string
   factorName: string
   avgScore: number
-  avgGrade: string
   affectedPages: number
   totalPages: number
   topRecommendations: string[]
@@ -322,7 +319,6 @@ export interface SitemapAuditReport {
   pagesTruncated: number
   effectiveLimit: number
   aggregateScore: number
-  aggregateGrade: string
   pages: SitemapPageResult[]
   /**
    * High-impact binary defects surfaced regardless of prevalence (issue #42).

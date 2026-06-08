@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0 (2026-06-08)
+
+### Breaking
+- **Letter grades removed — the audit is now a pure 0–100 score.** The `grade`-family fields are gone from the JSON: `AuditReport.overallGrade`, `SitemapAuditReport.aggregateGrade`, `SitemapPageResult.overallGrade`, `ScoredFactor.grade`, `CrossCuttingIssue.avgGrade`, and `AgentSummary.grade` (so `--format agent` now emits `{ schemaVersion, tool, mode, url, score, pass, criticalDefectCount, issues }`). `PrioritizedFix.avgGrade` (a letter) is replaced by **`PrioritizedFix.avgScore`** (a 0–100 number, cross-cutting fixes only). The `scoreToGrade()` export is removed from `@ainyc/aeo-audit/scoring`. Migrate by reading the 0–100 `overallScore` / `aggregateScore` / per-factor `score` / `avgScore` and thresholding to your own bands.
+- **Per-factor `status` band removed.** `ScoredFactor.status` (`'pass' | 'partial' | 'fail'`) and the `scoreToStatus()` export are gone. `ScoredFactor` is now structurally identical to `RawFactorResult` (`id, name, weight, score, findings, recommendations`). Derive any banding from `score` directly. (`SitemapPageResult.status` — `'success' | 'error'` — is unrelated and unchanged, as is the `AgentSummary.pass` ≥ 70 gate and all CLI exit codes.)
+- **`schemaVersion` bumped to `2.0`** to mark the removed fields. Parsers pinned to `1.x` should expect `grade`/`status` to be absent.
+
+### Changed
+- The single-page report `summary` now reads `Overall score <N>/100. …` instead of `Overall grade <letter>. …`. Text and markdown reports show the numeric score (and a score-derived color/icon) wherever a letter grade previously appeared; the markdown factor table drops its `Grade` and `Status` columns, and the per-page table drops `Grade` (keeping the `success`/`error` `Status`).
+
 ## 2.1.0 (2026-06-03)
 
 ### Added

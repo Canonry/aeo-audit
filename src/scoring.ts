@@ -26,38 +26,11 @@ export const OPTIONAL_FACTOR_DEFINITIONS: FactorDefinition[] = [
   { id: 'lighthouse', name: 'Lighthouse (Performance/A11y/Best Practices)', weight: 8 },
 ]
 
-export function scoreToGrade(score: number): string {
-  if (score >= 97) return 'A+'
-  if (score >= 93) return 'A'
-  if (score >= 90) return 'A-'
-  if (score >= 87) return 'B+'
-  if (score >= 83) return 'B'
-  if (score >= 80) return 'B-'
-  if (score >= 77) return 'C+'
-  if (score >= 73) return 'C'
-  if (score >= 70) return 'C-'
-  if (score >= 67) return 'D+'
-  if (score >= 63) return 'D'
-  if (score >= 60) return 'D-'
-  return 'F'
-}
-
-export function scoreToStatus(score: number): 'pass' | 'partial' | 'fail' {
-  if (score >= 70) return 'pass'
-  if (score >= 40) return 'partial'
-  return 'fail'
-}
-
 export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorSummary {
-  const factors = rawFactorResults.map((factor) => {
-    const score = clampScore(factor.score)
-    return {
-      ...factor,
-      score,
-      grade: scoreToGrade(score),
-      status: scoreToStatus(score),
-    }
-  })
+  const factors = rawFactorResults.map((factor) => ({
+    ...factor,
+    score: clampScore(factor.score),
+  }))
 
   const totalWeight = factors.reduce((sum, factor) => sum + factor.weight, 0)
 
@@ -69,7 +42,6 @@ export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorS
 
   return {
     overallScore,
-    overallGrade: scoreToGrade(overallScore),
     factors,
   }
 }

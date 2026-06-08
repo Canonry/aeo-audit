@@ -17,8 +17,6 @@ function factor(overrides: Partial<ScoredFactor> & { id: string; name: string })
     name: overrides.name,
     weight: 8,
     score: overrides.score ?? 40,
-    grade: overrides.grade ?? 'F',
-    status: overrides.status ?? 'fail',
     findings: overrides.findings ?? [],
     recommendations: overrides.recommendations ?? [],
   }
@@ -31,7 +29,6 @@ function auditReport(overrides: Partial<AuditReport> = {}): AuditReport {
     finalUrl: 'https://example.com/',
     auditedAt: '2026-04-18T00:00:00.000Z',
     overallScore: 60,
-    overallGrade: 'D-',
     summary: '',
     factors: [],
     criticalDefects: [],
@@ -74,8 +71,7 @@ describe('agentSummaryFromAudit', () => {
   it('reports pass=true and no issues for a clean, passing page', () => {
     const report = auditReport({
       overallScore: 92,
-      overallGrade: 'A',
-      factors: [factor({ id: 'structured-data', name: 'Structured Data', score: 95, status: 'pass', grade: 'A', recommendations: [] })],
+      factors: [factor({ id: 'structured-data', name: 'Structured Data', score: 95, recommendations: [] })],
     })
     const summary = agentSummaryFromAudit(report)
 
@@ -101,7 +97,6 @@ describe('agentSummaryFromSitemap', () => {
       pagesTruncated: 0,
       effectiveLimit: 200,
       aggregateScore: 64,
-      aggregateGrade: 'D',
       pages: [],
       criticalDefects,
       crossCuttingIssues: [],
@@ -143,7 +138,7 @@ describe('formatAgent / formatSitemapAgent', () => {
   it('emits valid JSON with the decision keys and none of the heavy detail', () => {
     const parsed = JSON.parse(formatAgent(auditReport({ factors: [factor({ id: 'x', name: 'X' })] })))
     expect(Object.keys(parsed).sort()).toEqual(
-      ['criticalDefectCount', 'grade', 'issues', 'mode', 'pass', 'schemaVersion', 'score', 'tool', 'url'].sort(),
+      ['criticalDefectCount', 'issues', 'mode', 'pass', 'schemaVersion', 'score', 'tool', 'url'].sort(),
     )
     // The point of agent mode: no 27 pages of factor/page detail.
     expect(parsed.factors).toBeUndefined()
@@ -163,7 +158,6 @@ describe('formatAgent / formatSitemapAgent', () => {
       pagesTruncated: 0,
       effectiveLimit: 200,
       aggregateScore: 80,
-      aggregateGrade: 'B-',
       pages: [],
       criticalDefects: [],
       crossCuttingIssues: [],

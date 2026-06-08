@@ -44,15 +44,14 @@ These are excluded by default; when included, the weights renormalize.
 
 > **Note on Google's guidance.** Google's [AI features and your website][google-aeo] guide says `llms.txt` and heavy structured data aren't required for AI Overviews or AI Mode. We still score them: Google is one engine; ChatGPT, Perplexity, and Claude do rely on them. Snippet eligibility is the one hard gate Google enforces: a page must be indexable and snippet-eligible to appear in AI features.
 
-## Grading scale
+## Score bands
 
-| Grade | Score | Meaning |
-|-------|-------|---------|
-| A+ | 97-100 | Exceptional AEO readiness |
-| A / A- | 90-96 | Strong foundation |
-| B+/B/B- | 80-89 | Good with clear gaps |
-| C+/C/C- | 70-79 | Moderate, needs work |
-| D+/D/D- | 60-69 | Weak |
-| F | <60 | Critical |
+The audit emits a **0–100 score** for every factor and a weighted **overall score** (0–100) — there are no letter grades or pass/partial/fail labels. Threshold the raw score to whatever bands suit your use. For reference, the CLI's own conventions:
 
-The CLI exits `0` for a score ≥ 70 and `1` below; see [Exit codes](cli.md#exit-codes).
+| Score | Meaning |
+|-------|---------|
+| 70–100 | Strong — meets the CLI's pass gate |
+| 40–69 | Moderate — clear gaps remain |
+| 0–39 | Weak — major work needed |
+
+The CLI exits `0` for an overall score ≥ 70 and `1` below; see [Exit codes](cli.md#exit-codes).
