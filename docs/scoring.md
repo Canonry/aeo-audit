@@ -15,7 +15,7 @@ AI answer engines are replacing traditional search for millions of queries. Gett
 |--------|--------|---------------|
 | Structured Data (JSON-LD) | 12% | Presence of LocalBusiness, FAQPage, Service, HowTo schemas |
 | Content Depth | 10% | Word count, heading hierarchy, paragraph structure, lists |
-| AI-Readable Content | 5% | llms.txt, llms-full.txt, robots.txt, sitemap.xml availability, per-page Markdown source endpoints |
+| AI Access Files (llms.txt, sitemap) | 5% | llms.txt, llms-full.txt, robots.txt, sitemap.xml availability, per-page Markdown source endpoints |
 | E-E-A-T Signals | 8% | Author meta, Person schema credentials, trust pages, reviews |
 | FAQ Content | 8% | FAQPage schema, details/summary blocks, question-style headings |
 | Citations & Authority | 8% | External links, authoritative domains, sameAs references |

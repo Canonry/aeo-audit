@@ -181,7 +181,7 @@ test('compiled CLI returns the expected JSON report for the fixture site', async
   assert.equal(report.overallScore, 76)
   assert.equal(
     report.summary,
-    'Overall score 76/100. Strongest signals: AI-Readable Content, Schema Validity. Biggest opportunities: Schema Completeness, E-E-A-T Signals.',
+    'Overall score 76/100. Strongest signals: AI Access Files (llms.txt, sitemap), Schema Validity. Biggest opportunities: Schema Completeness, E-E-A-T Signals.',
   )
   assert.deepEqual(report.metadata, {
     fetchTimeMs: 0,
@@ -203,7 +203,7 @@ test('compiled CLI returns the expected JSON report for the fixture site', async
     [
       { id: 'structured-data', score: 78 },
       { id: 'content-depth', score: 59 },
-      { id: 'ai-readable-content', score: 100 },
+      { id: 'ai-access-files', score: 100 },
       { id: 'eeat-signals', score: 25 },
       { id: 'faq-content', score: 82 },
       { id: 'citations', score: 66 },

@@ -3,7 +3,7 @@ import { load } from 'cheerio'
 
 import { parseJsonLdScripts, getVisibleText, extractSchemaTypes } from '../../src/analyzers/helpers.js'
 import { analyzeStructuredData } from '../../src/analyzers/structured-data.js'
-import { analyzeAiReadableContent } from '../../src/analyzers/ai-readable-content.js'
+import { analyzeAiAccessFiles } from '../../src/analyzers/ai-access-files.js'
 import { analyzeContentDepth } from '../../src/analyzers/content-depth.js'
 import { analyzeContentFreshness } from '../../src/analyzers/content-freshness.js'
 import { scoreFactors } from '../../src/scoring.js'
@@ -42,7 +42,7 @@ test('ai-readable analyzer handles timeout as uncertain instead of hard-missing'
     },
   })
 
-  const result = analyzeAiReadableContent(context)
+  const result = analyzeAiAccessFiles(context)
   expect(result.score).toBeGreaterThan(0)
   expect(result.findings.some((finding) => finding.type === 'timeout')).toBe(true)
 })
@@ -145,8 +145,8 @@ test('scoring engine clamps factor scores and computes a weighted overall', () =
       recommendations: [],
     },
     {
-      id: 'ai-readable-content',
-      name: 'AI-Readable Content',
+      id: 'ai-access-files',
+      name: 'AI Access Files (llms.txt, sitemap)',
       weight: 12,
       score: 20,
       findings: [],

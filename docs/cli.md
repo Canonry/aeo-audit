@@ -187,7 +187,7 @@ The relaxation is **scoped to the single host you named on the CLI, and only tha
 
 ## Auxiliary file diagnostics
 
-When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` the audit runs a **content-negotiation probe** that surfaces as a finding on the **AI-Readable Content** factor: if a file returns OK to a bare request but a non-2xx response under `Accept: text/markdown`, the audit reports a content-negotiation trap. This catches Astro / Vercel / Starlight setups that redirect `.txt` → non-existent `.md` for markdown-accepting clients, which makes the file invisible to AI content-extraction tools, even though the file is "present" by every other measure.
+When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` the audit runs a **content-negotiation probe** that surfaces as a finding on the **AI Access Files (llms.txt, sitemap)** factor: if a file returns OK to a bare request but a non-2xx response under `Accept: text/markdown`, the audit reports a content-negotiation trap. This catches Astro / Vercel / Starlight setups that redirect `.txt` → non-existent `.md` for markdown-accepting clients, which makes the file invisible to AI content-extraction tools, even though the file is "present" by every other measure.
 
 ## Flag reference
 
