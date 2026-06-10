@@ -6,4 +6,4 @@
  * Lives in its own module (not `index.ts`) so report builders can read it without
  * importing the audit entry points — which test suites routinely mock.
  */
-export const SCHEMA_VERSION = '2.1'
+export const SCHEMA_VERSION = '3.0'

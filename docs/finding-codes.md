@@ -35,28 +35,28 @@ Every `AuditFinding` carries a stable `code` so integrations can key on a machin
 - `content-depth.lists.present`
 - `content-depth.lists.none`
 
-### AI-Readable Content
+### AI Access Files (llms.txt, sitemap)
 
-- `ai-readable-content.content-negotiation.found`
-- `ai-readable-content.aux-resource.missing`
-- `ai-readable-content.aux-resource.timeout`
-- `ai-readable-content.aux-resource.unreachable`
-- `ai-readable-content.aux-resource.not-html`
-- `ai-readable-content.aux-resource.found`
-- `ai-readable-content.llms-txt.strong`
-- `ai-readable-content.llms-txt.short`
-- `ai-readable-content.llms-full-txt.strong`
-- `ai-readable-content.llms-full-txt.short`
-- `ai-readable-content.robots-txt.found`
-- `ai-readable-content.robots-txt.unreachable`
-- `ai-readable-content.robots-txt.missing`
-- `ai-readable-content.sitemap.found`
-- `ai-readable-content.sitemap.unreachable`
-- `ai-readable-content.sitemap.missing`
-- `ai-readable-content.llms-txt-link.found`
-- `ai-readable-content.llms-txt-link.missing`
-- `ai-readable-content.markdown-endpoint.found`
-- `ai-readable-content.markdown-endpoint.missing`
+- `ai-access-files.content-negotiation.found`
+- `ai-access-files.aux-resource.missing`
+- `ai-access-files.aux-resource.timeout`
+- `ai-access-files.aux-resource.unreachable`
+- `ai-access-files.aux-resource.not-html`
+- `ai-access-files.aux-resource.found`
+- `ai-access-files.llms-txt.strong`
+- `ai-access-files.llms-txt.short`
+- `ai-access-files.llms-full-txt.strong`
+- `ai-access-files.llms-full-txt.short`
+- `ai-access-files.robots-txt.found`
+- `ai-access-files.robots-txt.unreachable`
+- `ai-access-files.robots-txt.missing`
+- `ai-access-files.sitemap.found`
+- `ai-access-files.sitemap.unreachable`
+- `ai-access-files.sitemap.missing`
+- `ai-access-files.llms-txt-link.found`
+- `ai-access-files.llms-txt-link.missing`
+- `ai-access-files.markdown-endpoint.found`
+- `ai-access-files.markdown-endpoint.missing`
 
 ### E-E-A-T Signals
 

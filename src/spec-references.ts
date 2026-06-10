@@ -57,7 +57,7 @@ export type SpecRuleId = keyof typeof SPEC_RULES
  */
 export const FACTOR_SPEC_RULES: Record<string, SpecRuleId[]> = {
   'structured-data': ['structured-data-for-agents'],
-  'ai-readable-content': ['llms-txt', 'llms-full-txt', 'markdown-source-endpoints', 'link-headers'],
+  'ai-access-files': ['llms-txt', 'llms-full-txt', 'markdown-source-endpoints', 'link-headers'],
   'ai-crawler-access': ['robots-for-ai-crawlers', 'content-signals'],
   'agent-skill-exposure': ['mcp-and-tool-discovery', 'agent-skills-discovery', 'a2a-agent-cards', 'web-bot-auth'],
 }

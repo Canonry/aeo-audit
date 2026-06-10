@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.0.0 (2026-06-09)
+
+### Breaking
+- **Renamed the `ai-readable-content` factor to `ai-access-files` ("AI Access Files (llms.txt, sitemap)").** The factor that scores root-level AI access files (`/llms.txt`, `/llms-full.txt`, `/robots.txt`, `/sitemap.xml`, and per-page Markdown source endpoints) now uses the id `ai-access-files` and the display name **AI Access Files (llms.txt, sitemap)**. Breaking for anything keyed on the old identifier:
+  - `--factors ai-readable-content` is now **`--factors ai-access-files`**.
+  - All 20 finding codes are renamed from `ai-readable-content.*` to `ai-access-files.*` (e.g. `ai-readable-content.llms-txt.strong` → `ai-access-files.llms-txt.strong`). Full registry in [docs/finding-codes.md](docs/finding-codes.md).
+  - The analyzer export is renamed `analyzeAiReadableContent` → **`analyzeAiAccessFiles`** (subpath `@ainyc/aeo-audit/analyzers/ai-readable-content` → `…/ai-access-files`), and the `FACTOR_SPEC_RULES` key changes to match.
+  - Scores and the 5% weight are unchanged, and the report JSON **shape** is identical — but `schemaVersion` is bumped **`2.1` → `3.0`** to flag the breaking identifier rename, so agent parsers pinned to the old factor id or finding codes detect the drift via the major bump (per the documented "treat a major bump as breaking" contract).
+
 ## 3.1.0 (2026-06-09)
 
 ### Added

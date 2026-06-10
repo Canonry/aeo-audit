@@ -4,7 +4,7 @@ import type { FactorDefinition, RawFactorResult, ScoredFactorSummary } from './t
 export const FACTOR_DEFINITIONS: FactorDefinition[] = [
   { id: 'structured-data', name: 'Structured Data (JSON-LD)', weight: 12 },
   { id: 'content-depth', name: 'Content Depth', weight: 10 },
-  { id: 'ai-readable-content', name: 'AI-Readable Content', weight: 5 },
+  { id: 'ai-access-files', name: 'AI Access Files (llms.txt, sitemap)', weight: 5 },
   { id: 'eeat-signals', name: 'E-E-A-T Signals', weight: 8 },
   { id: 'faq-content', name: 'FAQ Content', weight: 8 },
   { id: 'citations', name: 'Citations & Authority Signals', weight: 8 },

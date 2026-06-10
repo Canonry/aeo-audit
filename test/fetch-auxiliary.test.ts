@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { load } from 'cheerio'
 
 import { fetchPage } from '../src/fetch-page.js'
-import { analyzeAiReadableContent } from '../src/analyzers/ai-readable-content.js'
+import { analyzeAiAccessFiles } from '../src/analyzers/ai-access-files.js'
 import type { AuditContext } from '../src/types.js'
 
 // The fetch tests need to bypass the SSRF guard (which blocks loopback IPs).
@@ -69,7 +69,7 @@ describe('fetchPage auxiliary diagnostics', () => {
     expect(page.auxiliary.llmsTxt?.state).toBe('ok')
     expect(page.auxiliary.llmsTxt?.diagnostics?.contentNegotiation).toBe(true)
 
-    const result = analyzeAiReadableContent(makeContext(page.auxiliary))
+    const result = analyzeAiAccessFiles(makeContext(page.auxiliary))
     expect(result.findings.some((f) => f.message.includes('content negotiation'))).toBe(true)
     expect(result.recommendations.some((r) => r.includes('Accept'))).toBe(true)
   })
@@ -137,7 +137,7 @@ describe('fetchPage auxiliary diagnostics', () => {
     expect(page.auxiliary.sitemapXml?.url).toBe(`${ORIGIN}/sitemap-index.xml`)
     expect(page.auxiliary.sitemapXml?.diagnostics?.contentNegotiation).toBe(true)
 
-    const result = analyzeAiReadableContent(makeContext(page.auxiliary))
+    const result = analyzeAiAccessFiles(makeContext(page.auxiliary))
     const negotiationFinding = result.findings.find((f) => f.message.includes('content negotiation'))
     expect(negotiationFinding?.message).toContain('/sitemap-index.xml')
     expect(negotiationFinding?.message).not.toContain('/sitemap.xml ')

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 // namespaced `<factorId>.<check>[.<variant>]` (issue: agent-native finding codes).
 const ANALYZERS: Record<string, string> = {
   'structured-data.ts': 'structured-data',
-  'ai-readable-content.ts': 'ai-readable-content',
+  'ai-access-files.ts': 'ai-access-files',
   'entity-consistency.ts': 'entity-consistency',
   'content-depth.ts': 'content-depth',
   'definition-blocks.ts': 'definition-blocks',

@@ -2,7 +2,7 @@ import { load } from 'cheerio'
 import { fetchPage, normalizeTargetUrl } from './fetch-page.js'
 import { AeoAuditError } from './errors.js'
 import { analyzeStructuredData } from './analyzers/structured-data.js'
-import { analyzeAiReadableContent } from './analyzers/ai-readable-content.js'
+import { analyzeAiAccessFiles } from './analyzers/ai-access-files.js'
 import { analyzeEntityConsistency } from './analyzers/entity-consistency.js'
 import { analyzeContentDepth } from './analyzers/content-depth.js'
 import { analyzeDefinitionBlocks } from './analyzers/definition-blocks.js'
@@ -64,7 +64,7 @@ export type {
 
 const ANALYZER_BY_ID: Record<string, Analyzer> = {
   'structured-data': analyzeStructuredData,
-  'ai-readable-content': analyzeAiReadableContent,
+  'ai-access-files': analyzeAiAccessFiles,
   'entity-consistency': analyzeEntityConsistency,
   'content-depth': analyzeContentDepth,
   'definition-blocks': analyzeDefinitionBlocks,

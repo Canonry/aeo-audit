@@ -132,7 +132,7 @@ Use `--format json` for the full report, or **`--format agent`** for just the de
 
 #### Auxiliary File Diagnostics
 
-When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml`, it probes once with `Accept: text/markdown` to detect a **content-negotiation** trap: file responds OK to a bare request but returns a non-2xx response when the client prefers markdown. This catches Astro / Vercel / Starlight setups that 307-redirect `.txt` → non-existent `.md` for markdown-accepting clients, making the file invisible to AI content-extraction tools even though the file exists. The diagnostic surfaces as a finding on the **AI-Readable Content** factor.
+When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml`, it probes once with `Accept: text/markdown` to detect a **content-negotiation** trap: file responds OK to a bare request but returns a non-2xx response when the client prefers markdown. This catches Astro / Vercel / Starlight setups that 307-redirect `.txt` → non-existent `.md` for markdown-accepting clients, making the file invisible to AI content-extraction tools even though the file exists. The diagnostic surfaces as a finding on the **AI Access Files (llms.txt, sitemap)** factor.
 
 ### Local Dev / Staging Targets
 
@@ -280,7 +280,7 @@ Use when the user wants `llms.txt` or `llms-full.txt` created or improved.
 If a URL is provided:
 1. Run:
    ```bash
-   npx @ainyc/aeo-audit@1 "<url>" [flags] --format json --factors ai-readable-content
+   npx @ainyc/aeo-audit@1 "<url>" [flags] --format json --factors ai-access-files
    ```
 2. Inspect existing AI-readable files if present.
 3. Extract key content from the site.
