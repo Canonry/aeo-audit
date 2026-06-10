@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.1.0 (2026-06-09)
+
+### Added
+- **Best-page context on every cross-cutting factor.** `CrossCuttingIssue` and cross-cutting `PrioritizedFix` entries now carry `bestScore` and `bestPageUrl` — the single strongest page for that factor (homepage wins ties). A site-wide gap reads as "Structured Data is 100 on the homepage — propagate that template to the rest" instead of a bare "add schema". The `avgScore` is unchanged; it stays an honest whole-site coverage number.
+- **Page-specific factor classification.** Cross-cutting issues carry a `status`: `sitewide`, `limited`, or `opportunity`. Factors that legitimately apply to only some page types (**FAQ Content**, **Definition Blocks** — exported as `PAGE_SPECIFIC_FACTOR_IDS` from `@ainyc/aeo-audit/scoring`) no longer float to the top of `prioritizedFixes` and read as "Critical: build an FAQ" when the site already has one. A page-specific factor present on at least one page (best score ≥ 30) is `limited` (a tune-up, demoted below genuine site-wide gaps, scoped to the page(s) that carry it with the tune-up recommendation from there); one absent everywhere is an `opportunity` (optional, no pages marked affected). Presence — not coverage breadth — is the gate. See [docs/scoring.md](docs/scoring.md#sitemap-aggregation-cross-cutting-issues-and-page-specific-factors).
+
+### Changed
+- **`schemaVersion` bumped to `2.1`** (additive: `CrossCuttingIssue` gained `pageSpecific`, `status`, `bestScore`, `bestPageUrl`; `PrioritizedFix` gained optional `status`, `bestScore`, `bestPageUrl`). Existing fields are unchanged; parsers pinned to `2.0` keep working.
+- Sitemap text and markdown reports show the `status` label and best-page alongside each factor's average; the markdown Cross-Cutting table gains **Status** and **Best (page)** columns. Page-specific factors render their concise status line instead of an "add it to every page" per-page dump (the same false positives that demotion removes); their real, scoped fix appears in Prioritized Fixes. Site-wide factors are unchanged and still list every affected page in full.
+
 ## 3.0.0 (2026-06-08)
 
 ### Breaking

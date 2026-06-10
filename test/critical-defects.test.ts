@@ -215,6 +215,8 @@ describe('buildCriticalDefects', () => {
 })
 
 describe('buildPrioritizedFixes with critical defects', () => {
+  // These fixtures exercise critical-defect promotion and the no-truncation
+  // ranking, not the page-specific classification, so they are pinned to `sitewide`.
   function crossCutting(factorName = 'FAQ Content', affectedPages = 20): CrossCuttingIssue {
     const rec = `Improve ${factorName}.`
     return {
@@ -225,6 +227,10 @@ describe('buildPrioritizedFixes with critical defects', () => {
       totalPages: 25,
       topRecommendations: [rec],
       topIssues: [{ recommendation: rec, affectedUrls: [] }],
+      pageSpecific: false,
+      status: 'sitewide',
+      bestScore: 40,
+      bestPageUrl: 'https://example.com/',
     }
   }
 

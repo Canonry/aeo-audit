@@ -55,3 +55,19 @@ The audit emits a **0–100 score** for every factor and a weighted **overall sc
 | 0–39 | Weak — major work needed |
 
 The CLI exits `0` for an overall score ≥ 70 and `1` below; see [Exit codes](cli.md#exit-codes).
+
+## Sitemap aggregation: cross-cutting issues and page-specific factors
+
+A sitemap (or static) run averages each factor across every audited page into `crossCuttingIssues[]`, and the worst of those plus the per-page critical defects become the ranked `prioritizedFixes[]`. Two refinements keep that rollup honest:
+
+**Best-page context on every factor.** Each cross-cutting issue carries `bestScore` and `bestPageUrl` — the single highest-scoring page for that factor (homepage wins ties). A site-wide gap then reads as *"Structured Data is 100 on the homepage — propagate that template to the 393 other pages"* rather than a bare *"add schema"*. The average (`avgScore`) is unchanged: it's an honest coverage number and is never recomputed over a subset.
+
+**Page-specific factors aren't site-wide failures.** Some factors legitimately apply to only certain page types — a product or portfolio page has no business carrying an **FAQ** or a glossary **Definition Block**, so a 0 there is correct, not a gap. Averaged across a whole site, these score near 0 and "affect" almost every page, which would otherwise float them to the top of the fix list and read as *"Critical: build an FAQ"* even when the site already has a good one on `/faq`. Each cross-cutting issue therefore carries a `status`:
+
+| `status` | Meaning | Ranking |
+|----------|---------|---------|
+| `sitewide` | Expected on every page (schema, E-E-A-T, freshness, citations…); a low average is a real coverage gap. | By prevalence, as before. |
+| `limited` | A page-specific factor **present on at least one page** (best score ≥ 30) but isolated. A tune-up/extend, not build-from-scratch. | Demoted below all `sitewide` issues. |
+| `opportunity` | A page-specific factor **not yet present on any audited page**. Adding it is discretionary. | Demoted, with no pages marked "affected". |
+
+For a `limited` factor the fix is scoped to the page(s) that actually carry it and the recommendation is the tune-up from there (*"add question-style headings to `/faq`"*) — never the "add it everywhere" recommendation aggregated from pages that correctly lack it. Presence (best ≥ 30), **not** coverage breadth, is the gate: thin coverage is the expected state for these factors and never downgrades a `limited` to a worse label. The page-specific set is currently **FAQ Content** and **Definition Blocks** (`PAGE_SPECIFIC_FACTOR_IDS`, exported from `@ainyc/aeo-audit/scoring`).

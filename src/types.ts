@@ -264,6 +264,12 @@ export interface PrioritizedFix {
   prevalencePct: number
   /** Average factor score (0–100) across audited pages (cross-cutting only). */
   avgScore?: number
+  /** How the factor reads site-wide (cross-cutting only): `sitewide`, `limited`, or `opportunity`. */
+  status?: CrossCuttingStatus
+  /** Best single-page factor score across the audit (cross-cutting only). */
+  bestScore?: number
+  /** URL achieving `bestScore` — the page to propagate from / tune up (cross-cutting only). */
+  bestPageUrl?: string
   /** Ready-to-display one-line headline (does not inline the page list). */
   summary: string
 }
@@ -297,14 +303,33 @@ export interface CrossCuttingIssueDetail {
   affectedUrls: string[]
 }
 
+/**
+ * How a cross-cutting factor's site-wide average should be read:
+ * - `sitewide`    — expected on every page; a low average is a real coverage gap.
+ * - `limited`     — a page-specific factor (FAQ, definitions) present on at least
+ *                   one page but isolated. A tune-up/extend, not build-from-scratch.
+ * - `opportunity` — a page-specific factor not yet present on any audited page.
+ * Only `sitewide` issues rank by prevalence; the page-specific two are demoted.
+ */
+export type CrossCuttingStatus = 'sitewide' | 'limited' | 'opportunity'
+
 export interface CrossCuttingIssue {
   factorId: string
   factorName: string
+  /** Mean factor score across every audited page — an honest coverage number. */
   avgScore: number
   affectedPages: number
   totalPages: number
   topRecommendations: string[]
   topIssues: CrossCuttingIssueDetail[]
+  /** True when this factor legitimately applies to only some page types (FAQ, definitions). */
+  pageSpecific: boolean
+  /** How to read `avgScore` site-wide; drives ranking and the report label. */
+  status: CrossCuttingStatus
+  /** Best single-page score for this factor across the audit (0–100). */
+  bestScore: number
+  /** URL of the page achieving `bestScore` (homepage wins ties, then lexical). */
+  bestPageUrl: string
 }
 
 export interface SitemapAuditReport {

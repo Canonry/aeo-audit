@@ -17,7 +17,7 @@ const PASS_THRESHOLD = 70
 export function agentSummaryFromAudit(report: AuditReport): AgentSummary {
   const criticalDefects = buildCriticalDefects([report])
   const crossCutting = buildCrossCuttingIssues([report])
-  const issues = buildPrioritizedFixes(crossCutting, 1, criticalDefects)
+  const issues = buildPrioritizedFixes(crossCutting, 1, criticalDefects, [report])
 
   return {
     schemaVersion: report.schemaVersion,

@@ -143,9 +143,25 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
     lines.push(`${'─'.repeat(70)}`)
 
     for (const issue of report.crossCuttingIssues) {
+      const best = `${DIM}best ${issue.bestScore}/100 on ${issue.bestPageUrl}${RESET}`
+
+      // Page-specific factors (FAQ, definitions): an isolated presence is expected,
+      // not a site-wide gap, so show the status + best page and skip the per-page
+      // "add it everywhere" dump (those pages have no business carrying it). The
+      // actionable, scoped tune-up lives in Prioritized Fixes below.
+      if (issue.status === 'limited') {
+        lines.push(`  ${YELLOW}${issue.factorName.padEnd(30)}${RESET} ${YELLOW}[limited]${RESET} ${DIM}avg ${issue.avgScore}/100${RESET} · ${best}`)
+        lines.push(`      ${DIM}present but isolated — a tune-up where it exists, not a site-wide gap${RESET}`)
+        continue
+      }
+      if (issue.status === 'opportunity') {
+        lines.push(`  ${DIM}${issue.factorName.padEnd(30)} [opportunity] avg ${issue.avgScore}/100 · not present on any audited page${RESET}`)
+        continue
+      }
+
       const pct = Math.round((issue.affectedPages / issue.totalPages) * 100)
       const igc = scoreColor(issue.avgScore)
-      lines.push(`  ${igc}${issue.factorName.padEnd(32)}${RESET} ${DIM}avg ${issue.avgScore}/100, affects ${pct}% of pages${RESET}`)
+      lines.push(`  ${igc}${issue.factorName.padEnd(32)}${RESET} ${DIM}avg ${issue.avgScore}/100${RESET} · ${best} ${DIM}(affects ${pct}% of pages)${RESET}`)
 
       for (const detail of issue.topIssues) {
         lines.push(`      ${DIM}• ${detail.recommendation}${RESET} ${DIM}(${detail.affectedUrls.length}/${issue.totalPages} pages)${RESET}`)
@@ -164,8 +180,19 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
     for (let i = 0; i < report.prioritizedFixes.length; i++) {
       const fix = report.prioritizedFixes[i]
       const tag = fix.severity ? `[${fix.severity === 'critical' ? RED : YELLOW}${fix.severity}${RESET}] ` : ''
+      const statusTag =
+        fix.status === 'limited'
+          ? `${YELLOW}[limited]${RESET} `
+          : fix.status === 'opportunity'
+            ? `${DIM}[opportunity]${RESET} `
+            : ''
       const avg = fix.avgScore !== undefined ? `${DIM} avg ${fix.avgScore}/100${RESET}` : ''
-      lines.push(`  ${CYAN}${i + 1}.${RESET} ${tag}${BOLD}${fix.title}${RESET}${avg} ${DIM}(${fix.prevalencePct}% of pages)${RESET}`)
+      // Skip best for `opportunity` — the factor is absent everywhere, so "best 0/100 on /" is noise.
+      const best =
+        fix.bestScore !== undefined && fix.status !== 'opportunity'
+          ? `${DIM} · best ${fix.bestScore}/100 on ${fix.bestPageUrl}${RESET}`
+          : ''
+      lines.push(`  ${CYAN}${i + 1}.${RESET} ${tag}${statusTag}${BOLD}${fix.title}${RESET}${avg}${best} ${DIM}(${fix.prevalencePct}% of pages)${RESET}`)
       lines.push(`     ${DIM}→ ${fix.recommendation}${RESET}`)
       // Spell out every affected page — agents and humans both need the full set.
       for (const url of fix.affectedPages) {

@@ -134,6 +134,42 @@ describe('runStaticAudit critical defects (issue #42)', () => {
     expect(topFix.affectedPages).toContain('https://example.com/')
 
     // The report carries a schema version so agent parsers can detect shape drift.
-    expect(result.report.schemaVersion).toBe('2.0')
+    expect(result.report.schemaVersion).toBe('2.1')
+  })
+})
+
+describe('runStaticAudit page-specific factors (limited scoping)', () => {
+  let dir: string
+
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'aeo-pagespecific-'))
+    // Two ordinary pages with no FAQ — correct for their type, so faq-content scores 0.
+    await writeFile(path.join(dir, 'index.html'), page('Home'))
+    await writeFile(path.join(dir, 'about.html'), page('About'))
+    // An FAQ page carrying FAQPage schema (faq-content ≈ 34): present but imperfect,
+    // so the factor is classified `limited` and its fix must scope to THIS page.
+    await writeFile(
+      path.join(dir, 'faq.html'),
+      '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>FAQ</title>'
+        + '<meta name="description" content="FAQ page, long enough to read as a real description for the site.">'
+        + '<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[]}</script>'
+        + '</head><body><h1>FAQ</h1><p>Some content for the analyzers.</p></body></html>',
+    )
+  })
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  // Regression: runStaticAudit must hand the audited pages to buildPrioritizedFixes so
+  // a `limited` page-specific fix is scoped to the page(s) that carry the factor.
+  // Omitting them left affectedPages empty and the summary reading "present on 0 pages".
+  it('scopes a limited FAQ fix to the page that carries it', async () => {
+    const result = await runStaticAudit(dir, { baseUrl: 'https://example.com' })
+    if (result.kind !== 'multi') throw new Error('expected multi')
+
+    const faqFix = result.report.prioritizedFixes.find((f) => f.id === 'faq-content')
+    expect(faqFix?.status).toBe('limited')
+    expect(faqFix?.affectedPages).toContain('https://example.com/faq')
   })
 })

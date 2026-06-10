@@ -120,19 +120,34 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
   }
 
   if (report.crossCuttingIssues.length > 0) {
+    const shortUrl = (u: string): string => (u.length > 48 ? u.slice(0, 45) + '...' : u)
+    const statusLabel: Record<string, string> = { sitewide: 'Site-wide', limited: 'Limited', opportunity: 'Opportunity' }
+
     lines.push(`## Cross-Cutting Issues`)
     lines.push(``)
-    lines.push(`| Factor | Avg Score | Affected Pages |`)
-    lines.push(`|--------|-----------|----------------|`)
+    lines.push(`| Factor | Status | Avg | Best (page) | Affected Pages |`)
+    lines.push(`|--------|--------|-----|-------------|----------------|`)
 
     for (const issue of report.crossCuttingIssues) {
-      const pct = Math.round((issue.affectedPages / issue.totalPages) * 100)
-      lines.push(`| ${issue.factorName} | ${issue.avgScore} | ${issue.affectedPages}/${issue.totalPages} (${pct}%) |`)
+      // Page-specific factors carry a structurally-low average across pages that
+      // correctly lack them, so "affected" is reported as isolated/none rather than
+      // a misleading near-100% gap.
+      const affected = issue.pageSpecific
+        ? issue.status === 'limited'
+          ? 'isolated'
+          : 'none'
+        : `${issue.affectedPages}/${issue.totalPages} (${Math.round((issue.affectedPages / issue.totalPages) * 100)}%)`
+      lines.push(
+        `| ${issue.factorName} | ${statusLabel[issue.status]} | ${issue.avgScore} | ${issue.bestScore} (${shortUrl(issue.bestPageUrl)}) | ${affected} |`,
+      )
     }
 
     lines.push(``)
 
-    const factorsWithIssues = report.crossCuttingIssues.filter((i) => i.topIssues.length > 0)
+    // The per-page breakdown is for site-wide factors only. A page-specific factor's
+    // "Add FAQ to this page" rows are the same false-positive noise that demotion
+    // removes; its real, scoped fix is in Prioritized Fixes below.
+    const factorsWithIssues = report.crossCuttingIssues.filter((i) => !i.pageSpecific && i.topIssues.length > 0)
     if (factorsWithIssues.length > 0) {
       lines.push(`### Per-Issue Breakdown`)
       lines.push(``)
@@ -157,8 +172,14 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
     for (let i = 0; i < report.prioritizedFixes.length; i++) {
       const fix = report.prioritizedFixes[i]
       const tag = fix.severity ? `**[${fix.severity}]** ` : ''
-      const avg = fix.avgScore !== undefined ? ` (avg ${fix.avgScore}/100)` : ''
-      lines.push(`${i + 1}. ${tag}**${fix.title}**${avg} _(${fix.prevalencePct}% of pages)_ — ${fix.recommendation}`)
+      const statusTag = fix.status === 'limited' ? `**[limited]** ` : fix.status === 'opportunity' ? `**[opportunity]** ` : ''
+      // Skip best for `opportunity` — the factor is absent everywhere, so "best 0/100 on /" is noise.
+      const showBest = fix.bestScore !== undefined && fix.status !== 'opportunity'
+      const avg =
+        fix.avgScore !== undefined
+          ? ` (avg ${fix.avgScore}/100${showBest ? `, best ${fix.bestScore}/100 on ${fix.bestPageUrl}` : ''})`
+          : ''
+      lines.push(`${i + 1}. ${tag}${statusTag}**${fix.title}**${avg} _(${fix.prevalencePct}% of pages)_ — ${fix.recommendation}`)
       // Spell out every affected page — agents and humans both need the full set.
       for (const url of fix.affectedPages) {
         const home = isHomepageUrl(url) ? ' **(homepage)**' : ''
