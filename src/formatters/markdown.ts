@@ -173,9 +173,11 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
       const fix = report.prioritizedFixes[i]
       const tag = fix.severity ? `**[${fix.severity}]** ` : ''
       const statusTag = fix.status === 'limited' ? `**[limited]** ` : fix.status === 'opportunity' ? `**[opportunity]** ` : ''
+      // Skip best for `opportunity` — the factor is absent everywhere, so "best 0/100 on /" is noise.
+      const showBest = fix.bestScore !== undefined && fix.status !== 'opportunity'
       const avg =
         fix.avgScore !== undefined
-          ? ` (avg ${fix.avgScore}/100${fix.bestScore !== undefined ? `, best ${fix.bestScore}/100 on ${fix.bestPageUrl}` : ''})`
+          ? ` (avg ${fix.avgScore}/100${showBest ? `, best ${fix.bestScore}/100 on ${fix.bestPageUrl}` : ''})`
           : ''
       lines.push(`${i + 1}. ${tag}${statusTag}**${fix.title}**${avg} _(${fix.prevalencePct}% of pages)_ — ${fix.recommendation}`)
       // Spell out every affected page — agents and humans both need the full set.

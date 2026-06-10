@@ -187,7 +187,11 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
             ? `${DIM}[opportunity]${RESET} `
             : ''
       const avg = fix.avgScore !== undefined ? `${DIM} avg ${fix.avgScore}/100${RESET}` : ''
-      const best = fix.bestScore !== undefined ? `${DIM} · best ${fix.bestScore}/100 on ${fix.bestPageUrl}${RESET}` : ''
+      // Skip best for `opportunity` — the factor is absent everywhere, so "best 0/100 on /" is noise.
+      const best =
+        fix.bestScore !== undefined && fix.status !== 'opportunity'
+          ? `${DIM} · best ${fix.bestScore}/100 on ${fix.bestPageUrl}${RESET}`
+          : ''
       lines.push(`  ${CYAN}${i + 1}.${RESET} ${tag}${statusTag}${BOLD}${fix.title}${RESET}${avg}${best} ${DIM}(${fix.prevalencePct}% of pages)${RESET}`)
       lines.push(`     ${DIM}→ ${fix.recommendation}${RESET}`)
       // Spell out every affected page — agents and humans both need the full set.
