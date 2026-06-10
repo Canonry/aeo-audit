@@ -276,7 +276,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
   // (derived from the file path → URL) only — no priority map is passed.
   const criticalDefects = buildCriticalDefects(successReports)
   const crossCuttingIssues = buildCrossCuttingIssues(successReports)
-  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length, criticalDefects)
+  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length, criticalDefects, successReports)
 
   const report: SitemapAuditReport = {
     schemaVersion: SCHEMA_VERSION,
