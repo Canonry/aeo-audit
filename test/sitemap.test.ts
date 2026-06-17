@@ -45,6 +45,60 @@ test('parseSitemapXml handles sitemap index files', () => {
   expect(entries[1].loc).toBe('https://example.com/sitemap-pages.xml')
 })
 
+test('parseSitemapXml decodes XML-escaped ampersands in urlset <loc> query params (issue #50)', () => {
+  // Per sitemaps.org, `&` in a URL must be written `&amp;`. Without decoding, the
+  // fetcher requests the literal `...&amp;...`, which the origin treats as a
+  // different (usually empty) request, silently dropping the page.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://example.com/search?type=pages&amp;page=1&amp;lang=en</loc>
+  </url>
+</urlset>`
+
+  const entries = parseSitemapXml(xml)
+  expect(entries).toHaveLength(1)
+  expect(entries[0].loc).toBe('https://example.com/search?type=pages&page=1&lang=en')
+})
+
+test('parseSitemapXml decodes XML-escaped ampersands in sitemapindex child <loc> (issue #50)', () => {
+  // The BigCommerce repro: every child sitemap of the index carries `&amp;` query
+  // params, so without decoding all child fetches fail and the audit returns zero
+  // URLs ("No auditable URLs found in sitemap.").
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://example.com/xmlsitemap.php?type=pages&amp;page=1</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.com/xmlsitemap.php?type=products&amp;page=1</loc>
+  </sitemap>
+</sitemapindex>`
+
+  const entries = parseSitemapXml(xml)
+  expect(entries).toHaveLength(2)
+  expect(entries[0].loc).toBe('https://example.com/xmlsitemap.php?type=pages&page=1')
+  expect(entries[1].loc).toBe('https://example.com/xmlsitemap.php?type=products&page=1')
+})
+
+test('parseSitemapXml decodes numeric and named character references, with &amp; applied last', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://example.com/q?a=1&amp;b=2&#38;c=3&#x26;d=4</loc>
+  </url>
+  <url>
+    <loc>https://example.com/caf&#233;</loc>
+  </url>
+</urlset>`
+
+  const entries = parseSitemapXml(xml)
+  expect(entries).toHaveLength(2)
+  // &amp;, &#38; (decimal) and &#x26; (hex) all resolve to a literal ampersand.
+  expect(entries[0].loc).toBe('https://example.com/q?a=1&b=2&c=3&d=4')
+  expect(entries[1].loc).toBe('https://example.com/café')
+})
+
 test('shouldSkipUrl filters non-HTML URLs', () => {
   expect(shouldSkipUrl('https://example.com/doc.pdf')).toBe(true)
   expect(shouldSkipUrl('https://example.com/image.png')).toBe(true)
