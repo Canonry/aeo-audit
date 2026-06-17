@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.0.1 (2026-06-17)
+
+### Fixed
+- **Sitemap `<loc>` URLs are now XML-entity-decoded (issue #50).** Per the [sitemaps.org spec](https://www.sitemaps.org/protocol.html#escaping), a `&` inside a URL must be written `&amp;`, so any spec-compliant `<loc>` with a multi-param query string (`?type=pages&amp;page=1`) arrives entity-escaped. `parseSitemapXml` previously passed the literal `...&amp;...` to the fetcher, which the origin treats as a different (usually empty) request. On a **sitemap index** — where every child `<loc>` carries query params (BigCommerce, many paginated CMS sitemaps) — every child fetch failed and the audit aborted with `BAD_INPUT: No auditable URLs found in sitemap.`; on a flat `<urlset>` the affected pages were silently dropped. Both the `urlset` and `sitemapindex` branches now decode the five predefined XML entities plus decimal/hex numeric character references (with `&amp;` resolved last). No API or scoring change.
+
 ## 4.0.0 (2026-06-09)
 
 ### Breaking
