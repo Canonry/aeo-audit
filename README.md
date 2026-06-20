@@ -66,7 +66,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4   # the engine needs Node >= 20
         with: { node-version: 20, cache: pnpm }
-      - uses: Canonry/aeo-audit/action@v4
+      - uses: Canonry/aeo-audit-action@v4
         with:
           build-command: "pnpm install --frozen-lockfile && pnpm run build"
           target: "./out"                      # your built HTML (Next export / Astro dist / Hugo public)
@@ -74,14 +74,14 @@ jobs:
           baseline-path: ".aeo/baseline.default.json"
 ```
 
-The first run has no baseline, so it passes and tells you to seed one (`npx @ainyc/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json`, then commit it). See the [action guide](action/README.md) for `url`/`sitemap` modes, baseline strategies, monorepos, tolerances, and every input.
+The first run has no baseline, so it passes and tells you to seed one (`npx @ainyc/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json`, then commit it). See the [aeo-audit-action README](https://github.com/Canonry/aeo-audit-action#readme) for `url`/`sitemap` modes, baseline strategies, monorepos, tolerances, and every input.
 
 ## Documentation
 
 | Doc | What's in it |
 |---|---|
 | [CLI reference](docs/cli.md) | Every flag, mode, and exit code |
-| [GitHub Action](action/README.md) | The CI regression gate: inputs, baselines, monorepos |
+| [GitHub Action](https://github.com/Canonry/aeo-audit-action) | The CI regression gate: inputs, baselines, monorepos |
 | [Scoring](docs/scoring.md) | The 16 factors, weights, score bands |
 | [Programmatic API](docs/api.md) | `runAeoAudit`, `runSitemapAudit`, `runStaticAudit` |
 | [Skill](docs/skill.md) | `/aeo` modes and install |

@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.1.1 (2026-06-20)
+
+### Fixed
+- **AEO Audit Guard action: robust engine-version resolution.** The composite action resolved the engine version with `npm view "@ainyc/aeo-audit@<major>" version | tail -n1`, which returns a `pkg@x 'x'` line — not a bare version — once the `@<major>` range matches multiple published versions, producing a malformed `npx` spec and an empty report. It now uses `npm view … --json | sort -V | tail -n1` to take the highest clean semver. The README's GitHub Action example now points at the standalone `Canonry/aeo-audit-action@v4` (also published to the GitHub Marketplace).
+
 ## 4.1.0 (2026-06-19)
 
 ### Added
