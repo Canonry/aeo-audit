@@ -137,7 +137,9 @@ runs:
         set -euo pipefail
         node -e 'process.exit(+process.versions.node.split(".")[0] >= 20 ? 0 : 1)' \
           || { echo "::error::aeo-audit needs Node >= 20 (the consumer workflow must run actions/setup-node)."; exit 1; }
-        RESOLVED=$(npm view "@ainyc/aeo-audit@${VER}" version 2>/dev/null | tail -n1 || true)
+        # `npm view <pkg>@<range> version` prints `pkg@x 'x'` lines when the range matches
+        # multiple versions, so use --json and take the highest clean semver (not `tail -n1`).
+        RESOLVED=$(npm view "@ainyc/aeo-audit@${VER}" version --json 2>/dev/null | tr -d '[]" ' | tr ',' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n1 || true)
         if [ -z "$RESOLVED" ]; then RESOLVED="$VER"; fi
         echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
         echo "Using @ainyc/aeo-audit@$RESOLVED"
