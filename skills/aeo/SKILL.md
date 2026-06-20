@@ -43,6 +43,7 @@ npx @ainyc/aeo-audit@1 "<url>" [flags] --format json
 - `llms`: create or improve `llms.txt` and `llms-full.txt`
 - `monitor`: compare changes over time or benchmark competitors
 - `detect-platform`: identify the CMS, site builder, framework, or hosting stack a site uses
+- `compare`: diff two saved `--format json` reports into a regression verdict + exit code (CI gate)
 
 If no mode is provided, default to `audit`.
 
@@ -69,6 +70,7 @@ If no mode is provided, default to `audit`.
 - `detect-platform https://example.com --min-confidence high`
 - `detect-platform --urls competitors.txt`
 - `detect-platform --urls https://a.com,https://b.com`
+- `compare --baseline baseline.json --current current.json` (fail CI on AEO regression)
 
 ## Mode Selection
 
@@ -168,6 +170,26 @@ npx @ainyc/aeo-audit@1 "./out" --require-meta --format json
 - `--base-url <url>` maps files to page URLs (`out/about/index.html` → `<base>/about/`; default `https://localhost`). `index.html` collapses to its directory URL; other files drop the `.html` extension.
 - `llms.txt`, `llms-full.txt`, `robots.txt`, and `sitemap.xml` are read from the directory root when present.
 - **Partial coverage:** server-only signals (redirects, `X-Robots-Tag`, `Last-Modified`, `Link` headers) aren't visible from static files. Recommend auditing the deployed URL for full coverage.
+
+### Compare / Regression Mode
+
+When the user wants to **fail CI on an AEO regression** (a PR dropped the score, broke a page, or introduced a structural defect), use the `compare` subcommand. It diffs two saved `--format json` reports — a baseline and the current run — and exits non-zero on a regression. It runs no audit and no network; it only reads reports.
+
+```bash
+# 1. Produce the current report (any mode's --format json output works)
+npx @ainyc/aeo-audit@1 "./out" --base-url https://example.com --format json > current.json
+# 2. Diff against a stored baseline — exit 1 if it regressed
+npx @ainyc/aeo-audit@1 compare --baseline baseline.json --current current.json
+# Write a Markdown summary (for a PR comment) and tighten the overall gate
+npx @ainyc/aeo-audit@1 compare --baseline baseline.json --current current.json --overall-tolerance 0 --md-out diff.md
+# Committed/artifact baselines: hard-fail (exit 2) if factor set / engine major differ
+npx @ainyc/aeo-audit@1 compare --baseline baseline.json --current current.json --strict-comparability
+```
+
+- **A regression is any of:** overall/aggregate drop > `--overall-tolerance` (default 2); a single page drop > `--page-tolerance` (default 5); a single factor drop > `--factor-tolerance` (default 8); a page that was auditing successfully now erroring; a new `severity:critical` defect (`--fail-on-new-critical`, default on); or a major report-schema change. Score/page/factor deltas only gate when the two runs are **comparable** (same factor set, no major engine change) — otherwise they're warnings, not failures.
+- `missing-meta-description` is `severity:warning`, so it does **not** trip `--fail-on-new-critical`; use `--require-meta` on the audit or `--fail-on warnings` here. Removed pages and new warnings are report-only unless promoted with `--fail-on removed-pages,warnings`.
+- **Exit codes:** `0` = no regression / improvement / first run (no baseline); `1` = regression; `2` = misconfiguration (mode mismatch, unreadable report, missing `--current`, or incomparable factor-set/engine under `--strict-comparability`). `--report-only` always exits `0` (soak mode).
+- Both reports must be the same mode (two single, or two multi-page). stdout carries only the `CompareReport` JSON (or Markdown with `--format markdown`); diagnostics go to stderr.
 
 ### Lighthouse Mode
 

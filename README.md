@@ -46,11 +46,42 @@ The package ships a Claude Code / ClawHub skill. [Install it](docs/skill.md#inst
 
 Modes: audit, fix, schema, `llms.txt`, monitor. See the [skill guide](docs/skill.md).
 
+## Guard CI against regressions (GitHub Action)
+
+Drop the **AEO Audit Guard** action into any pipeline to fail a PR when its AEO score drops, a page stops auditing, or a new structural defect appears — measured against a committed baseline. It builds your site, audits the HTML offline (no deploy, no secrets), and posts a sticky PR comment with the per-factor diff.
+
+```yaml
+# .github/workflows/aeo.yml
+on:
+  pull_request: { branches: [main] }
+permissions:
+  contents: read
+  pull-requests: write          # for the sticky comment
+jobs:
+  aeo-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4   # the engine needs Node >= 20
+        with: { node-version: 20, cache: pnpm }
+      - uses: Canonry/aeo-audit/action@v4
+        with:
+          build-command: "pnpm install --frozen-lockfile && pnpm run build"
+          target: "./out"                      # your built HTML (Next export / Astro dist / Hugo public)
+          base-url: "https://www.example.com"
+          baseline-path: ".aeo/baseline.default.json"
+```
+
+The first run has no baseline, so it passes and tells you to seed one (`npx @ainyc/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json`, then commit it). See the [action guide](action/README.md) for `url`/`sitemap` modes, baseline strategies, monorepos, tolerances, and every input.
+
 ## Documentation
 
 | Doc | What's in it |
 |---|---|
 | [CLI reference](docs/cli.md) | Every flag, mode, and exit code |
+| [GitHub Action](action/README.md) | The CI regression gate: inputs, baselines, monorepos |
 | [Scoring](docs/scoring.md) | The 16 factors, weights, score bands |
 | [Programmatic API](docs/api.md) | `runAeoAudit`, `runSitemapAudit`, `runStaticAudit` |
 | [Skill](docs/skill.md) | `/aeo` modes and install |
