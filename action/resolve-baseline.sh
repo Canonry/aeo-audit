@@ -3,7 +3,7 @@
 # artifact strategies, then publish has_baseline + path + score. A missing baseline
 # is a soft state (the gate honours --on-missing-baseline) — never a silent pass.
 set -uo pipefail
-# shellcheck source=lib.sh
+# shellcheck source=lib.sh disable=SC1091
 source "$GITHUB_ACTION_PATH/lib.sh"
 
 BASE_OUT="$RUNNER_TEMP/aeo-base-${SITE_ID}.json"

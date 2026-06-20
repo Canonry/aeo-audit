@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build + audit the PR head into $1, then publish score / report path / audit exit.
 set -uo pipefail
-# shellcheck source=lib.sh
+# shellcheck source=lib.sh disable=SC1091
 source "$GITHUB_ACTION_PATH/lib.sh"
 
 OUT="$1"

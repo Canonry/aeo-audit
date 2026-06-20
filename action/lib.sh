@@ -70,6 +70,8 @@ aeo_run_audit() {
   fi
   aeo_build_args
   aeo_engine "${AEO_ARGS[@]}" --format json >"$out"
+  # AEO_AUDIT_EXIT is consumed by the caller (audit.sh) after sourcing, not within this file.
+  # shellcheck disable=SC2034
   AEO_AUDIT_EXIT=$?
   return 0
 }

@@ -4,7 +4,7 @@
 # re-derives them. committed/artifact baselines run --strict-comparability because
 # matched audit settings can't be guaranteed by construction.
 set -uo pipefail
-# shellcheck source=lib.sh
+# shellcheck source=lib.sh disable=SC1091
 source "$GITHUB_ACTION_PATH/lib.sh"
 
 REG="$RUNNER_TEMP/aeo-regression-${SITE_ID}.json"
