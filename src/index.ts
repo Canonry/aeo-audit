@@ -22,7 +22,7 @@ import { analyzeAgentSkillExposure } from './analyzers/agent-skill-exposure.js'
 import { analyzeLighthouse } from './analyzers/lighthouse.js'
 import { getVisibleText, parseJsonLdScripts, countWords } from './analyzers/helpers.js'
 import { detectCriticalDefects } from './critical-defects.js'
-import { SCHEMA_VERSION } from './schema.js'
+import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { FACTOR_DEFINITIONS, OPTIONAL_FACTOR_DEFINITIONS, scoreFactors } from './scoring.js'
 import type {
   Analyzer,
@@ -38,7 +38,8 @@ export { runSitemapAudit } from './sitemap.js'
 export { runStaticAudit } from './static-audit.js'
 export { detectCriticalDefects, buildCriticalDefects } from './critical-defects.js'
 export { agentSummaryFromAudit, agentSummaryFromSitemap } from './agent-summary.js'
-export { SCHEMA_VERSION } from './schema.js'
+export { SCHEMA_VERSION, engineVersion } from './schema.js'
+export { compareReports, renderCompareMarkdown, isSitemapReport, driftLevel, DEFAULT_COMPARE_POLICY } from './compare.js'
 export { detectPlatform, detectPlatformBatch } from './detect-platform.js'
 export { SPEC_RULES, FACTOR_SPEC_RULES, SPEC_SITE, specCitation } from './spec-references.js'
 export type { SpecRule, SpecRuleId, SpecStatus } from './spec-references.js'
@@ -53,6 +54,20 @@ export type {
   PrioritizedFix,
 } from './types.js'
 export type { StaticAuditOptions, StaticAuditResult } from './static-audit.js'
+export type {
+  CompareMeta,
+  ComparePolicy,
+  CompareFailOn,
+  CompareReport,
+  CompareResult,
+  DefectChange,
+  DefectChangeKind,
+  DriftLevel,
+  FactorDelta,
+  OverallDelta,
+  PageAvailabilityChange,
+  PageDelta,
+} from './types.js'
 export type {
   BatchDetectionEntry,
   BatchPlatformDetectionReport,
@@ -197,6 +212,10 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
     summary: buildSummary(factors, overallScore),
     factors,
     criticalDefects: detectCriticalDefects(context),
+    compareMeta: {
+      engineVersion: engineVersion(),
+      factorIds: factors.map((factor) => factor.id).sort(),
+    },
     metadata: {
       fetchTimeMs: page.fetchTimeMs,
       pageTitle: context.pageTitle,

@@ -9,6 +9,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
         node-version: [20, 22]
@@ -27,3 +29,57 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run test
       - run: pnpm run test:e2e
+
+  # Lint the composite action's shell scripts (shellcheck is preinstalled on the runner).
+  action-scripts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck action/*.sh
+
+  # Exercise the composite action end-to-end against a committed HTML fixture, using
+  # the locally-built engine (AEO_ENGINE_CMD) since the new version isn't published
+  # yet. Seeds a baseline, then gates the same fixture against it and expects a pass.
+  dogfood-action:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AEO_ENGINE_CMD: node ${{ github.workspace }}/bin/aeo-audit.js
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Seed baseline from the fixture
+        uses: ./action
+        with:
+          mode: static
+          target: ${{ github.workspace }}/test/fixtures/site
+          base-url: https://acme-robotics.example
+          baseline: committed
+          baseline-path: ${{ runner.temp }}/dogfood-baseline.json
+          mode-of-run: update-baseline
+          comment: "false"
+      - name: Gate the fixture against its own baseline (expect pass)
+        id: gate
+        uses: ./action
+        with:
+          mode: static
+          target: ${{ github.workspace }}/test/fixtures/site
+          base-url: https://acme-robotics.example
+          baseline: committed
+          baseline-path: ${{ runner.temp }}/dogfood-baseline.json
+          comment: "false"
+      - name: Assert the gate passed
+        run: |
+          test "${{ steps.gate.outputs.verdict }}" = "pass" \
+            || { echo "expected verdict=pass, got '${{ steps.gate.outputs.verdict }}'"; exit 1; }

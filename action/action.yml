@@ -1,0 +1,287 @@
+name: "AEO Audit Guard"
+description: "Technical static AEO (Answer Engine Optimization) audit for CI — build your site, audit the rendered HTML offline (no deploy, no secrets, deterministic), and fail PRs on regressions vs a baseline."
+author: "Canonry"
+branding:
+  icon: "trending-up"
+  color: "purple"
+
+inputs:
+  mode:
+    description: "Audit mode: static (audit a built dir/.html offline — default, secret-free, deterministic), url (one live/preview URL), or sitemap (crawl a live site)."
+    default: "static"
+    required: false
+  target:
+    description: "What to audit. static: path to built HTML dir or a .html file (e.g. ./out). url/sitemap: the URL."
+    default: "./out"
+    required: false
+  build-command:
+    description: "Shell command that produces the static output for mode=static. Leave empty if the build already ran. Treated as trusted maintainer config — never wire PR-author values into it."
+    default: ""
+    required: false
+  base-url:
+    description: "static: passed as aeo-audit --base-url so files map to real page URLs (canonical/og:url + stable per-page diff keys). Set this to your production origin; the default depresses absolute scores. url/sitemap: the base branch's deployed URL when baseline=base-rebuild."
+    default: "https://localhost"
+    required: false
+  baseline:
+    description: "How to obtain the comparison baseline: committed (read a committed JSON — default, reviewable, deterministic), base-rebuild (re-audit the PR base SHA in the same runner), or artifact (download the latest default-branch baseline artifact)."
+    default: "committed"
+    required: false
+  baseline-path:
+    description: "For baseline=committed: path to the committed --format json report, relative to repo root. Also the write path in mode-of-run=update-baseline. ${site-id} is templated in."
+    default: ".aeo/baseline.${site-id}.json"
+    required: false
+  site-id:
+    description: "Stable id for this site in a monorepo. Namespaces the baseline path, artifact name, and sticky-comment marker so multiple sites gate independently."
+    default: "default"
+    required: false
+  mode-of-run:
+    description: "gate (default): audit + compare + fail on regression. update-baseline: re-audit and write the baseline (run on push to the default branch); does not compare or fail."
+    default: "gate"
+    required: false
+  aeo-audit-version:
+    description: "npm dist-tag or exact version of @ainyc/aeo-audit. Must be >= 4.1 (the compare subcommand). Resolved to a concrete version once and reused for every invocation."
+    default: "4"
+    required: false
+  audit-args:
+    description: "Extra flags appended to EVERY audit invocation, identical on both sides (e.g. '--limit 500 --include-agent-skills'). Space-separated tokens; values may not contain spaces. Do NOT pass --format. SSRF-relaxing flags (--allow-local/--allow-private/--rewrite-sitemap-origin) and --lighthouse in static mode are rejected."
+    default: ""
+    required: false
+  overall-tolerance:
+    description: "Max overall/aggregate score drop before failing."
+    default: "2"
+    required: false
+  page-tolerance:
+    description: "Max single-page score drop before failing."
+    default: "5"
+    required: false
+  factor-tolerance:
+    description: "Max single-factor score drop before failing."
+    default: "8"
+    required: false
+  fail-on-new-critical:
+    description: "Fail when the PR introduces a new severity:critical defect (missing-h1, multiple-h1, missing-title). missing-meta-description is severity:warning — use require-meta or fail-on:warnings for it."
+    default: "true"
+    required: false
+  fail-on:
+    description: "Comma list promoting report-only dimensions to failures: removed-pages, warnings."
+    default: ""
+    required: false
+  min-absolute-score:
+    description: "Also fail if the current score is below this floor, independent of the diff (mirrors aeo-audit's own >=70 gate). Set 0 to gate purely on regression."
+    default: "0"
+    required: false
+  require-meta:
+    description: "Pass aeo-audit --require-meta so a missing <meta name=description> on any page fails the audit regardless of score."
+    default: "false"
+    required: false
+  on-missing-baseline:
+    description: "Behaviour when no baseline resolves: warn (pass + comment, default) or fail (block the build until a baseline is seeded). To seed a baseline automatically, run a separate mode-of-run=update-baseline job (see README)."
+    default: "warn"
+    required: false
+  comment-only:
+    description: "Post the PR comment but never fail the build (gradual-onboarding soak mode)."
+    default: "false"
+    required: false
+  comment:
+    description: "Post/update the sticky PR comment. Set false for push/baseline jobs."
+    default: "true"
+    required: false
+  github-token:
+    description: "Token for the sticky comment (needs pull-requests: write) and, for baseline=artifact, artifact download (needs actions: read)."
+    default: "${{ github.token }}"
+    required: false
+
+outputs:
+  result:
+    description: "Compare result: pass | regression | improvement | no-baseline."
+    value: "${{ steps.gate.outputs.result }}"
+  verdict:
+    description: "pass | fail — the binary build gate."
+    value: "${{ steps.gate.outputs.verdict }}"
+  score:
+    description: "Current overall/aggregate score (0-100)."
+    value: "${{ steps.audit-head.outputs.score }}"
+  baseline-score:
+    description: "The baseline score compared against (empty when no baseline)."
+    value: "${{ steps.gate.outputs.baseline_score }}"
+  delta:
+    description: "Signed score delta (current minus baseline)."
+    value: "${{ steps.gate.outputs.delta }}"
+  regression-count:
+    description: "Number of gating dimensions that tripped."
+    value: "${{ steps.gate.outputs.regression_count }}"
+  regressed-factors:
+    description: "Comma-separated factor ids that regressed."
+    value: "${{ steps.gate.outputs.regressed_factors }}"
+  report-json:
+    description: "Path to the current full aeo-audit JSON report."
+    value: "${{ steps.audit-head.outputs.report_path }}"
+  regression-json:
+    description: "Path to the CompareReport JSON."
+    value: "${{ steps.gate.outputs.regression_path }}"
+  comment-url:
+    description: "URL of the sticky PR comment (empty on forks / when comment could not post)."
+    value: "${{ steps.comment.outputs.url }}"
+
+runs:
+  using: "composite"
+  steps:
+    # 0. Engine needs Node >= 20, and a concrete engine version resolved once so
+    #    head/base/compare can't drift onto different patches mid-run.
+    - name: Resolve engine
+      id: engine
+      shell: bash
+      env:
+        VER: ${{ inputs.aeo-audit-version }}
+      run: |
+        set -euo pipefail
+        node -e 'process.exit(+process.versions.node.split(".")[0] >= 20 ? 0 : 1)' \
+          || { echo "::error::aeo-audit needs Node >= 20 (the consumer workflow must run actions/setup-node)."; exit 1; }
+        RESOLVED=$(npm view "@ainyc/aeo-audit@${VER}" version 2>/dev/null | tail -n1 || true)
+        if [ -z "$RESOLVED" ]; then RESOLVED="$VER"; fi
+        echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
+        echo "Using @ainyc/aeo-audit@$RESOLVED"
+
+    # 1. Build + audit the PR HEAD -> current.json. The engine prints JSON before
+    #    its own non-zero exit (<70 / --require-meta), so `set +e` captures both.
+    - name: Build & audit (head)
+      id: audit-head
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        TARGET: ${{ inputs.target }}
+        BUILD_CMD: ${{ inputs.build-command }}
+        BASE_URL: ${{ inputs.base-url }}
+        VER: ${{ steps.engine.outputs.version }}
+        EXTRA: ${{ inputs.audit-args }}
+        REQ_META: ${{ inputs.require-meta }}
+        SITE_ID: ${{ inputs.site-id }}
+      run: |
+        set -uo pipefail
+        bash "$GITHUB_ACTION_PATH/audit.sh" "$RUNNER_TEMP/aeo-head-${SITE_ID}.json"
+
+    # 2a. update-baseline mode: current IS the new baseline. Write & stop.
+    - name: Write baseline
+      if: ${{ inputs.mode-of-run == 'update-baseline' }}
+      shell: bash
+      env:
+        BASELINE_PATH: ${{ inputs.baseline-path }}
+        SITE_ID: ${{ inputs.site-id }}
+        HEAD: ${{ steps.audit-head.outputs.report_path }}
+        BASELINE: ${{ inputs.baseline }}
+      run: |
+        set -euo pipefail
+        if [ "$BASELINE" = "committed" ]; then
+          P="${BASELINE_PATH/\$\{site-id\}/$SITE_ID}"
+          mkdir -p "$(dirname "$P")"
+          cp "$HEAD" "$P"
+          echo "Baseline written to $P — commit it (e.g. via peter-evans/create-pull-request)."
+        else
+          echo "report=$HEAD" >> "$GITHUB_OUTPUT"
+          echo "Baseline report at $HEAD — upload it as an artifact in this job."
+        fi
+
+    # 2b. Resolve the BASELINE report (gate mode only).
+    - name: Resolve baseline
+      id: baseline
+      if: ${{ inputs.mode-of-run == 'gate' }}
+      shell: bash
+      env:
+        BASELINE: ${{ inputs.baseline }}
+        BASELINE_PATH: ${{ inputs.baseline-path }}
+        SITE_ID: ${{ inputs.site-id }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW: ${{ github.workflow }}
+        MODE: ${{ inputs.mode }}
+        TARGET: ${{ inputs.target }}
+        BUILD_CMD: ${{ inputs.build-command }}
+        BASE_URL: ${{ inputs.base-url }}
+        VER: ${{ steps.engine.outputs.version }}
+        EXTRA: ${{ inputs.audit-args }}
+        REQ_META: ${{ inputs.require-meta }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -uo pipefail
+        bash "$GITHUB_ACTION_PATH/resolve-baseline.sh"
+
+    # 3. Diff via the CLI's compare subcommand — numeric truth + thresholds + exit.
+    #    committed/artifact baselines can't guarantee matched settings, so they run
+    #    --strict-comparability (factor-set / engine-major mismatch => exit 2).
+    - name: Compute regression
+      id: gate
+      if: ${{ inputs.mode-of-run == 'gate' }}
+      shell: bash
+      env:
+        HAS_BASE: ${{ steps.baseline.outputs.has_baseline }}
+        BASE_PATH: ${{ steps.baseline.outputs.path }}
+        HEAD_PATH: ${{ steps.audit-head.outputs.report_path }}
+        VER: ${{ steps.engine.outputs.version }}
+        BASELINE: ${{ inputs.baseline }}
+        OTOL: ${{ inputs.overall-tolerance }}
+        PTOL: ${{ inputs.page-tolerance }}
+        FTOL: ${{ inputs.factor-tolerance }}
+        FAILCRIT: ${{ inputs.fail-on-new-critical }}
+        FAILON: ${{ inputs.fail-on }}
+        ONMISS: ${{ inputs.on-missing-baseline }}
+        REPORTONLY: ${{ inputs.comment-only }}
+        SITE_ID: ${{ inputs.site-id }}
+      run: |
+        set -uo pipefail
+        bash "$GITHUB_ACTION_PATH/compare.sh"
+
+    # 4. Sticky PR comment (one per site-id, upserted). The body is the tool's own
+    #    --md-out markdown; on forks (no write token) it falls back to the job summary.
+    - name: Upsert PR comment
+      id: comment
+      if: ${{ inputs.mode-of-run == 'gate' && inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      continue-on-error: true
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: aeo-audit-guard-${{ inputs.site-id }}
+        path: ${{ steps.gate.outputs.md_path }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+
+    # 5. Always mirror the comment to the job summary (survives forks / missing token).
+    - name: Job summary
+      if: ${{ inputs.mode-of-run == 'gate' }}
+      shell: bash
+      env:
+        MD_PATH: ${{ steps.gate.outputs.md_path }}
+      run: |
+        set -uo pipefail
+        [ -f "$MD_PATH" ] && cat "$MD_PATH" >> "$GITHUB_STEP_SUMMARY" || true
+
+    # 6. Final gate — the comment is already posted, so a red check carries the why.
+    - name: Enforce gate
+      if: ${{ inputs.mode-of-run == 'gate' && inputs.comment-only != 'true' }}
+      shell: bash
+      env:
+        CMP_EXIT: ${{ steps.gate.outputs.compare_exit }}
+        AUDIT_EXIT: ${{ steps.audit-head.outputs.audit_exit }}
+        REQ_META: ${{ inputs.require-meta }}
+        SCORE: ${{ steps.audit-head.outputs.score }}
+        MIN_ABS: ${{ inputs.min-absolute-score }}
+        MSG: ${{ steps.gate.outputs.fail_reason }}
+        SITE_ID: ${{ inputs.site-id }}
+      run: |
+        set -uo pipefail
+        FAIL=0
+        if [ "${CMP_EXIT:-0}" = "2" ]; then
+          echo "::error title=AEO config error (${SITE_ID})::${MSG:-compare could not run; check target/base-url/baseline/audit-args}"
+          exit 2
+        fi
+        if [ "${CMP_EXIT:-0}" = "1" ]; then
+          echo "::error title=AEO regression (${SITE_ID})::${MSG} — see the PR comment for the per-factor/per-page table and how to refresh the baseline."
+          FAIL=1
+        fi
+        if [ "$REQ_META" = "true" ] && [ "${AUDIT_EXIT:-0}" != "0" ]; then
+          echo "::error title=AEO meta gate (${SITE_ID})::audit exited non-zero with --require-meta (a page may be missing <meta name=description>, or the score is below 70)."
+          FAIL=1
+        fi
+        if [ "$MIN_ABS" != "0" ] && [ -n "${SCORE:-}" ] && [ "$SCORE" -lt "$MIN_ABS" ]; then
+          echo "::error title=AEO below floor (${SITE_ID})::score $SCORE is below the absolute floor of $MIN_ABS."
+          FAIL=1
+        fi
+        exit $FAIL

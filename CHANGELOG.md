@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.1.0 (2026-06-19)
+
+### Added
+- **`aeo-audit compare` subcommand — a regression gate.** Diffs two `--format json` reports (a baseline and a current run) into a typed `CompareReport` and a CI-friendly exit code (`0` no regression / improvement / no-baseline, `1` regression, `2` misconfiguration). A regression is any of: overall/aggregate drop > `--overall-tolerance` (default 2), a single page drop > `--page-tolerance` (default 5), a single factor drop > `--factor-tolerance` (default 8), a page that was auditing successfully now erroring out (caught even though `aggregateScore` averages success pages only and would otherwise hide it), a new `severity:critical` defect (`--fail-on-new-critical`, default on), or a major report-schema change. Score/page/factor deltas only gate when the two runs are **comparable** (same factor set, no major engine change); otherwise they're reported with a warning. New-critical detection distinguishes a genuinely new defect type / a previously-clean page regressing (both gate) from a known templated defect arriving on a net-new page (report-only). `--fail-on removed-pages,warnings` promotes report-only dimensions; `--report-only` never fails; `--strict-comparability` turns a factor-set / engine-major mismatch into a hard exit-2 for committed/artifact baselines. Exported as `compareReports`, `renderCompareMarkdown`, `isSitemapReport`, `driftLevel`, and `DEFAULT_COMPARE_POLICY` from `@ainyc/aeo-audit` and the new `@ainyc/aeo-audit/compare` subpath.
+- **`compareMeta` on reports.** `AuditReport` and `SitemapAuditReport` now carry an optional `compareMeta` (`engineVersion`, `factorIds`) so a stored baseline records which engine and factor set produced it — scoring changes can ship under a package version that does not bump `schemaVersion`, so `compare` uses the engine version to judge comparability. `engineVersion()` is exported.
+
+### Changed
+- **`schemaVersion` bumped `3.0` → `3.1`** (additive: the optional `compareMeta` field). Existing fields are unchanged; parsers pinned to `3.0` keep working, and `compare` treats a `3.0` baseline vs a `3.1` current as a non-gating minor drift.
+
 ## 4.0.1 (2026-06-17)
 
 ### Fixed

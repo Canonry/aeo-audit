@@ -1,10 +1,11 @@
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
+import { compareReports, renderCompareMarkdown, DEFAULT_COMPARE_POLICY } from './compare.js'
 import { runAeoAudit } from './index.js'
 import { runSitemapAudit } from './sitemap.js'
 import { runStaticAudit } from './static-audit.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { detectPlatform, detectPlatformBatch } from './detect-platform.js'
-import { isAeoAuditError } from './errors.js'
+import { AeoAuditError, isAeoAuditError } from './errors.js'
 import {
   formatBatchPlatformJson,
   formatJson,
@@ -25,7 +26,10 @@ import {
 } from './formatters/text.js'
 import { formatAgent, formatSitemapAgent } from './formatters/agent.js'
 import type {
+  AuditReport,
   BatchPlatformDetectionReport,
+  CompareFailOn,
+  ComparePolicy,
   PlatformConfidence,
   PlatformDetectionReport,
   ScoredFactor,
@@ -254,9 +258,13 @@ function sitemapMetaFailureMessage(pages: SitemapPageResult[]): string | null {
 function printHelp() {
   console.log(`
 Usage: aeo-audit <url|path> [options]
+       aeo-audit compare --current <file> [--baseline <file>] [options]
 
 Pass a URL to audit a live site, or a filesystem path (a .html file or a
 directory of built HTML, e.g. ./out) to audit static output offline.
+
+The 'compare' subcommand diffs two --format json reports into a regression
+verdict (run 'aeo-audit compare --help' for its options).
 
 Options:
   --format <type>         Output format: text (default), json, markdown, agent.
@@ -330,16 +338,243 @@ Examples:
   aeo-audit --detect-platform --urls urls.txt
   aeo-audit --detect-platform --urls https://a.com,https://b.com --format json
   cat urls.txt | aeo-audit --detect-platform --urls -
+  aeo-audit https://example.com --format json > current.json
+  aeo-audit compare --baseline baseline.json --current current.json
 
-Exit code: 0 when score >= 70, 1 otherwise. In sitemap and static-directory modes, the aggregate score is used.
+Exit codes (audit/sitemap/static modes): 0 when score >= 70, 1 otherwise. In sitemap and
+static-directory modes, the aggregate score is used.
 In --detect-platform mode, exit code is 0 if any platform is detected, 1 otherwise.
 In --detect-platform batch mode, exit code is 0 if at least one URL succeeded, 1 otherwise.
 With --require-meta, exit is 1 if any audited page is missing <meta name="description">,
 regardless of the score-based rule above.
+For the 'compare' subcommand: 0 = no regression / improvement / no-baseline, 1 = regression,
+2 = misconfiguration. See 'aeo-audit compare --help'.
 `)
 }
 
+/* ── compare subcommand ───────────────────────────────────────────────────
+ * `aeo-audit compare` diffs two report JSONs (a baseline and a current run) into
+ * a regression verdict. It reads pre-existing reports and runs NO audit, so it is
+ * dispatched before the audit if-chain in `main()` and has its own arg grammar.
+ * stdout carries ONLY the machine output (JSON unless --format markdown); every
+ * diagnostic goes to stderr so a consumer can pipe stdout straight into a parser.
+ * Exit: 0 = no regression / improvement / no-baseline, 1 = regression, 2 = misconfig.
+ */
+interface CompareArgs {
+  baseline: string | null
+  current: string | null
+  format: 'json' | 'markdown'
+  mdOut: string | null
+  policy: ComparePolicy
+  help: boolean
+  error: string | null
+}
+
+function parseCompareArgs(argv: string[]): CompareArgs {
+  const args = argv.slice(3) // drop node, script, 'compare'
+  const result: CompareArgs = {
+    baseline: null,
+    current: null,
+    format: 'json',
+    mdOut: null,
+    policy: { ...DEFAULT_COMPARE_POLICY, failOn: [] },
+    help: false,
+    error: null,
+  }
+
+  const readNumber = (raw: string, flag: string): number | null => {
+    const num = Number(raw)
+    if (!Number.isFinite(num) || num < 0) {
+      result.error = `Invalid value for ${flag}: "${raw}" (expected a non-negative number).`
+      return null
+    }
+    return num
+  }
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]
+    if (arg === '--baseline' && args[i + 1]) {
+      result.baseline = args[i + 1]
+      i += 1
+    } else if (arg === '--current' && args[i + 1]) {
+      result.current = args[i + 1]
+      i += 1
+    } else if (arg === '--format' && args[i + 1]) {
+      const value = args[i + 1]
+      if (value !== 'json' && value !== 'markdown') {
+        result.error = `Unknown compare format "${value}". Use: json, markdown.`
+      } else {
+        result.format = value
+      }
+      i += 1
+    } else if (arg === '--md-out' && args[i + 1]) {
+      result.mdOut = args[i + 1]
+      i += 1
+    } else if (arg === '--overall-tolerance' && args[i + 1]) {
+      const n = readNumber(args[i + 1], arg)
+      if (n !== null) result.policy.overallTolerance = n
+      i += 1
+    } else if (arg === '--page-tolerance' && args[i + 1]) {
+      const n = readNumber(args[i + 1], arg)
+      if (n !== null) result.policy.pageTolerance = n
+      i += 1
+    } else if (arg === '--factor-tolerance' && args[i + 1]) {
+      const n = readNumber(args[i + 1], arg)
+      if (n !== null) result.policy.factorTolerance = n
+      i += 1
+    } else if (arg === '--fail-on-new-critical') {
+      result.policy.failOnNewCritical = true
+    } else if (arg === '--no-fail-on-new-critical') {
+      result.policy.failOnNewCritical = false
+    } else if (arg === '--fail-on' && args[i + 1]) {
+      for (const raw of args[i + 1].split(',')) {
+        const token = raw.trim()
+        if (token === 'removed-pages' || token === 'warnings') {
+          if (!result.policy.failOn.includes(token)) result.policy.failOn.push(token as CompareFailOn)
+        } else if (token.length > 0) {
+          result.error = `Unknown --fail-on value "${token}". Use: removed-pages, warnings.`
+        }
+      }
+      i += 1
+    } else if (arg === '--on-missing-baseline' && args[i + 1]) {
+      const value = args[i + 1]
+      if (value === 'warn' || value === 'fail') {
+        result.policy.onMissingBaseline = value
+      } else {
+        result.error = `Unknown --on-missing-baseline value "${value}". Use: warn, fail.`
+      }
+      i += 1
+    } else if (arg === '--report-only') {
+      result.policy.reportOnly = true
+    } else if (arg === '--strict-comparability') {
+      result.policy.strictComparability = true
+    } else if (arg === '--help' || arg === '-h') {
+      result.help = true
+    } else {
+      result.error = `Unknown compare argument: "${arg}".`
+    }
+  }
+
+  return result
+}
+
+function printCompareHelp(): void {
+  console.log(`
+Usage: aeo-audit compare --current <file> [--baseline <file>] [options]
+
+Diff two aeo-audit JSON reports (produced with --format json) into a regression
+verdict and a non-zero exit code. Single (AuditReport) and multi-page
+(SitemapAuditReport) reports are both supported; the two sides must be the same
+mode. Runs no audit and touches no network.
+
+Options:
+  --current <file>          Current run's --format json report (required).
+  --baseline <file>         Baseline --format json report to compare against.
+                            Omit for a first run (result: no-baseline).
+  --overall-tolerance <n>   Max overall/aggregate score drop before failing (default 2).
+  --page-tolerance <n>      Max single-page score drop before failing (default 5).
+  --factor-tolerance <n>    Max single-factor score drop before failing (default 8).
+  --fail-on-new-critical    Fail on a new severity:critical defect (default on).
+  --no-fail-on-new-critical Do not fail on new critical defects.
+  --fail-on <list>          Promote report-only dimensions to failures:
+                            removed-pages, warnings (comma-separated).
+  --on-missing-baseline <m> warn (default) | fail — behaviour when no baseline.
+  --report-only             Compute and print the diff but never exit non-zero.
+  --strict-comparability    Treat a factor-set or major engine-version mismatch as a
+                            misconfiguration (exit 2) instead of a non-gating warning.
+                            Use for committed/artifact baselines.
+  --md-out <file>           Also write a human Markdown summary to this file.
+  --format <type>           stdout format: json (default) or markdown.
+  -h, --help                Show this help message.
+
+Exit code: 0 no regression / improvement / no-baseline, 1 regression,
+2 misconfiguration (report-mode mismatch, incomparable factor-set/engine under
+--strict-comparability, unreadable/invalid report files). --report-only always 0.
+
+Examples:
+  aeo-audit https://example.com --format json > current.json
+  aeo-audit compare --baseline baseline.json --current current.json
+  aeo-audit compare --baseline base.json --current cur.json --overall-tolerance 0 --md-out diff.md
+  aeo-audit compare --baseline base.json --current cur.json --strict-comparability --fail-on removed-pages
+`)
+}
+
+async function readReport(path: string): Promise<AuditReport | SitemapAuditReport> {
+  let raw: string
+  try {
+    raw = await readFile(path, 'utf-8')
+  } catch {
+    throw new AeoAuditError('COMPARE_MISCONFIG', `Could not read report file: ${path}`)
+  }
+  try {
+    return JSON.parse(raw) as AuditReport | SitemapAuditReport
+  } catch {
+    throw new AeoAuditError('COMPARE_MISCONFIG', `Report file is not valid JSON: ${path}`)
+  }
+}
+
+export async function mainCompare(argv: string[]): Promise<number> {
+  const args = parseCompareArgs(argv)
+
+  if (args.help) {
+    printCompareHelp()
+    return 0
+  }
+  if (args.error) {
+    console.error(`Error: ${args.error}`)
+    return 2
+  }
+  if (!args.current) {
+    console.error('Error: compare requires --current <file>. Run "aeo-audit compare --help" for usage.')
+    return 2
+  }
+
+  try {
+    const current = await readReport(args.current)
+    const baseline = args.baseline ? await readReport(args.baseline) : null
+
+    const report = compareReports(baseline, current, args.policy)
+
+    if (args.mdOut) {
+      await writeFile(args.mdOut, renderCompareMarkdown(report), 'utf-8')
+    }
+
+    // stdout: machine output ONLY.
+    console.log(args.format === 'markdown' ? renderCompareMarkdown(report) : JSON.stringify(report, null, 2))
+
+    // Human context to stderr so it never corrupts the parsed stdout.
+    for (const warning of report.warnings) console.error(`Warning: ${warning}`)
+    for (const reason of report.failReasons) console.error(`Regression: ${reason}`)
+
+    if (report.result === 'no-baseline' && report.verdict === 'pass') {
+      console.error('No baseline supplied — nothing to compare against (first run).')
+    }
+
+    return report.verdict === 'fail' ? 1 : 0
+  } catch (error) {
+    if (isAeoAuditError(error) && error.code === 'COMPARE_MISCONFIG') {
+      console.error(`Error [COMPARE_MISCONFIG]: ${error.message}`)
+      return 2
+    }
+    if (isAeoAuditError(error)) {
+      console.error(`Error [${error.code}]: ${error.message}`)
+    } else if (error instanceof Error) {
+      console.error(`Error: ${error.message}`)
+    } else {
+      console.error(`Error: ${String(error)}`)
+    }
+    return 2
+  }
+}
+
 export async function main(argv: string[] = process.argv): Promise<number> {
+  // `compare` reads reports rather than auditing, so it dispatches before the
+  // audit arg parser (which would otherwise swallow the bare "compare" token as a
+  // positional URL).
+  if (argv[2] === 'compare') {
+    return mainCompare(argv)
+  }
+
   const args = parseArgs(argv)
 
   if (args.help) {

@@ -4,8 +4,8 @@ import { AeoAuditError } from './errors.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { auditHtmlPage } from './index.js'
 import { buildCriticalDefects } from './critical-defects.js'
-import { SCHEMA_VERSION } from './schema.js'
-import { buildCrossCuttingIssues, buildPrioritizedFixes, mapWithConcurrency } from './sitemap.js'
+import { SCHEMA_VERSION, engineVersion } from './schema.js'
+import { buildCrossCuttingIssues, buildPrioritizedFixes, mapWithConcurrency, unionFactorIds } from './sitemap.js'
 import type {
   AuditReport,
   AuxiliaryResources,
@@ -280,6 +280,10 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
 
   const report: SitemapAuditReport = {
     schemaVersion: SCHEMA_VERSION,
+    compareMeta: {
+      engineVersion: engineVersion(),
+      factorIds: unionFactorIds(successReports),
+    },
     sitemapUrl: resolved,
     auditedAt: new Date().toISOString(),
     pagesDiscovered: discovered,

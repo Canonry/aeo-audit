@@ -171,6 +171,15 @@ export interface AuditReport {
   /** Binary structural defects on this page, detected independently of scoring. */
   criticalDefects: CriticalDefect[]
   metadata: AuditMetadata
+  /**
+   * Provenance for regression comparison (issue: AEO regression gate). Records the
+   * engine version that produced this report so a stored baseline can be checked
+   * for comparability against a current run — scoring changes ship under package
+   * versions that do NOT bump `schemaVersion`, so the shape version alone can't tell
+   * whether two reports' scores are comparable. Optional: reports produced before
+   * this field existed simply omit it and `compare` degrades to a warning.
+   */
+  compareMeta?: CompareMeta
 }
 
 export interface FactorDefinition {
@@ -358,6 +367,8 @@ export interface SitemapAuditReport {
    * full affected-page set so an agent can act without parsing prose.
    */
   prioritizedFixes: PrioritizedFix[]
+  /** Provenance for regression comparison; see `AuditReport.compareMeta`. */
+  compareMeta?: CompareMeta
 }
 
 export interface SitemapAuditPlan {
@@ -435,4 +446,150 @@ export interface BatchPlatformDetectionReport {
   failed: number
   totalFetchTimeMs: number
   results: BatchDetectionEntry[]
+}
+
+/* ── Regression comparison types ── */
+
+/**
+ * Report provenance used by `compare` to decide whether two reports are
+ * comparable. Embedded at audit time; absent on reports from older engines.
+ */
+export interface CompareMeta {
+  /** npm package version (`@ainyc/aeo-audit`) that produced the report. */
+  engineVersion: string
+  /** Active factor-id set for the audit, sorted. A mismatch means the weighted
+   * basis differs (`--factors`/`--include-*`), so score deltas are apples-to-oranges. */
+  factorIds: string[]
+}
+
+/** Knobs controlling which deltas fail the build. Mirrors the `compare` CLI flags. */
+export interface ComparePolicy {
+  /** Max overall/aggregate score drop before [GATE]. Default 2 (absorbs rounding/freshness jitter). */
+  overallTolerance: number
+  /** Max single-page score drop before [GATE]. Default 5. */
+  pageTolerance: number
+  /** Max single-factor score drop before [GATE]. Default 8 (sub-checks toggle). */
+  factorTolerance: number
+  /** Fail when a new severity:critical defect type/page-regression appears. Default true. */
+  failOnNewCritical: boolean
+  /** Promote normally report-only dimensions to gating failures. */
+  failOn: CompareFailOn[]
+  /** What to do when no baseline is supplied. Default 'warn' (pass + note); 'fail'
+   * blocks the build until a baseline is seeded (see the action's update-baseline mode). */
+  onMissingBaseline: 'warn' | 'fail'
+  /** Report every dimension but never fail the build (soak mode). */
+  reportOnly: boolean
+  /**
+   * Treat a factor-set or major engine-version mismatch as a hard misconfiguration
+   * (exit 2) instead of a non-gating warning. The action sets this for
+   * committed/artifact baselines, where matched audit settings can't be guaranteed
+   * by construction; base-rebuild leaves it off (settings are identical both sides).
+   */
+  strictComparability: boolean
+}
+
+export type CompareFailOn = 'removed-pages' | 'warnings'
+
+export type CompareResult = 'pass' | 'regression' | 'improvement' | 'no-baseline'
+
+export type DriftLevel = 'none' | 'minor' | 'major' | 'unknown'
+
+export interface OverallDelta {
+  baseline: number
+  current: number
+  delta: number
+  regressed: boolean
+}
+
+export interface FactorDelta {
+  id: string
+  name: string
+  /** Page URL the factor was scored on (multi-report only); omitted for single reports. */
+  page?: string
+  baseline: number
+  current: number
+  delta: number
+  regressed: boolean
+}
+
+export interface PageDelta {
+  url: string
+  baseline: number
+  current: number
+  delta: number
+  regressed: boolean
+}
+
+/**
+ * A page that was successfully audited in the baseline but is no longer producing
+ * a score in the current run — it either errored (`status:'error'`) or dropped out
+ * of the audited set entirely. The strongest possible regression signal, and one
+ * the aggregate score actively hides because it averages success pages only.
+ */
+export interface PageAvailabilityChange {
+  url: string
+  now: 'error' | 'absent'
+  /** Error message, when the page transitioned success → error. */
+  error?: string
+}
+
+/**
+ * How a newly-present defect relates to the baseline:
+ * - `new-type`        — this defect id was absent from the baseline entirely (a genuinely new failure mode).
+ * - `page-regression` — a page that existed and was clean in the baseline now carries this defect.
+ * - `new-page`        — the defect appears on a page that did not exist in the baseline (pre-existing
+ *                       template debt arriving with new content, not a regression of existing pages).
+ * Only the first two gate by default; `new-page` is report-only.
+ */
+export type DefectChangeKind = 'new-type' | 'page-regression' | 'new-page'
+
+export interface DefectChange {
+  id: string
+  severity: CriticalDefectSeverity
+  title: string
+  kind: DefectChangeKind
+  /** Pages exhibiting this defect change. Never truncated. */
+  pages: string[]
+}
+
+/**
+ * The full regression verdict produced by `compareReports`. stdout-serializable;
+ * the action reads it directly rather than re-deriving any verdict in shell.
+ */
+export interface CompareReport {
+  tool: string
+  reportMode: 'single' | 'sitemap'
+  result: CompareResult
+  verdict: 'pass' | 'fail'
+  /** Number of gating dimensions that tripped (0 when green). */
+  regressionCount: number
+  /** One human line per gating failure (drives the CI annotation and comment). */
+  failReasons: string[]
+  /** Non-gating comparability/staleness/truncation notices. */
+  warnings: string[]
+  currentScore: number
+  baselineScore: number | null
+  overall: OverallDelta | null
+  /** Regressed factor deltas (full list, never truncated). */
+  regressedFactors: FactorDelta[]
+  improvedFactorCount: number
+  /** Regressed per-page deltas (full list). */
+  regressedPages: PageDelta[]
+  improvedPageCount: number
+  /** Pages that stopped scoring (success → error/absent). */
+  droppedPages: PageAvailabilityChange[]
+  /** Pages present in baseline, absent from current (intentional deletes or truncation). */
+  removedPages: string[]
+  /** Pages new in current vs baseline. */
+  addedPages: string[]
+  newDefects: DefectChange[]
+  currentSchemaVersion: string
+  baselineSchemaVersion: string | null
+  schemaDrift: DriftLevel
+  currentEngineVersion: string | null
+  baselineEngineVersion: string | null
+  engineDrift: DriftLevel
+  baselineAuditedAt: string | null
+  currentAuditedAt: string
+  policy: ComparePolicy
 }

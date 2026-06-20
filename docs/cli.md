@@ -125,6 +125,30 @@ A `.html`/`.htm` file produces a single-page report; a directory is walked for H
 
 Coverage is **partial by design**: server-only signals (redirects, `X-Robots-Tag`, `Last-Modified`, `Link` headers) aren't visible from static files, so factors that depend on them score as if the header were absent. Audit the deployed URL for full coverage.
 
+## Compare mode (regression gate)
+
+`aeo-audit compare` is a subcommand that diffs two `--format json` reports — a **baseline** and a **current** run — into a regression verdict and a CI-friendly exit code. It runs no audit and touches no network; it reads reports you already produced. The same `compare` call works in any CI, a pre-commit hook, or a local shell — it is the engine behind the AEO regression GitHub Action.
+
+```bash
+# 1. Produce a current report (static-output mode shown; any mode's json works)
+npx @ainyc/aeo-audit ./out --base-url https://example.com --format json > current.json
+
+# 2. Diff it against a stored baseline; exit 1 if it regressed
+npx @ainyc/aeo-audit compare --baseline baseline.json --current current.json
+
+# Tighter overall gate, plus a human Markdown summary for a PR comment
+npx @ainyc/aeo-audit compare --baseline base.json --current current.json \
+  --overall-tolerance 0 --md-out diff.md
+
+# Committed/artifact baselines: refuse to gate apples-to-oranges (exit 2) if the
+# factor set or engine major differs between the two reports
+npx @ainyc/aeo-audit compare --baseline base.json --current current.json --strict-comparability
+```
+
+A regression is **any** of: the overall/aggregate score dropping more than `--overall-tolerance` (default 2), a single page dropping more than `--page-tolerance` (default 5), a single factor dropping more than `--factor-tolerance` (default 8), a page that was auditing successfully now erroring out, a **new** `severity:critical` defect (`--fail-on-new-critical`, on by default), or a major report-schema change. Score, page, and factor deltas only gate when the two runs are **comparable** (same factor set, no major engine change); otherwise they're reported with a warning rather than failing the build. `missing-meta-description` is `severity:warning`, so it does **not** trip `--fail-on-new-critical` — use `--require-meta` on the audit or `--fail-on warnings` here. Removed pages and new warnings are report-only unless promoted with `--fail-on`. Pass `--report-only` to print the full diff without ever failing (onboarding soak mode), and `--strict-comparability` to turn a factor-set / engine-major mismatch into a hard exit-2 misconfiguration.
+
+Both reports must be the same mode (two single reports, or two multi-page reports); mixing them is a misconfiguration (exit 2). On a first run with no `--baseline`, the result is `no-baseline` and the build passes (use `--on-missing-baseline fail` to block until a baseline is seeded). stdout carries only the `CompareReport` (JSON by default, or Markdown with `--format markdown`); every human diagnostic goes to stderr, so you can pipe stdout straight into a parser. Run `aeo-audit compare --help` for the full option list.
+
 ## Platform detection
 
 Detect what platform, CMS, framework, or static site generator a website is built on. Useful for competitor research, lead qualification, and triage before an audit.
@@ -211,6 +235,25 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 | `--base-url <url>` | In static-output mode, the base URL used to map files to page URLs (e.g. `out/about/index.html` → `<base>/about/`). Default `https://localhost`. |
 | `-h`, `--help` | Show the help message |
 
+### `compare` subcommand flags
+
+| Flag | Description |
+|------|-------------|
+| `--current <file>` | Current run's `--format json` report (required) |
+| `--baseline <file>` | Baseline `--format json` report to diff against. Omit for a first run (`no-baseline`) |
+| `--overall-tolerance <n>` | Max overall/aggregate score drop before failing (default 2) |
+| `--page-tolerance <n>` | Max single-page score drop before failing (default 5) |
+| `--factor-tolerance <n>` | Max single-factor score drop before failing (default 8) |
+| `--fail-on-new-critical` / `--no-fail-on-new-critical` | Fail (or not) on a new `severity:critical` defect. Default on |
+| `--fail-on <list>` | Promote report-only dimensions to failures: `removed-pages`, `warnings` (comma-separated) |
+| `--on-missing-baseline <m>` | Behaviour when no baseline: `warn` (default) or `fail` |
+| `--report-only` | Compute and print the diff but never exit non-zero (soak mode) |
+| `--strict-comparability` | Treat a factor-set or major engine-version mismatch as a misconfiguration (exit 2) instead of a non-gating warning. Use for committed/artifact baselines |
+| `--md-out <file>` | Also write a human Markdown summary to this file |
+| `--format <type>` | stdout format for compare: `json` (default) or `markdown` |
+
 ## Exit codes
 
 Exit code `0` for score ≥ 70, `1` for < 70 (CI-friendly). In sitemap and static-directory modes the exit code is based on the aggregate score. In `--detect-platform` mode the exit code is `0` if any platform is detected (or, in batch mode, if any URL succeeded), `1` otherwise. When `--require-meta` is passed, exit is forced to `1` if any audited page lacks `<meta name="description">`, regardless of the score-based rule.
+
+The **`compare` subcommand** has its own exit contract: `0` = no regression, an improvement, or a first run with no baseline; `1` = a regression tripped a gating dimension; `2` = a misconfiguration (report-mode mismatch, an unreadable or invalid report file, a missing `--current`, or — with `--strict-comparability` — an incomparable factor set / engine major). `--report-only` always exits `0`.

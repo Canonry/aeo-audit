@@ -2,7 +2,7 @@ import { AeoAuditError } from './errors.js'
 import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { runAeoAudit } from './index.js'
-import { SCHEMA_VERSION } from './schema.js'
+import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { PAGE_SPECIFIC_FACTOR_IDS, PAGE_SPECIFIC_PRESENT_THRESHOLD } from './scoring.js'
 import type {
   AuditReport,
@@ -655,6 +655,10 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
 
   return {
     schemaVersion: SCHEMA_VERSION,
+    compareMeta: {
+      engineVersion: engineVersion(),
+      factorIds: unionFactorIds(successReports),
+    },
     sitemapUrl,
     auditedAt: new Date().toISOString(),
     pagesDiscovered: discovered,
@@ -669,6 +673,20 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     crossCuttingIssues,
     prioritizedFixes,
   }
+}
+
+/**
+ * Sorted union of factor ids across the successfully-audited pages. Embedded in a
+ * multi-page report's `compareMeta` so `compare` can detect when a baseline and a
+ * current run used a different factor set (`--factors`/`--include-*`), which makes
+ * their weight-renormalized scores incomparable.
+ */
+export function unionFactorIds(successReports: AuditReport[]): string[] {
+  const ids = new Set<string>()
+  for (const report of successReports) {
+    for (const factor of report.factors) ids.add(factor.id)
+  }
+  return [...ids].sort()
 }
 
 export {

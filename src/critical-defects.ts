@@ -8,7 +8,7 @@ import type {
 } from './types.js'
 
 /** Human-readable labels for each defect, used in rollups and formatters. */
-const DEFECT_TITLES: Record<CriticalDefectId, string> = {
+export const DEFECT_TITLES: Record<CriticalDefectId, string> = {
   'missing-h1': 'Missing H1',
   'multiple-h1': 'Multiple H1 tags',
   'missing-title': 'Missing <title>',
