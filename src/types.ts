@@ -391,6 +391,11 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
    * security cost: every crawled URL is pinned to the origin you explicitly named.
    */
   rewriteOrigin?: boolean
+  /**
+   * Optional path allow-list for PR/changed-page audits. Values may be paths or
+   * full URLs; matching uses normalized URL pathnames and ignores query strings.
+   */
+  includePaths?: string[]
   onPlan?: (plan: SitemapAuditPlan) => void
 }
 

@@ -91,6 +91,10 @@ npx @ainyc/aeo-audit https://staging.example.com --sitemap --rewrite-sitemap-ori
 
 # Audit a whole local dev server: rewrite the sitemap onto localhost and unblock it
 npx @ainyc/aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local
+
+# PR preview workflow: audit changed static routes plus critical pages
+npx @ainyc/aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local \
+  --changed --base main --include-critical
 ```
 
 Auto-discovery checks `/sitemap.xml` → `/sitemap-index.xml` → `Sitemap:` directives in `/robots.txt`. Astro / Next.js / Vercel sites that only publish `sitemap-index.xml` are discovered without needing an explicit URL.
@@ -98,6 +102,26 @@ Auto-discovery checks `/sitemap.xml` → `/sitemap-index.xml` → `Sitemap:` dir
 `--rewrite-sitemap-origin` re-homes every `<loc>` onto the origin of the target URL you passed (preserving path and query) before crawling. Use it when a sitemap hardcodes the canonical/prod domain but you want to audit a different origin that serves the same paths: a staging host, or a local dev server. Every crawled URL is pinned to the origin you explicitly named, so there's no SSRF cost; combined with `--allow-local` it makes a local dev server's whole sitemap auditable in one command.
 
 When the sitemap has more URLs than `--limit`, the run audits the highest-priority pages and prints a notice to stderr listing how many were skipped and how to audit them all.
+
+### Changed-page sitemap mode
+
+Use `--changed` with `--sitemap` for PR work when the useful question is "what changed on this branch?" rather than "what is the whole-site average?"
+
+```bash
+npx @ainyc/aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local \
+  --changed --base main --include-critical
+
+npx @ainyc/aeo-audit https://staging.example.com --sitemap --rewrite-sitemap-origin \
+  --changed --base origin/main --include-critical --critical-paths /,/pricing,/contact
+```
+
+`--changed` reads `git diff --name-only --diff-filter=ACMR <base>...HEAD`, infers static routes from common app/page conventions, then filters the sitemap to matching paths. Supported route conventions include Next `app/**/page.*`, Next/Nuxt `pages/**`, SvelteKit `src/routes/**/+page.svelte`, and common blog markdown roots. Dynamic route templates such as `[slug]` are skipped because concrete URL params cannot be inferred safely from the file path alone; include known concrete pages through `--include-critical --critical-paths <list>` or audit explicit URLs separately.
+
+Flags:
+- `--changed` — enable changed-page sitemap filtering
+- `--base <ref>` — git base for route inference (default `main`)
+- `--include-critical` — add critical paths to the inferred changed paths
+- `--critical-paths <list>` — comma-separated critical paths for `--include-critical`; defaults to `/`
 
 A **Critical Defects** section lists binary, one-line-fix structural defects (an `<h1>` count other than one, a missing `<title>`, a missing meta description) surfaced **regardless of how few pages they affect**, with the offending pages named (homepage and high sitemap-`priority` pages first). These would otherwise be averaged into a passing factor score and excluded from the prevalence-ranked fixes; the critical-severity ones also lead the prioritized fix list. The section is shown even with `--top-issues`. See the machine-readable shapes in [api.md](api.md#machine-readable-output-for-ai-agents).
 
@@ -225,6 +249,10 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 | `--sitemap [url]` | Audit all pages from the sitemap. Auto-discovery tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`. Pass an explicit URL to override. |
 | `--limit <n>` | Max pages to audit in sitemap mode (default 200, sorted by sitemap priority) |
 | `--top-issues` | In sitemap mode, skip per-page output and show only the cross-cutting issues and critical defects |
+| `--changed` | With `--sitemap`, audit only sitemap URLs whose paths map to static routes changed since `--base` |
+| `--base <ref>` | Git base ref for `--changed` (default `main`) |
+| `--include-critical` | With `--changed`, also audit critical paths |
+| `--critical-paths <list>` | Comma-separated critical paths for `--include-critical` (default `/`) |
 | `--detect-platform` | Identify the platform/CMS/framework powering the site instead of running an audit |
 | `--urls <src>` | In `--detect-platform` mode, run on multiple URLs. `<src>` is a file path (one URL per line), a comma-separated list, or `-` for stdin |
 | `--concurrency <n>` | In `--detect-platform` batch mode, max in-flight fetches (default 5) |

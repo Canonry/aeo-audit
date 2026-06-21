@@ -1,6 +1,6 @@
 ---
 name: aeo
-description: Run AEO audits, fix site issues, validate schema, generate llms.txt, and compare sites.
+description: Run AEO audits, preview branch audits, changed-page sitemap audits, local/private preview audits with explicit opt-in, sitemap origin rewriting, static-output audits, regression comparisons, site fixes, schema validation, and llms.txt generation.
 homepage: https://ainyc.ai
 repository: https://github.com/Canonry/aeo-audit
 allowed-tools:
@@ -17,7 +17,7 @@ allowed-tools:
 
 Website: [ainyc.ai](https://ainyc.ai)
 
-One skill for audit, fixes, schema, llms.txt, and monitoring workflows.
+One skill for audit, preview-branch review, fixes, schema, llms.txt, and monitoring workflows.
 
 ## Command
 
@@ -41,7 +41,7 @@ npx @ainyc/aeo-audit@1 "<url>" [flags] --format json
 - `fix`: apply code changes after an audit
 - `schema`: validate JSON-LD and entity consistency
 - `llms`: create or improve `llms.txt` and `llms-full.txt`
-- `monitor`: compare changes over time or benchmark competitors
+- `monitor`: compare changes over time, compare a branch preview against production, or benchmark competitors
 - `detect-platform`: identify the CMS, site builder, framework, or hosting stack a site uses
 - `compare`: diff two saved `--format json` reports into a regression verdict + exit code (CI gate)
 
@@ -59,6 +59,7 @@ If no mode is provided, default to `audit`.
 - `audit https://example.com --sitemap --require-meta`
 - `audit http://localhost:3000 --allow-local`
 - `audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local`
+- `audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local --changed --base main --include-critical`
 - `audit https://staging.example.com --sitemap --rewrite-sitemap-origin`
 - `audit ./out` (static-output mode: audit built HTML offline)
 - `audit ./out --base-url https://example.com --require-meta`
@@ -113,6 +114,10 @@ Flags:
 - `--limit <n>` — cap pages audited (default 200, sorted by sitemap priority)
 - `--top-issues` — skip per-page output, show only cross-cutting patterns and critical defects
 - `--rewrite-sitemap-origin` — rewrite every `<loc>`'s origin to the target URL's origin (preserving path/query) before crawling. Use when the sitemap hardcodes the prod/canonical domain but you want to audit a staging host or local dev server.
+- `--changed` — filter sitemap URLs to static routes changed since `--base`; use for PR work
+- `--base <ref>` — git base for `--changed` (default `main`)
+- `--include-critical` — add critical paths to the changed-page set
+- `--critical-paths <list>` — comma-separated critical paths for `--include-critical`; defaults to `/`
 - `--require-meta` — force exit `1` if any audited page is missing `<meta name="description">`, regardless of overall score (useful as a CI gate)
 - `--include-geo` / `--include-agent-skills` — honored per page in sitemap mode (adds the optional geographic-signals / agent-skill-exposure factors). `--lighthouse` is not available with `--sitemap`.
 
@@ -124,6 +129,45 @@ Returns:
 - Cross-cutting issues (factors failing across multiple pages), each with the best-scoring page (`bestScore`/`bestPageUrl`) and a `status`: `sitewide` (a real coverage gap) vs. `limited`/`opportunity` for page-specific factors (FAQ, definitions) that legitimately apply to only some page types
 - Aggregate score
 - Prioritized fixes (critical defects first, then site-wide gaps; page-specific `limited`/`opportunity` factors demoted below them, scoped to the page(s) that carry them)
+
+### Preview / PR Audit Workflow
+
+Use this path for PR review, local production builds, preview deployments, and branch-vs-main questions. Prefer built-in flags over manual sitemap downloads, localtunnel glue, or ad hoc URL scripts.
+
+For a local preview server whose sitemap emits production canonicals:
+
+```bash
+npx @ainyc/aeo-audit@1 "http://localhost:3000" \
+  --sitemap \
+  --rewrite-sitemap-origin \
+  --allow-local \
+  --changed \
+  --base main \
+  --include-critical \
+  --format agent
+```
+
+Guidance:
+- Use `--allow-local` only when the user explicitly wants to audit localhost/private IPs.
+- Use `--rewrite-sitemap-origin` when a local or staging sitemap emits production canonicals.
+- Use `--changed --base <ref>` for PR work so unrelated site sections do not dominate the result.
+- Use `--include-critical --critical-paths /,/pricing,/contact` when important pages should always be checked.
+- If `--changed` finds no static routes, inspect the diff manually. Dynamic route templates cannot be safely converted to concrete URLs without route params; include known concrete paths with `--critical-paths` or audit explicit URLs separately.
+- Prefer `--format agent` for agent action, `--format json` for saved compare baselines, and `--format markdown` for human summaries.
+
+For branch-vs-production regression review, produce comparable reports first, then run `compare`:
+
+```bash
+npx @ainyc/aeo-audit@1 "https://production.example" --sitemap --format json > baseline.json
+npx @ainyc/aeo-audit@1 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json > current.json
+npx @ainyc/aeo-audit@1 compare --baseline baseline.json --current current.json --format markdown
+```
+
+Report:
+- URLs audited or changed paths selected
+- Score/regression verdict from `compare`
+- Critical defects and prioritized fixes
+- Caveats such as local/private opt-in, sitemap origin rewriting, dynamic route templates skipped, or sitemap pages filtered out
 
 #### Machine-readable output (for agents)
 
@@ -329,10 +373,9 @@ Single URL:
 4. Save the current result.
 
 Comparison mode:
-1. Parse `--compare <url2>`.
-2. Audit both URLs.
-3. Show side-by-side factor deltas.
-4. Highlight advantages, weaknesses, and priority gaps.
+1. For branch-vs-production, produce baseline and current `--format json` reports in the same mode, then run the `compare` subcommand.
+2. For competitor benchmarking, audit both public URLs and show side-by-side factor deltas.
+3. Highlight advantages, weaknesses, regressions, and priority gaps.
 
 ## Behavior
 
@@ -340,4 +383,6 @@ Comparison mode:
 - If the task is diagnosis only, do not edit files.
 - If the task is a fix request, make edits and verify with a rerun when possible.
 - If the URL is unreachable or not HTML, report the exact failure.
+- If a local/private URL is requested and `--allow-local` is missing, rerun with `--allow-local` only after confirming local preview auditing is intended.
+- If sitemap mode appears to audit production during preview work, rerun with `--rewrite-sitemap-origin`.
 - Prefer concise, evidence-based recommendations over generic SEO advice.

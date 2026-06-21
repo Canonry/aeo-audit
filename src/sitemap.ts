@@ -33,6 +33,30 @@ function shouldSkipUrl(url: string): boolean {
   }
 }
 
+function normalizePathForFilter(value: string): string | null {
+  try {
+    const parsed = new URL(value)
+    return normalizeRoutePath(parsed.pathname)
+  } catch {
+    if (!value.trim()) return null
+    return normalizeRoutePath(value)
+  }
+}
+
+function normalizeRoutePath(routePath: string): string {
+  if (!routePath || routePath === '/') return '/'
+  const withoutTrailingSlash = routePath.replace(/\/+$/, '')
+  return withoutTrailingSlash.startsWith('/') ? withoutTrailingSlash : `/${withoutTrailingSlash}`
+}
+
+function buildPathFilter(paths: string[] | undefined): Set<string> | null {
+  if (!paths || paths.length === 0) return null
+  const normalized = paths
+    .map((path) => normalizePathForFilter(path))
+    .filter((path): path is string => Boolean(path))
+  return normalized.length ? new Set(normalized) : null
+}
+
 /**
  * Re-home a sitemap `<loc>` onto `targetOrigin`, preserving its path, query, and
  * fragment. Used by `--rewrite-sitemap-origin` so a sitemap that hardcodes the
@@ -555,8 +579,12 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
 
   const discovered = allEntries.length
 
-  // Filter to HTML content pages
-  const eligible = allEntries.filter((e) => !shouldSkipUrl(e.loc))
+  // Filter to HTML content pages, then optionally to changed/critical paths.
+  const pathFilter = buildPathFilter(options.includePaths)
+  const eligible = allEntries.filter((e) => (
+    !shouldSkipUrl(e.loc)
+    && (!pathFilter || pathFilter.has(normalizePathForFilter(e.loc) || ''))
+  ))
   const filtered = discovered - eligible.length
 
   // Sort by priority (highest first) if priorities exist
@@ -569,7 +597,12 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   const truncated = eligible.length - entries.length
 
   if (entries.length === 0) {
-    throw new AeoAuditError('BAD_INPUT', 'No auditable URLs found in sitemap.')
+    throw new AeoAuditError(
+      'BAD_INPUT',
+      pathFilter
+        ? 'No auditable URLs found in sitemap after applying the changed-page path filter.'
+        : 'No auditable URLs found in sitemap.',
+    )
   }
 
   options.onPlan?.({

@@ -5,6 +5,7 @@ import { runSitemapAudit } from './sitemap.js'
 import { runStaticAudit } from './static-audit.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { detectPlatform, detectPlatformBatch } from './detect-platform.js'
+import { getChangedRoutePaths, normalizeRoutePath } from './changed-pages.js'
 import { AeoAuditError, isAeoAuditError } from './errors.js'
 import {
   formatBatchPlatformJson,
@@ -91,6 +92,10 @@ interface ParsedArgs {
   allowLocal: boolean
   rewriteSitemapOrigin: boolean
   baseUrl: string | null
+  changed: boolean
+  base: string
+  includeCritical: boolean
+  criticalPaths: string[] | null
 }
 
 function isFormatterName(value: string): value is FormatterName {
@@ -119,6 +124,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     allowLocal: false,
     rewriteSitemapOrigin: false,
     baseUrl: null,
+    changed: false,
+    base: 'main',
+    includeCritical: false,
+    criticalPaths: null,
   }
 
   for (let i = 0; i < args.length; i += 1) {
@@ -174,6 +183,19 @@ function parseArgs(argv: string[]): ParsedArgs {
       result.rewriteSitemapOrigin = true
     } else if (args[i] === '--base-url' && args[i + 1]) {
       result.baseUrl = args[i + 1]
+      i += 1
+    } else if (args[i] === '--changed') {
+      result.changed = true
+    } else if (args[i] === '--base' && args[i + 1]) {
+      result.base = args[i + 1]
+      i += 1
+    } else if (args[i] === '--include-critical') {
+      result.includeCritical = true
+    } else if (args[i] === '--critical-paths' && args[i + 1]) {
+      result.criticalPaths = args[i + 1]
+        .split(',')
+        .map((path) => path.trim())
+        .filter((path) => path.length > 0)
       i += 1
     } else if (args[i] === '--help' || args[i] === '-h') {
       result.help = true
@@ -255,6 +277,16 @@ function sitemapMetaFailureMessage(pages: SitemapPageResult[]): string | null {
     .join(', ')}${missingPages.length > 3 ? ` (+${missingPages.length - 3} more)` : ''}`
 }
 
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths.map((path) => normalizeRoutePath(path)))]
+}
+
+async function resolveChangedIncludePaths(args: ParsedArgs): Promise<string[]> {
+  const changedPaths = await getChangedRoutePaths({ base: args.base })
+  const criticalPaths = args.includeCritical ? (args.criticalPaths ?? ['/']) : []
+  return uniquePaths([...changedPaths, ...criticalPaths])
+}
+
 function printHelp() {
   console.log(`
 Usage: aeo-audit <url|path> [options]
@@ -305,6 +337,12 @@ Options:
                           origin before crawling (preserving path/query). Use when a sitemap
                           hardcodes the prod/canonical domain but you want to audit a staging
                           host or local dev server that serves the same paths.
+  --changed               With --sitemap, audit only static routes changed since --base.
+                          Dynamic route templates are skipped because concrete URL params
+                          cannot be inferred safely from the file path alone.
+  --base <ref>            Git base ref for --changed (default main).
+  --include-critical      With --changed, also audit critical paths (default /).
+  --critical-paths <list> Comma-separated critical paths for --include-critical.
   --base-url <url>        In static-output mode, base URL used to map files to page URLs
                           (e.g. out/about/index.html -> <base>/about/). Default https://localhost.
   -h, --help              Show this help message
@@ -328,6 +366,7 @@ Examples:
   aeo-audit https://example.com --sitemap --require-meta
   aeo-audit http://localhost:3000 --allow-local
   aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local
+  aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local --changed --base main --include-critical
   aeo-audit https://staging.example.com --sitemap --rewrite-sitemap-origin
   aeo-audit ./out
   aeo-audit ./out --base-url https://example.com --require-meta
@@ -607,6 +646,11 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     return 1
   }
 
+  if (args.changed && !args.sitemap) {
+    console.error('Error: --changed only applies to --sitemap mode, where concrete URLs can be selected from the sitemap.')
+    return 1
+  }
+
   try {
     // Static-output mode: the positional arg is a filesystem path, audited offline.
     if (args.url && (await isStaticTarget(args.url))) {
@@ -699,6 +743,15 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     const allowPrivateHost = args.allowLocal ? normalizeTargetUrl(args.url).hostname : undefined
 
     if (args.sitemap) {
+      const includePaths = args.changed ? await resolveChangedIncludePaths(args) : undefined
+      if (args.changed && (!includePaths || includePaths.length === 0)) {
+        console.error('Error: --changed found no static route files. Dynamic route templates cannot be mapped to concrete URLs without route params; use --include-critical/--critical-paths or audit explicit URLs.')
+        return 1
+      }
+      if (includePaths) {
+        console.error(`Notice: --changed selected ${includePaths.length} sitemap path(s): ${includePaths.join(', ')}`)
+      }
+
       const options: SitemapAuditOptions = {
         factors: args.factors,
         includeGeo: args.includeGeo,
@@ -707,6 +760,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         limit: args.limit ?? undefined,
         topIssuesOnly: args.topIssues,
         rewriteOrigin: args.rewriteSitemapOrigin,
+        includePaths,
         allowPrivateHost,
         onPlan: (plan) => {
           if (plan.truncated > 0) {
