@@ -94,4 +94,26 @@ describe('runSitemapAudit option forwarding', () => {
     const [, options] = runAeoAuditMock.mock.calls[0]
     expect(options.includeLighthouse).toBeUndefined()
   })
+
+  it('filters sitemap entries by included paths', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(`<?xml version="1.0" encoding="UTF-8"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+          <url><loc>http://1.1.1.1/</loc></url>
+          <url><loc>http://1.1.1.1/about/</loc></url>
+          <url><loc>http://1.1.1.1/contact?ref=sitemap</loc></url>
+        </urlset>`, { status: 200, headers: { 'content-type': 'application/xml' } }),
+    ))
+
+    const report = await runSitemapAudit(PAGE_URL, {
+      sitemapUrl: SITEMAP_URL,
+      includePaths: ['/', '/contact'],
+    })
+
+    const crawled = runAeoAuditMock.mock.calls.map((call) => call[0]).sort()
+    expect(crawled).toEqual(['http://1.1.1.1/', 'http://1.1.1.1/contact?ref=sitemap'])
+    expect(report.pagesDiscovered).toBe(3)
+    expect(report.pagesAudited).toBe(2)
+    expect(report.pagesFiltered).toBe(1)
+  })
 })
