@@ -30,13 +30,13 @@ interface ReadBodyOptions {
   requireHtmlSniff?: boolean
 }
 
-interface FetchWithRedirectOptions {
+export interface FetchWithRedirectOptions {
   timeoutMs: number
   maxRedirects?: number
   allowPrivateHost?: string
 }
 
-interface RedirectFetchResult {
+export interface RedirectFetchResult {
   response: Response
   finalUrl: string
   redirectChain: RedirectHop[]
@@ -277,7 +277,15 @@ async function timedFetch(url: URL | string, options: TimedFetchOptions): Promis
   }
 }
 
-async function fetchWithValidatedRedirects(startUrl: URL | string, options: FetchWithRedirectOptions): Promise<RedirectFetchResult> {
+/**
+ * Fetch `startUrl`, following redirects manually and re-validating EVERY hop through
+ * `validatePublicRequestTarget` (hostname blocklist + DNS→private-IP check). This is
+ * the single SSRF-safe entry point for any outbound request to a URL the caller does
+ * not fully control — the main page fetch, the auxiliary-file probes, and (since the
+ * sitemap runner) every sitemap / robots / child-`<loc>` fetch route through it. The
+ * caller gets a not-yet-read `Response` plus the final URL and redirect chain.
+ */
+export async function fetchWithValidatedRedirects(startUrl: URL | string, options: FetchWithRedirectOptions): Promise<RedirectFetchResult> {
   const { timeoutMs, maxRedirects = MAX_REDIRECTS, allowPrivateHost } = options
 
   let currentUrl = new URL(startUrl.toString())

@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.1.2 (2026-06-24)
+
+### Fixed
+- **SSRF: sitemap mode now validates every outbound fetch (security).** In `--sitemap` mode the runner fetched the sitemap, `robots.txt`, and — critically — every sitemap-index child `<loc>` through a raw `fetch()` with no SSRF guard and auto-follow redirects. A malicious or compromised target could therefore steer the auditing host onto internal endpoints: a public `/sitemap.xml` that `302`s to `http://169.254.169.254/…`, a sitemap index listing `<loc>http://169.254.169.254/…</loc>`, or an internal host passed directly via `--sitemap`/the audited origin all reached cloud-metadata and internal services (the single-URL path was already guarded; only the sitemap fetches were exposed). Every sitemap/robots/child-`<loc>` fetch now routes through the same `fetchWithValidatedRedirects` guard used by the page fetch — hostname blocklist + DNS→private-IP rejection re-checked on **every** redirect hop, with redirects followed manually. `--allow-local` continues to permit only the single host you named (host-only, per-hop), so a redirect or `<loc>` to any *other* private host stays blocked. No CLI, output, or scoring change.
+
 ## 4.1.1 (2026-06-20)
 
 ### Fixed

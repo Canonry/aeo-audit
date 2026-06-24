@@ -72,6 +72,9 @@ describe('runSitemapAudit --rewrite-sitemap-origin', () => {
     await runSitemapAudit('http://localhost:3000', {
       sitemapUrl: 'http://localhost:3000/sitemap.xml',
       rewriteOrigin: true,
+      // The sitemap itself is fetched from localhost; opt the loopback host past the
+      // SSRF guard exactly as `--allow-local` does.
+      allowPrivateHost: 'localhost',
     })
 
     const crawled = runAeoAuditMock.mock.calls.map((c) => c[0]).sort()
@@ -81,6 +84,7 @@ describe('runSitemapAudit --rewrite-sitemap-origin', () => {
   it('crawls the literal prod <loc>s when rewriting is off', async () => {
     await runSitemapAudit('http://localhost:3000', {
       sitemapUrl: 'http://localhost:3000/sitemap.xml',
+      allowPrivateHost: 'localhost',
     })
 
     const crawled = runAeoAuditMock.mock.calls.map((c) => c[0])

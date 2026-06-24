@@ -1,6 +1,6 @@
 import { AeoAuditError } from './errors.js'
 import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
-import { normalizeTargetUrl } from './fetch-page.js'
+import { fetchWithValidatedRedirects, normalizeTargetUrl } from './fetch-page.js'
 import { runAeoAudit } from './index.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { PAGE_SPECIFIC_FACTOR_IDS, PAGE_SPECIFIC_PRESENT_THRESHOLD } from './scoring.js'
@@ -16,7 +16,6 @@ import type {
   SitemapPageResult,
 } from './types.js'
 
-const USER_AGENT = 'AINYC-AEO-Audit/1.0'
 const SITEMAP_TIMEOUT_MS = 10_000
 const SITEMAP_MAX_BYTES = 5 * 1024 * 1024
 const DEFAULT_LIMIT = 200
@@ -147,33 +146,50 @@ interface SitemapFetchResult {
   status: number
 }
 
-async function fetchSitemapResponse(url: string): Promise<SitemapFetchResult> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), SITEMAP_TIMEOUT_MS)
-
+/**
+ * Fetch a sitemap / robots / child-`<loc>` URL through the SSRF guard.
+ *
+ * Sitemap mode fetches URLs the *target* controls — the discovery origin, a
+ * `Sitemap:` directive, and (crucially) every child `<loc>` of a sitemap index, any
+ * of which a malicious target can point at an internal host (cloud metadata at
+ * 169.254.169.254, internal services). Routing through `fetchWithValidatedRedirects`
+ * validates the host against the private-IP blocklist on EVERY hop and follows
+ * redirects manually, so a public target that 302s to an internal host — or a child
+ * `<loc>` pointing internally — is blocked before any internal request is made.
+ *
+ * `allowPrivateHost` (from `--allow-local`) names the single host permitted to resolve
+ * privately; the match is host-only and per-hop, so a redirect or `<loc>` to any OTHER
+ * private host stays blocked even when it is set.
+ */
+async function fetchSitemapResponse(url: string, allowPrivateHost?: string): Promise<SitemapFetchResult> {
+  let response: Response
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      signal: controller.signal,
-      headers: { 'User-Agent': USER_AGENT, Accept: '*/*' },
+    const result = await fetchWithValidatedRedirects(url, {
+      timeoutMs: SITEMAP_TIMEOUT_MS,
+      allowPrivateHost,
     })
+    response = result.response
+  } catch (error) {
+    if (error instanceof AeoAuditError) throw error
+    throw new AeoAuditError('UNREACHABLE', 'Could not fetch sitemap.', { cause: error })
+  }
 
-    if (!response.ok) {
-      // Drain the body so the socket can be released.
-      try {
-        await response.body?.cancel()
-      } catch {
-        /* ignore */
-      }
-      return { body: '', status: response.status }
+  if (!response.ok) {
+    // Drain the body so the socket can be released.
+    try {
+      await response.body?.cancel()
+    } catch {
+      /* ignore */
     }
+    return { body: '', status: response.status }
+  }
 
-    const reader = response.body?.getReader()
-    if (!reader) return { body: '', status: response.status }
+  const reader = response.body?.getReader()
+  if (!reader) return { body: '', status: response.status }
 
-    const chunks: Buffer[] = []
-    let totalBytes = 0
-
+  const chunks: Buffer[] = []
+  let totalBytes = 0
+  try {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
@@ -185,21 +201,16 @@ async function fetchSitemapResponse(url: string): Promise<SitemapFetchResult> {
       }
       chunks.push(chunk)
     }
-
-    return { body: Buffer.concat(chunks).toString('utf8'), status: response.status }
   } catch (error) {
     if (error instanceof AeoAuditError) throw error
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new AeoAuditError('TIMEOUT', `Sitemap fetch timed out after ${SITEMAP_TIMEOUT_MS}ms.`)
-    }
-    throw new AeoAuditError('UNREACHABLE', 'Could not fetch sitemap.', { cause: error })
-  } finally {
-    clearTimeout(timer)
+    throw new AeoAuditError('UNREACHABLE', 'Could not read sitemap response.', { cause: error })
   }
+
+  return { body: Buffer.concat(chunks).toString('utf8'), status: response.status }
 }
 
-async function fetchSitemapBody(url: string): Promise<string> {
-  const result = await fetchSitemapResponse(url)
+async function fetchSitemapBody(url: string, allowPrivateHost?: string): Promise<string> {
+  const result = await fetchSitemapResponse(url, allowPrivateHost)
   if (result.status < 200 || result.status >= 300) {
     throw new AeoAuditError('UNREACHABLE', `Sitemap returned HTTP ${result.status}.`)
   }
@@ -215,12 +226,12 @@ function looksLikeSitemap(body: string): boolean {
  * Issue #32: try the documented sitemap paths in order, then fall back to
  * Sitemap: directives in /robots.txt. Returns the first URL that 200s.
  */
-export async function discoverSitemapUrl(origin: string): Promise<string | null> {
+export async function discoverSitemapUrl(origin: string, allowPrivateHost?: string): Promise<string | null> {
   const candidates = [`${origin}/sitemap.xml`, `${origin}/sitemap-index.xml`]
 
   for (const candidate of candidates) {
     try {
-      const result = await fetchSitemapResponse(candidate)
+      const result = await fetchSitemapResponse(candidate, allowPrivateHost)
       // Require an actual sitemap marker — many SPAs serve the HTML shell for
       // unknown routes, returning 200 with `<!doctype html>` for /sitemap.xml.
       if (result.status >= 200 && result.status < 300 && looksLikeSitemap(result.body)) {
@@ -234,7 +245,7 @@ export async function discoverSitemapUrl(origin: string): Promise<string | null>
 
   // robots.txt fallback — many sites declare a non-standard sitemap location there.
   try {
-    const robots = await fetchSitemapResponse(`${origin}/robots.txt`)
+    const robots = await fetchSitemapResponse(`${origin}/robots.txt`, allowPrivateHost)
     if (robots.status >= 200 && robots.status < 300 && robots.body) {
       const sitemapDirective = parseRobotsSitemap(robots.body, origin)
       if (sitemapDirective) {
@@ -264,9 +275,10 @@ export function parseRobotsSitemap(robotsBody: string, origin: string): string |
     if (!match) continue
     try {
       const resolved = new URL(match[1], origin)
-      // Only honor same-origin directives. fetchSitemapBody has no SSRF guard,
-      // so accepting an absolute URL at an arbitrary host would let a target
-      // steer requests from the auditing host to internal endpoints.
+      // Only honor same-origin directives. The fetch layer now SSRF-validates every
+      // hop, so a cross-origin directive at a private host is blocked regardless;
+      // restricting to same-origin here is defense-in-depth plus scope control —
+      // a target should not steer the auditor onto an unrelated public host either.
       if (resolved.origin !== originUrl.origin) continue
       return resolved.toString()
     } catch {
@@ -276,17 +288,19 @@ export function parseRobotsSitemap(robotsBody: string, origin: string): string |
   return null
 }
 
-async function resolveSitemapUrls(sitemapUrl: string): Promise<SitemapEntry[]> {
-  const body = await fetchSitemapBody(sitemapUrl)
+async function resolveSitemapUrls(sitemapUrl: string, allowPrivateHost?: string): Promise<SitemapEntry[]> {
+  const body = await fetchSitemapBody(sitemapUrl, allowPrivateHost)
   const entries = parseSitemapXml(body)
 
-  // If it's a sitemap index, fetch child sitemaps
+  // If it's a sitemap index, fetch child sitemaps. Each child <loc> is fully
+  // target-controlled, so it goes through the same SSRF guard as every other fetch;
+  // a child pointing at a private host is blocked and contributes no URLs.
   const isSitemapIndex = body.includes('<sitemapindex')
   if (isSitemapIndex) {
     const childResults = await Promise.all(
       entries.map(async (entry) => {
         try {
-          const childBody = await fetchSitemapBody(entry.loc)
+          const childBody = await fetchSitemapBody(entry.loc, allowPrivateHost)
           return parseSitemapXml(childBody)
         } catch {
           return []
@@ -549,7 +563,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   if (options.sitemapUrl) {
     sitemapUrl = options.sitemapUrl
   } else {
-    const discovered = await discoverSitemapUrl(origin)
+    const discovered = await discoverSitemapUrl(origin, options.allowPrivateHost)
     if (!discovered) {
       throw new AeoAuditError(
         'UNREACHABLE',
@@ -560,7 +574,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   }
 
   // Fetch and parse sitemap
-  let allEntries = await resolveSitemapUrls(sitemapUrl)
+  let allEntries = await resolveSitemapUrls(sitemapUrl, options.allowPrivateHost)
 
   // Opt-in origin rewriting (issue from field feedback): re-home every <loc> onto
   // the origin the user named so a sitemap hardcoding the prod/canonical domain can
