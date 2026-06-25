@@ -763,6 +763,11 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         includePaths,
         allowPrivateHost,
         onPlan: (plan) => {
+          if (plan.childSitemapsSkipped > 0) {
+            console.error(
+              `Notice: sitemap index exceeded the child-sitemap safety cap; ${plan.childSitemapsSkipped} child sitemap(s) were not fetched.`,
+            )
+          }
           if (plan.truncated > 0) {
             console.error(
               `Notice: sitemap has ${plan.discovered} URLs; auditing top ${plan.willAudit} by priority (--limit ${plan.effectiveLimit}). ${plan.truncated} pages skipped. Pass --limit ${Math.max(plan.discovered, 9999)} to audit all.`,

@@ -20,6 +20,12 @@ const SITEMAP_TIMEOUT_MS = 10_000
 const SITEMAP_MAX_BYTES = 5 * 1024 * 1024
 const DEFAULT_LIMIT = 200
 const DEFAULT_CONCURRENCY = 5
+// Safety ceiling on how many child sitemaps a single index may fan out to. A
+// malicious or misconfigured index can list tens of thousands of <loc>s; without a
+// cap every one is fetched (see resolveSitemapUrls), exhausting the shared runner.
+// 1000 children × 50k URLs each is far more than any audit consumes, so a legitimate
+// site never notices, while the pathological case stays bounded.
+const MAX_CHILD_SITEMAPS = 1000
 
 const SKIP_EXTENSIONS = new Set(['.pdf', '.txt', '.xml', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.mp4', '.mp3', '.zip', '.gz', '.css', '.js'])
 
@@ -288,7 +294,13 @@ export function parseRobotsSitemap(robotsBody: string, origin: string): string |
   return null
 }
 
-async function resolveSitemapUrls(sitemapUrl: string, allowPrivateHost?: string): Promise<SitemapEntry[]> {
+interface ResolvedSitemap {
+  entries: SitemapEntry[]
+  /** Child sitemaps dropped by the MAX_CHILD_SITEMAPS safety cap (0 when none). */
+  childSitemapsSkipped: number
+}
+
+async function resolveSitemapUrls(sitemapUrl: string, allowPrivateHost?: string): Promise<ResolvedSitemap> {
   const body = await fetchSitemapBody(sitemapUrl, allowPrivateHost)
   const entries = parseSitemapXml(body)
 
@@ -297,20 +309,23 @@ async function resolveSitemapUrls(sitemapUrl: string, allowPrivateHost?: string)
   // a child pointing at a private host is blocked and contributes no URLs.
   const isSitemapIndex = body.includes('<sitemapindex')
   if (isSitemapIndex) {
-    const childResults = await Promise.all(
-      entries.map(async (entry) => {
-        try {
-          const childBody = await fetchSitemapBody(entry.loc, allowPrivateHost)
-          return parseSitemapXml(childBody)
-        } catch {
-          return []
-        }
-      }),
-    )
-    return childResults.flat()
+    // Cap the fan-out and fetch with bounded concurrency. Without this an index can
+    // steer the runner into tens of thousands of simultaneous fetches (a DoS) and
+    // accumulate millions of entries before the later --limit slice ever applies.
+    const children = entries.slice(0, MAX_CHILD_SITEMAPS)
+    const childSitemapsSkipped = entries.length - children.length
+    const childResults = await mapWithConcurrency(children, DEFAULT_CONCURRENCY, async (entry) => {
+      try {
+        const childBody = await fetchSitemapBody(entry.loc, allowPrivateHost)
+        return parseSitemapXml(childBody)
+      } catch {
+        return []
+      }
+    })
+    return { entries: childResults.flat(), childSitemapsSkipped }
   }
 
-  return entries
+  return { entries, childSitemapsSkipped: 0 }
 }
 
 async function mapWithConcurrency<T, R>(
@@ -574,7 +589,8 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   }
 
   // Fetch and parse sitemap
-  let allEntries = await resolveSitemapUrls(sitemapUrl, options.allowPrivateHost)
+  const { entries: resolvedEntries, childSitemapsSkipped } = await resolveSitemapUrls(sitemapUrl, options.allowPrivateHost)
+  let allEntries = resolvedEntries
 
   // Opt-in origin rewriting (issue from field feedback): re-home every <loc> onto
   // the origin the user named so a sitemap hardcoding the prod/canonical domain can
@@ -625,6 +641,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     truncated,
     willAudit: entries.length,
     effectiveLimit,
+    childSitemapsSkipped,
   })
 
   // Forward the in-process optional factors so opt-in flags behave the same as in
