@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.1.3 (2026-06-24)
+
+### Fixed
+- **SSRF: pin the validated IP to close a DNS-rebinding TOCTOU (security).** The guard resolved the host and checked its IPs, then handed the hostname to `fetch()`, which re-resolved at connect time — so a low-TTL record could answer public during validation and a private IP (`127.0.0.1`, `169.254.169.254`) at connect, on any redirect hop. Outbound requests now go through an `undici` dispatcher whose connect-time DNS lookup returns **only** public IPs and connects to exactly that address, so the IP validated is the IP connected to; the hostname is still used for TLS SNI and the `Host` header, so HTTPS certificate validation is unchanged. `--allow-local` keeps using the default resolver for the single host you named. Adds `undici` as a dependency. No CLI, output, or scoring change.
+
 ## 4.1.2 (2026-06-24)
 
 ### Fixed
