@@ -1,6 +1,6 @@
 {
   "name": "@ainyc/aeo-audit",
-  "version": "4.1.2",
+  "version": "4.1.3",
   "description": "The most comprehensive open-source Answer Engine Optimization (AEO) audit tool. Scores websites across 16 ranking factors that determine AI citation.",
   "type": "module",
   "main": "./dist/index.js",
@@ -49,7 +49,8 @@
   },
   "dependencies": {
     "cheerio": "^1.0.0",
-    "ipaddr.js": "^2.3.0"
+    "ipaddr.js": "^2.3.0",
+    "undici": "^8.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

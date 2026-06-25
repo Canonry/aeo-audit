@@ -1,5 +1,8 @@
 import dns from 'node:dns/promises'
+import { lookup as dnsLookup, type LookupAddress } from 'node:dns'
+import type { LookupFunction } from 'node:net'
 import ipaddr from 'ipaddr.js'
+import { fetch as undiciFetch, Agent } from 'undici'
 import { AeoAuditError, isAeoAuditError } from './errors.js'
 import type {
   AuxiliaryDiagnostics,
@@ -23,6 +26,8 @@ interface TimedFetchOptions {
   timeoutMs: number
   headers?: HeadersInit
   redirect?: RequestRedirect
+  /** Single host allowed to resolve privately; when it matches, DNS pinning is skipped. */
+  allowPrivateHost?: string
 }
 
 interface ReadBodyOptions {
@@ -250,13 +255,65 @@ function isRedirectStatus(status: number): boolean {
   return status >= 300 && status < 400
 }
 
+/**
+ * Connect-time DNS lookup for the pinning dispatcher: resolve the host and hand the
+ * socket ONLY public IPs. Because undici connects to exactly the address this returns,
+ * a low-TTL record that passed the pre-fetch `validatePublicRequestTarget` check but
+ * rebinds to a private IP at connect time is rejected here — closing the validate-then-
+ * connect (TOCTOU) gap that per-hop re-validation alone cannot.
+ */
+export const validatingLookup: LookupFunction = (hostname, options, callback) => {
+  dnsLookup(hostname, { all: true, family: options.family ?? 0, verbatim: true }, (error, addresses) => {
+    if (error) {
+      callback(error, '')
+      return
+    }
+
+    const publicAddresses = (addresses as LookupAddress[]).filter((entry) => isPublicIpAddress(entry.address))
+    if (publicAddresses.length === 0) {
+      callback(new AeoAuditError('BLOCKED_IP', 'URL resolves to a blocked or private IP address.'), '')
+      return
+    }
+
+    if (options.all) {
+      callback(null, publicAddresses)
+      return
+    }
+
+    callback(null, publicAddresses[0].address, publicAddresses[0].family)
+  })
+}
+
+// One process-wide dispatcher (no per-request allocation or socket leak). Every fetch
+// to a host NOT named by --allow-local goes through it; the allowed host keeps the
+// default resolver so a deliberately-private target (localhost, a dev server) still works.
+const pinnedDispatcher = new Agent({ connect: { lookup: validatingLookup } })
+
+// Node's global fetch rejects a userland-undici dispatcher, so real requests go through
+// undici's own fetch with the pinning dispatcher attached. Tests replace globalThis.fetch
+// with canned responses; pinning is a socket-layer concern those mocks never reach, so
+// when the global has been stubbed we defer to it. The dedicated pin tests use real sockets.
+const builtinFetch = globalThis.fetch
+async function pinnedHostFetch(url: string, init: RequestInit, pin: boolean): Promise<Response> {
+  if (globalThis.fetch !== builtinFetch) {
+    return globalThis.fetch(url, init)
+  }
+  const undiciInit = (pin ? { ...init, dispatcher: pinnedDispatcher } : init) as unknown as Parameters<typeof undiciFetch>[1]
+  const response = await undiciFetch(url, undiciInit)
+  return response as unknown as Response
+}
+
 async function timedFetch(url: URL | string, options: TimedFetchOptions): Promise<Response> {
-  const { timeoutMs, headers, redirect = 'manual' } = options
+  const { timeoutMs, headers, redirect = 'manual', allowPrivateHost } = options
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
+  // Skip pinning only for the single host the caller opted out via --allow-local; that
+  // host legitimately resolves to a private IP and the pinning lookup would block it.
+  const pin = !isHostExplicitlyAllowed(new URL(url.toString()).hostname, allowPrivateHost)
+
   try {
-    return await fetch(url, {
+    return await pinnedHostFetch(url.toString(), {
       method: 'GET',
       redirect,
       signal: controller.signal,
@@ -265,7 +322,7 @@ async function timedFetch(url: URL | string, options: TimedFetchOptions): Promis
         Accept: '*/*',
         ...(headers || {}),
       },
-    })
+    }, pin)
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new AeoAuditError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`, { cause: error })
@@ -294,7 +351,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
   for (;;) {
     await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
 
-    const response = await timedFetch(currentUrl, { timeoutMs, redirect: 'manual' })
+    const response = await timedFetch(currentUrl, { timeoutMs, redirect: 'manual', allowPrivateHost })
 
     if (!isRedirectStatus(response.status)) {
       return {
@@ -552,6 +609,7 @@ async function probeStatusWithHeaders(
         timeoutMs: DIAGNOSTIC_TIMEOUT_MS,
         headers,
         redirect: 'manual',
+        allowPrivateHost,
       })
     } catch {
       return null
