@@ -50,7 +50,7 @@
   "dependencies": {
     "cheerio": "^1.0.0",
     "ipaddr.js": "^2.3.0",
-    "undici": "^8.5.0"
+    "undici": "^7.22.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
