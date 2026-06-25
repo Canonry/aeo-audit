@@ -377,6 +377,8 @@ export interface SitemapAuditPlan {
   truncated: number
   willAudit: number
   effectiveLimit: number
+  /** Child sitemaps dropped by the per-index safety cap (0 when none were dropped). */
+  childSitemapsSkipped: number
 }
 
 export interface SitemapAuditOptions extends RunAeoAuditOptions {

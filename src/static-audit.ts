@@ -227,6 +227,8 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     truncated,
     willAudit: selected.length,
     effectiveLimit,
+    // Static mode reads local files; there is no sitemap index to fan out from.
+    childSitemapsSkipped: 0,
   })
 
   const auditOptions: RunAeoAuditOptions = {

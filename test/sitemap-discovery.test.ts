@@ -55,6 +55,10 @@ describe('discoverSitemapUrl', () => {
   let server: Server
   let origin: string
   let handler: (path: string) => { status: number; body: string; contentType?: string }
+  // The test server is on 127.0.0.1 (a private/loopback IP). Discovery now SSRF-
+  // validates every fetch, so the loopback host must be opted in via allowPrivateHost
+  // exactly as `--allow-local` does in production.
+  const ALLOW_LOOPBACK = '127.0.0.1'
 
   beforeAll(async () => {
     server = createServer((req, res) => {
@@ -76,7 +80,7 @@ describe('discoverSitemapUrl', () => {
       if (path === '/sitemap.xml') return { status: 200, body: '<urlset></urlset>' }
       return { status: 404, body: '' }
     }
-    expect(await discoverSitemapUrl(origin)).toBe(`${origin}/sitemap.xml`)
+    expect(await discoverSitemapUrl(origin, ALLOW_LOOPBACK)).toBe(`${origin}/sitemap.xml`)
   })
 
   it('falls back to /sitemap-index.xml when /sitemap.xml is 404 (issue #32)', async () => {
@@ -85,7 +89,7 @@ describe('discoverSitemapUrl', () => {
       if (path === '/sitemap-index.xml') return { status: 200, body: '<sitemapindex></sitemapindex>' }
       return { status: 404, body: '' }
     }
-    expect(await discoverSitemapUrl(origin)).toBe(`${origin}/sitemap-index.xml`)
+    expect(await discoverSitemapUrl(origin, ALLOW_LOOPBACK)).toBe(`${origin}/sitemap-index.xml`)
   })
 
   it('falls back to robots.txt Sitemap directive when both default paths 404', async () => {
@@ -99,12 +103,12 @@ describe('discoverSitemapUrl', () => {
       }
       return { status: 404, body: '' }
     }
-    expect(await discoverSitemapUrl(origin)).toBe(`${origin}/custom/path/sitemap.xml`)
+    expect(await discoverSitemapUrl(origin, ALLOW_LOOPBACK)).toBe(`${origin}/custom/path/sitemap.xml`)
   })
 
   it('returns null when no sitemap is found anywhere', async () => {
     handler = () => ({ status: 404, body: '' })
-    expect(await discoverSitemapUrl(origin)).toBeNull()
+    expect(await discoverSitemapUrl(origin, ALLOW_LOOPBACK)).toBeNull()
   })
 
   it('ignores non-XML 200 responses (e.g. HTML 200 from a SPA catch-all route)', async () => {
@@ -113,6 +117,6 @@ describe('discoverSitemapUrl', () => {
       if (path === '/sitemap-index.xml') return { status: 200, body: '<sitemapindex></sitemapindex>' }
       return { status: 404, body: '' }
     }
-    expect(await discoverSitemapUrl(origin)).toBe(`${origin}/sitemap-index.xml`)
+    expect(await discoverSitemapUrl(origin, ALLOW_LOOPBACK)).toBe(`${origin}/sitemap-index.xml`)
   })
 })

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import test, { type TestContext } from 'node:test'
+import test, { before, type TestContext } from 'node:test'
 
 import { strongHtml, defaultAuxiliary } from '../fixtures/pages.js'
 import type { AuditReport } from '../../src/types.js'
@@ -124,6 +124,19 @@ function captureConsole(t: TestContext): { stdout: string[]; stderr: string[] } 
 
   return { stdout, stderr }
 }
+
+// Load the compiled CLI once before any test installs a fetch mock. fetch-page.ts
+// captures globalThis.fetch as `builtinFetch` at module load and defers to a stubbed
+// fetch only when the live global differs from that capture (see installMockFetch). If
+// the module first loaded inside a test — after installMockFetch() ran — builtinFetch
+// would capture the mock, the guard would treat them as equal, and requests would bypass
+// the mock through a real pinned undici fetch. Warming it here makes builtinFetch the real
+// fetch, so the per-test mocks are honored. It must be a runtime dynamic import (not a
+// static one) because dist/ is a gitignored artifact built by pretest:e2e, absent when
+// typecheck runs.
+before(async () => {
+  await import(new URL('../../dist/cli.js', import.meta.url).href)
+})
 
 test('--require-meta forces exit 1 when the fixture has no <meta name="description">', async (t) => {
   installMockClock(t)
