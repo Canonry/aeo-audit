@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.2.0 (2026-06-27)
+
+### Changed
+- **Content Signals Policy: score the values, not mere presence (scoring change).** The `ai-crawler-access` factor used to award a flat +8 for *any* `Content-Signal:` line in `robots.txt`, so a site declaring `ai-input=no` — which asks answer engines not to use the page for AI answers (RAG/grounding) — was rewarded for opting out of AEO. The audit now parses the per-`User-agent` Content Signals directive (Cloudflare / [contentsignals.org](https://contentsignals.org)) and scores each signal by its value: `ai-input=yes` and `search=yes` are credited (+6 / +2), `ai-input=no` and `search=no` are penalized and flagged with a fix recommendation, and `ai-train=no` is neutral for citation (it blocks training, not answers, and is Cloudflare's own default). The ideal `search=yes, ai-input=yes` policy still nets +8, so AEO-friendly sites are unaffected; only sites that declare restrictive or partial signals see a score change. New finding codes: `ai-crawler-access.content-signal.{ai-input-allowed,ai-input-blocked,search-allowed,search-blocked,ai-train-blocked}`. No CLI or output-format change.
+
 ## 4.1.3 (2026-06-24)
 
 ### Fixed
