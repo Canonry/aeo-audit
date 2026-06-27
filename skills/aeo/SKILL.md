@@ -295,7 +295,7 @@ Use when the user wants code changes applied after the audit.
    - E-E-A-T signals
    - FAQ markup
    - freshness metadata
-   - agent-readiness signals: per-page Markdown source endpoints, `robots.txt` `Content-Signal` directives, and A2A agent cards (aligned with specification.website)
+   - agent-readiness signals: per-page Markdown source endpoints, `robots.txt` `Content-Signal` directives (the audit scores the values — set `ai-input=yes`/`search=yes` to permit AI answers and search indexing; `ai-input=no` opts out of the real-time AI use AEO depends on), and A2A agent cards (aligned with specification.website)
 5. Re-run the audit and report the score delta.
 
 Rules:

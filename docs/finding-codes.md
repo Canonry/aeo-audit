@@ -197,6 +197,11 @@ Every `AuditFinding` carries a stable `code` so integrations can key on a machin
 - `ai-crawler-access.crawler.blocked`
 - `ai-crawler-access.sitemap.found`
 - `ai-crawler-access.content-signal.found`
+- `ai-crawler-access.content-signal.ai-input-allowed`
+- `ai-crawler-access.content-signal.ai-input-blocked`
+- `ai-crawler-access.content-signal.search-allowed`
+- `ai-crawler-access.content-signal.search-blocked`
+- `ai-crawler-access.content-signal.ai-train-blocked`
 
 ### Named Entities
 
