@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { createServer } from 'node:http'
+import type { Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import test, { before, type TestContext } from 'node:test'
 
-import { strongHtml, defaultAuxiliary } from '../fixtures/pages.js'
-import type { AuditReport } from '../../src/types.js'
+import { strongHtml, weakHtml, defaultAuxiliary } from '../fixtures/pages.js'
+import type { AuditReport, SitemapAuditReport } from '../../src/types.js'
 
 const FIXED_NOW = '2026-03-08T12:00:00.000Z'
 const FIXTURE_URL = 'http://1.1.1.1'
 const FIXTURE_ORIGIN = `${FIXTURE_URL}/`
+const LARGE_SITEMAP_PAGE_COUNT = 90
 const RealDate = Date
 
 interface MockHttpResponse {
@@ -125,6 +131,85 @@ function captureConsole(t: TestContext): { stdout: string[]; stderr: string[] } 
   return { stdout, stderr }
 }
 
+async function closeServer(server: Server): Promise<void> {
+  if (!server.listening) return
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
+}
+
+async function startLargeSitemapServer(t: TestContext): Promise<string> {
+  let origin = ''
+  const pagePaths = Array.from({ length: LARGE_SITEMAP_PAGE_COUNT }, (_, i) => `/page-${i}/`)
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', origin)
+
+    if (url.pathname === '/sitemap.xml') {
+      res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8' })
+      res.end(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${pagePaths.map((pagePath) => `  <url><loc>${origin}${pagePath}</loc><priority>0.5</priority></url>`).join('\n')}
+</urlset>`)
+      return
+    }
+
+    if (url.pathname === '/robots.txt') {
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end(`User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`)
+      return
+    }
+
+    if (url.pathname === '/llms.txt' || url.pathname === '/llms-full.txt') {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('not found')
+      return
+    }
+
+    if (pagePaths.includes(url.pathname)) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(weakHtml)
+      return
+    }
+
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('not found')
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address() as AddressInfo
+  origin = `http://127.0.0.1:${address.port}`
+
+  t.after(async () => {
+    await closeServer(server)
+  })
+
+  return origin
+}
+
+async function spawnCli(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const child = spawn(process.execPath, [new URL('../../bin/aeo-audit.js', import.meta.url).pathname, ...args], {
+    cwd: new URL('../..', import.meta.url),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  const stdoutChunks: Buffer[] = []
+  const stderrChunks: Buffer[] = []
+  child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk))
+  child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
+
+  const [code] = await once(child, 'close') as [number | null]
+
+  return {
+    code,
+    stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+    stderr: Buffer.concat(stderrChunks).toString('utf8'),
+  }
+}
+
 // Load the compiled CLI once before any test installs a fetch mock. fetch-page.ts
 // captures globalThis.fetch as `builtinFetch` at module load and defers to a stubbed
 // fetch only when the live global differs from that capture (see installMockFetch). If
@@ -233,4 +318,28 @@ test('compiled CLI returns the expected JSON report for the fixture site', async
       { id: 'geographic-signals', score: 94 },
     ],
   )
+})
+
+test('bin wrapper flushes large piped sitemap JSON before exiting', async (t) => {
+  const origin = await startLargeSitemapServer(t)
+
+  const result = await spawnCli([
+    origin,
+    '--sitemap',
+    '--limit',
+    String(LARGE_SITEMAP_PAGE_COUNT),
+    '--top-issues',
+    '--format',
+    'json',
+    '--allow-local',
+  ])
+
+  assert.equal(result.code, 1, 'weak fixture sitemap should preserve the audit failure exit code')
+  assert.equal(result.stderr, '')
+  assert.ok(result.stdout.length > 64 * 1024, 'regression fixture should exceed the usual pipe buffer size')
+
+  const report = JSON.parse(result.stdout) as SitemapAuditReport
+  assert.equal(report.pagesAudited, LARGE_SITEMAP_PAGE_COUNT)
+  assert.equal(report.pages.length, LARGE_SITEMAP_PAGE_COUNT)
+  assert.ok(report.aggregateScore < 70)
 })
