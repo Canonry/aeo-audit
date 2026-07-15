@@ -20,6 +20,7 @@ function sitemapReport(prioritizedFixes: PrioritizedFix[]): SitemapAuditReport {
     criticalDefects: [],
     crossCuttingIssues: [],
     prioritizedFixes,
+    budget: { exhausted: false, discoveryComplete: true },
   }
 }
 

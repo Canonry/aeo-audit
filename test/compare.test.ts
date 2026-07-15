@@ -113,6 +113,7 @@ function sitemapReport(opts: {
     criticalDefects: opts.defects ?? [],
     crossCuttingIssues: [],
     prioritizedFixes: [],
+    budget: { exhausted: false, discoveryComplete: true },
   }
   if (opts.engineVersion !== null) {
     report.compareMeta = {

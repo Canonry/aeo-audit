@@ -69,6 +69,7 @@ function sitemapReport(score: number): SitemapAuditReport {
     criticalDefects: [],
     crossCuttingIssues: [],
     prioritizedFixes: [],
+    budget: { exhausted: false, discoveryComplete: true },
   }
 }
 

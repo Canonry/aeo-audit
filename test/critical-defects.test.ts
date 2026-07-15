@@ -311,6 +311,7 @@ describe('formatters list every affected page (no truncation)', () => {
       criticalDefects,
       crossCuttingIssues: [],
       prioritizedFixes,
+      budget: { exhausted: false, discoveryComplete: true },
     }
   }
 

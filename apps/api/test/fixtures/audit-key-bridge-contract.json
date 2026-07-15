@@ -1,0 +1,21 @@
+{
+  "request": {
+    "keyHash": "f7f61a6fc9d53d18dc3bfb9f89941efe0f5629cb38186b8c105b253560f4c650"
+  },
+  "active": {
+    "status": "active",
+    "keyId": "key_01",
+    "agencyId": "agency_01",
+    "name": "Production",
+    "keyPrefix": "aak_0123",
+    "createdAt": "2026-07-15T12:30:45.000Z",
+    "lastUsedAt": null
+  },
+  "revoked": {
+    "status": "revoked",
+    "keyId": "key_01"
+  },
+  "unknown": {
+    "status": "unknown"
+  }
+}

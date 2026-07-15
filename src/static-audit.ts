@@ -299,6 +299,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     criticalDefects,
     crossCuttingIssues,
     prioritizedFixes,
+    budget: { exhausted: false, discoveryComplete: true },
   }
 
   return { kind: 'multi', report }

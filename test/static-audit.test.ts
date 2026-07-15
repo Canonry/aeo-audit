@@ -134,7 +134,8 @@ describe('runStaticAudit critical defects (issue #42)', () => {
     expect(topFix.affectedPages).toContain('https://example.com/')
 
     // The report carries a schema version so agent parsers can detect shape drift.
-    expect(result.report.schemaVersion).toBe('3.1')
+    expect(result.report.schemaVersion).toBe('3.2')
+    expect(result.report.budget).toEqual({ exhausted: false, discoveryComplete: true })
   })
 })
 

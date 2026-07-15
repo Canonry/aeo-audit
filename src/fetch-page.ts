@@ -1,9 +1,10 @@
 import dns from 'node:dns/promises'
-import { lookup as dnsLookup, type LookupAddress } from 'node:dns'
+import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from 'node:dns'
 import type { LookupFunction } from 'node:net'
 import ipaddr from 'ipaddr.js'
-import { fetch as undiciFetch, Agent } from 'undici'
+import { fetch as undiciFetch, Agent, type Dispatcher } from 'undici'
 import { AeoAuditError, isAeoAuditError } from './errors.js'
+import { rethrowExecutionControlFlow } from './execution.js'
 import type {
   AuxiliaryDiagnostics,
   AuxiliaryResource,
@@ -28,6 +29,9 @@ interface TimedFetchOptions {
   redirect?: RequestRedirect
   /** Single host allowed to resolve privately; when it matches, DNS pinning is skipped. */
   allowPrivateHost?: string
+  signal?: AbortSignal
+  onOutboundAttempt?: () => void
+  network?: FetchNetworkAdapter
 }
 
 interface ReadBodyOptions {
@@ -39,6 +43,20 @@ export interface FetchWithRedirectOptions {
   timeoutMs: number
   maxRedirects?: number
   allowPrivateHost?: string
+  signal?: AbortSignal
+  onOutboundAttempt?: () => void
+  /** Request-scoped resolver/dispatcher seam for deterministic SSRF regression tests. */
+  network?: FetchNetworkAdapter
+}
+
+/**
+ * Internal request-scoped network seam. Production callers omit this and use the
+ * process-wide DNS-pinning dispatcher; tests can inject independent preflight and
+ * connect-time resolution without replacing globals.
+ */
+export interface FetchNetworkAdapter {
+  resolveHostAddresses: (hostname: string, signal?: AbortSignal) => Promise<string[]>
+  dispatcher: Dispatcher
 }
 
 export interface RedirectFetchResult {
@@ -188,16 +206,54 @@ function getErrorMessage(error: unknown): string | undefined {
   return undefined
 }
 
+function findBlockedIpCause(error: unknown): AeoAuditError | null {
+  const visited = new Set<unknown>()
+  let current = error
+  while (current instanceof Error && !visited.has(current)) {
+    visited.add(current)
+    if (isAeoAuditError(current) && current.code === 'BLOCKED_IP') return current
+    current = current.cause
+  }
+  return null
+}
+
 function isDnsNotFoundError(error: unknown): boolean {
   return ['ENODATA', 'ENOTFOUND', 'EAI_AGAIN', 'SERVFAIL', 'ETIMEOUT'].includes(getErrorCode(error) || '')
 }
 
-async function resolveHostAddresses(hostname: string): Promise<string[]> {
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  if (signal.reason instanceof Error) throw signal.reason
+  throw new DOMException('The operation was aborted.', 'AbortError')
+}
+
+async function raceWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  throwIfAborted(signal)
+  if (!signal) return promise
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      try {
+        throwIfAborted(signal)
+      } catch (error) {
+        reject(error)
+      }
+    }
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => { cleanup(); resolve(value) },
+      (error) => { cleanup(); reject(error) },
+    )
+  })
+}
+
+async function resolveHostAddresses(hostname: string, signal?: AbortSignal): Promise<string[]> {
   if (ipaddr.isValid(hostname)) {
     return [hostname]
   }
 
-  const results = await Promise.allSettled([dns.resolve4(hostname), dns.resolve6(hostname)])
+  const results = await raceWithSignal(Promise.allSettled([dns.resolve4(hostname), dns.resolve6(hostname)]), signal)
 
   const ips = []
   for (const result of results) {
@@ -220,6 +276,8 @@ async function resolveHostAddresses(hostname: string): Promise<string[]> {
 interface ValidateTargetOptions {
   /** Single host permitted to resolve to a private/loopback IP. See RunAeoAuditOptions.allowPrivateHost. */
   allowPrivateHost?: string
+  signal?: AbortSignal
+  network?: FetchNetworkAdapter
 }
 
 async function validatePublicRequestTarget(targetUrl: URL, options: ValidateTargetOptions = {}): Promise<void> {
@@ -241,7 +299,9 @@ async function validatePublicRequestTarget(targetUrl: URL, options: ValidateTarg
     throw new AeoAuditError('BLOCKED_HOST', 'URL points to a blocked or private hostname.')
   }
 
-  const ips = await resolveHostAddresses(targetUrl.hostname)
+  const ips = options.network
+    ? await raceWithSignal(options.network.resolveHostAddresses(targetUrl.hostname, options.signal), options.signal)
+    : await resolveHostAddresses(targetUrl.hostname, options.signal)
   const privateIp = ips.find((ip) => !isPublicIpAddress(ip))
 
   if (privateIp) {
@@ -262,27 +322,42 @@ function isRedirectStatus(status: number): boolean {
  * rebinds to a private IP at connect time is rejected here — closing the validate-then-
  * connect (TOCTOU) gap that per-hop re-validation alone cannot.
  */
-export const validatingLookup: LookupFunction = (hostname, options, callback) => {
-  dnsLookup(hostname, { all: true, family: options.family ?? 0, verbatim: true }, (error, addresses) => {
-    if (error) {
-      callback(error, '')
-      return
-    }
+type LookupAllAddresses = (
+  hostname: string,
+  options: LookupOptions,
+  callback: (error: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void,
+) => void
 
-    const publicAddresses = (addresses as LookupAddress[]).filter((entry) => isPublicIpAddress(entry.address))
-    if (publicAddresses.length === 0) {
-      callback(new AeoAuditError('BLOCKED_IP', 'URL resolves to a blocked or private IP address.'), '')
-      return
-    }
+/** Build the production connect-time guard around an injectable raw resolver. */
+export function createValidatingLookup(lookupAll: LookupAllAddresses): LookupFunction {
+  return (hostname, options, callback) => {
+    lookupAll(hostname, options, (error, addresses) => {
+      if (error) {
+        callback(error, '')
+        return
+      }
 
-    if (options.all) {
-      callback(null, publicAddresses)
-      return
-    }
+      const publicAddresses = addresses.filter((entry) => isPublicIpAddress(entry.address))
+      if (publicAddresses.length === 0) {
+        callback(new AeoAuditError('BLOCKED_IP', 'URL resolves to a blocked or private IP address.'), '')
+        return
+      }
 
-    callback(null, publicAddresses[0].address, publicAddresses[0].family)
-  })
+      if (options.all) {
+        callback(null, publicAddresses)
+        return
+      }
+
+      callback(null, publicAddresses[0].address, publicAddresses[0].family)
+    })
+  }
 }
+
+const systemLookupAll: LookupAllAddresses = (hostname, options, callback) => {
+  dnsLookup(hostname, { ...options, all: true, verbatim: true }, callback)
+}
+
+export const validatingLookup = createValidatingLookup(systemLookupAll)
 
 // One process-wide dispatcher (no per-request allocation or socket leak). Every fetch
 // to a host NOT named by --allow-local goes through it; the allowed host keeps the
@@ -294,36 +369,48 @@ const pinnedDispatcher = new Agent({ connect: { lookup: validatingLookup } })
 // with canned responses; pinning is a socket-layer concern those mocks never reach, so
 // when the global has been stubbed we defer to it. The dedicated pin tests use real sockets.
 const builtinFetch = globalThis.fetch
-async function pinnedHostFetch(url: string, init: RequestInit, pin: boolean): Promise<Response> {
+async function pinnedHostFetch(
+  url: string,
+  init: RequestInit,
+  pin: boolean,
+  dispatcher: Dispatcher = pinnedDispatcher,
+): Promise<Response> {
   if (globalThis.fetch !== builtinFetch) {
     return globalThis.fetch(url, init)
   }
-  const undiciInit = (pin ? { ...init, dispatcher: pinnedDispatcher } : init) as unknown as Parameters<typeof undiciFetch>[1]
+  const undiciInit = (pin ? { ...init, dispatcher } : init) as unknown as Parameters<typeof undiciFetch>[1]
   const response = await undiciFetch(url, undiciInit)
   return response as unknown as Response
 }
 
 async function timedFetch(url: URL | string, options: TimedFetchOptions): Promise<Response> {
-  const { timeoutMs, headers, redirect = 'manual', allowPrivateHost } = options
+  const { timeoutMs, headers, redirect = 'manual', allowPrivateHost, signal, onOutboundAttempt, network } = options
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const combinedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
 
   // Skip pinning only for the single host the caller opted out via --allow-local; that
   // host legitimately resolves to a private IP and the pinning lookup would block it.
   const pin = !isHostExplicitlyAllowed(new URL(url.toString()).hostname, allowPrivateHost)
 
   try {
+    throwIfAborted(signal)
+    onOutboundAttempt?.()
     return await pinnedHostFetch(url.toString(), {
       method: 'GET',
       redirect,
-      signal: controller.signal,
+      signal: combinedSignal,
       headers: {
         'User-Agent': USER_AGENT,
         Accept: '*/*',
         ...(headers || {}),
       },
-    }, pin)
+    }, pin, network?.dispatcher)
   } catch (error) {
+    if (signal?.aborted) throwIfAborted(signal)
+    rethrowExecutionControlFlow(error)
+    const blockedIp = findBlockedIpCause(error)
+    if (blockedIp) throw blockedIp
     if (error instanceof Error && error.name === 'AbortError') {
       throw new AeoAuditError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`, { cause: error })
     }
@@ -343,15 +430,22 @@ async function timedFetch(url: URL | string, options: TimedFetchOptions): Promis
  * caller gets a not-yet-read `Response` plus the final URL and redirect chain.
  */
 export async function fetchWithValidatedRedirects(startUrl: URL | string, options: FetchWithRedirectOptions): Promise<RedirectFetchResult> {
-  const { timeoutMs, maxRedirects = MAX_REDIRECTS, allowPrivateHost } = options
+  const { timeoutMs, maxRedirects = MAX_REDIRECTS, allowPrivateHost, signal, onOutboundAttempt, network } = options
 
   let currentUrl = new URL(startUrl.toString())
   const redirectChain: RedirectHop[] = []
 
   for (;;) {
-    await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
+    await validatePublicRequestTarget(currentUrl, { allowPrivateHost, signal, network })
 
-    const response = await timedFetch(currentUrl, { timeoutMs, redirect: 'manual', allowPrivateHost })
+    const response = await timedFetch(currentUrl, {
+      timeoutMs,
+      redirect: 'manual',
+      allowPrivateHost,
+      signal,
+      onOutboundAttempt,
+      network,
+    })
 
     if (!isRedirectStatus(response.status)) {
       return {
@@ -526,7 +620,7 @@ async function attemptAuxiliaryFetch(
   origin: string,
   path: string,
   spec: AuxiliarySpec,
-  allowPrivateHost?: string,
+  options: FetchPageOptions,
 ): Promise<AuxiliaryFetchAttempt> {
   const startedAt = Date.now()
   const targetUrl = new URL(path, origin)
@@ -535,7 +629,10 @@ async function attemptAuxiliaryFetch(
     const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(targetUrl, {
       timeoutMs: AUX_TIMEOUT_MS,
       maxRedirects: MAX_REDIRECTS,
-      allowPrivateHost,
+      allowPrivateHost: options.allowPrivateHost,
+      signal: options.signal,
+      onOutboundAttempt: options.onOutboundAttempt,
+      network: options.network,
     })
 
     const body = response.ok
@@ -557,6 +654,8 @@ async function attemptAuxiliaryFetch(
       wasMissing: response.status === 404,
     }
   } catch (error) {
+    if (options.signal?.aborted) throw error
+    rethrowExecutionControlFlow(error)
     const knownError = isAeoAuditError(error)
       ? error
       : new AeoAuditError('UNREACHABLE', 'Failed to fetch auxiliary file.', { cause: error })
@@ -595,7 +694,7 @@ async function attemptAuxiliaryFetch(
 async function probeStatusWithHeaders(
   url: URL | string,
   headers: Record<string, string>,
-  allowPrivateHost?: string,
+  options: FetchPageOptions,
 ): Promise<number | null> {
   const startUrl = typeof url === 'string' ? new URL(url) : new URL(url.toString())
   let currentUrl = startUrl
@@ -604,14 +703,23 @@ async function probeStatusWithHeaders(
   for (;;) {
     let response: Response
     try {
-      await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
+      await validatePublicRequestTarget(currentUrl, {
+        allowPrivateHost: options.allowPrivateHost,
+        signal: options.signal,
+        network: options.network,
+      })
       response = await timedFetch(currentUrl, {
         timeoutMs: DIAGNOSTIC_TIMEOUT_MS,
         headers,
         redirect: 'manual',
-        allowPrivateHost,
+        allowPrivateHost: options.allowPrivateHost,
+        signal: options.signal,
+        onOutboundAttempt: options.onOutboundAttempt,
+        network: options.network,
       })
-    } catch {
+    } catch (error) {
+      if (options.signal?.aborted) throw error
+      rethrowExecutionControlFlow(error)
       return null
     }
 
@@ -638,14 +746,14 @@ async function probeStatusWithHeaders(
   }
 }
 
-async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, allowPrivateHost?: string): Promise<AuxiliaryResource> {
-  let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec, allowPrivateHost)
+async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, options: FetchPageOptions): Promise<AuxiliaryResource> {
+  let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec, options)
 
   // Issue #32: if the primary path 404s, try the documented fallbacks (e.g.
   // /sitemap-index.xml). The first successful fallback wins.
   if (attempt.wasMissing && spec.fallbackPaths?.length) {
     for (const fallback of spec.fallbackPaths) {
-      const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec, allowPrivateHost)
+      const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec, options)
       if (!fallbackAttempt.wasMissing && fallbackAttempt.resource.state === 'ok') {
         attempt = fallbackAttempt
         break
@@ -665,7 +773,7 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, allowPriv
     const probeStatus = await probeStatusWithHeaders(attempt.resource.url, {
       'User-Agent': USER_AGENT,
       Accept: MARKDOWN_PROBE_ACCEPT,
-    }, allowPrivateHost)
+    }, options)
     if (probeStatus !== null && (probeStatus < 200 || probeStatus >= 400)) {
       diagnostics.contentNegotiation = true
     }
@@ -682,17 +790,24 @@ export interface FetchPageOptions {
   skipAuxiliary?: boolean
   /** Permit this single host to resolve to a private/loopback IP. See RunAeoAuditOptions.allowPrivateHost. */
   allowPrivateHost?: string
+  signal?: AbortSignal
+  onOutboundAttempt?: () => void
+  /** Internal request-scoped resolver/dispatcher seam; production callers omit it. */
+  network?: FetchNetworkAdapter
 }
 
 export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}): Promise<FetchedPage> {
   const startedAt = Date.now()
   const normalizedUrl = normalizeTargetUrl(rawUrl)
-  const { allowPrivateHost } = options
+  const { allowPrivateHost, signal, onOutboundAttempt } = options
 
   const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(normalizedUrl, {
     timeoutMs: MAIN_TIMEOUT_MS,
     maxRedirects: MAX_REDIRECTS,
     allowPrivateHost,
+    signal,
+    onOutboundAttempt,
+    network: options.network,
   })
 
   const contentType = response.headers.get('content-type') || ''
@@ -722,7 +837,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
     const origin = new URL(finalUrl).origin
     const auxiliaryEntries = await Promise.all(
       AUXILIARY_SPECS.map(async (spec): Promise<[keyof AuxiliaryResources, AuxiliaryResource]> => {
-        const result = await fetchAuxiliaryFile(origin, spec, allowPrivateHost)
+        const result = await fetchAuxiliaryFile(origin, spec, options)
         return [spec.key, result]
       }),
     )

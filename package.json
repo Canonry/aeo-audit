@@ -1,6 +1,7 @@
 {
   "name": "@ainyc/aeo-audit",
-  "version": "4.2.0",
+  "version": "4.3.0",
+  "packageManager": "pnpm@9.15.9",
   "description": "The most comprehensive open-source Answer Engine Optimization (AEO) audit tool. Scores websites across 16 ranking factors that determine AI citation.",
   "type": "module",
   "main": "./dist/index.js",
@@ -39,12 +40,14 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm run typecheck:engine && pnpm --filter @ainyc/aeo-audit-api run typecheck",
+    "typecheck:engine": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "pretest:e2e": "pnpm run build",
     "test:e2e": "tsx --test test/e2e/*.test.ts",
-    "lint": "eslint src/ test/ bin/ eslint.config.js",
+    "lint": "pnpm run lint:engine && pnpm --filter @ainyc/aeo-audit-api run lint",
+    "lint:engine": "eslint src/ test/ bin/ eslint.config.js",
     "prepublishOnly": "pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e && pnpm run lint"
   },
   "dependencies": {
@@ -79,6 +82,12 @@
     "audit"
   ],
   "license": "MIT",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/Canonry/aeo-audit.git"

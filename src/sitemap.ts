@@ -1,4 +1,5 @@
 import { AeoAuditError } from './errors.js'
+import { isSitemapBudgetExceeded, rethrowExecutionControlFlow, SitemapBudgetExceededError } from './execution.js'
 import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
 import { fetchWithValidatedRedirects, normalizeTargetUrl } from './fetch-page.js'
 import { runAeoAudit } from './index.js'
@@ -167,15 +168,23 @@ interface SitemapFetchResult {
  * privately; the match is host-only and per-hop, so a redirect or `<loc>` to any OTHER
  * private host stays blocked even when it is set.
  */
-async function fetchSitemapResponse(url: string, allowPrivateHost?: string): Promise<SitemapFetchResult> {
+async function fetchSitemapResponse(
+  url: string,
+  allowPrivateHost?: string,
+  signal?: AbortSignal,
+  onOutboundAttempt?: () => void,
+): Promise<SitemapFetchResult> {
   let response: Response
   try {
     const result = await fetchWithValidatedRedirects(url, {
       timeoutMs: SITEMAP_TIMEOUT_MS,
       allowPrivateHost,
+      signal,
+      onOutboundAttempt,
     })
     response = result.response
   } catch (error) {
+    rethrowExecutionControlFlow(error)
     if (error instanceof AeoAuditError) throw error
     throw new AeoAuditError('UNREACHABLE', 'Could not fetch sitemap.', { cause: error })
   }
@@ -208,6 +217,8 @@ async function fetchSitemapResponse(url: string, allowPrivateHost?: string): Pro
       chunks.push(chunk)
     }
   } catch (error) {
+    if (signal?.aborted && signal.reason instanceof Error) throw signal.reason
+    rethrowExecutionControlFlow(error)
     if (error instanceof AeoAuditError) throw error
     throw new AeoAuditError('UNREACHABLE', 'Could not read sitemap response.', { cause: error })
   }
@@ -215,10 +226,19 @@ async function fetchSitemapResponse(url: string, allowPrivateHost?: string): Pro
   return { body: Buffer.concat(chunks).toString('utf8'), status: response.status }
 }
 
-async function fetchSitemapBody(url: string, allowPrivateHost?: string): Promise<string> {
-  const result = await fetchSitemapResponse(url, allowPrivateHost)
+async function fetchSitemapBody(
+  url: string,
+  allowPrivateHost?: string,
+  signal?: AbortSignal,
+  onOutboundAttempt?: () => void,
+  rootSitemap = false,
+): Promise<string> {
+  const result = await fetchSitemapResponse(url, allowPrivateHost, signal, onOutboundAttempt)
   if (result.status < 200 || result.status >= 300) {
-    throw new AeoAuditError('UNREACHABLE', `Sitemap returned HTTP ${result.status}.`)
+    throw new AeoAuditError(
+      rootSitemap ? 'SITEMAP_INVALID' : 'UNREACHABLE',
+      `Sitemap returned HTTP ${result.status}.`,
+    )
   }
   return result.body
 }
@@ -232,18 +252,25 @@ function looksLikeSitemap(body: string): boolean {
  * Issue #32: try the documented sitemap paths in order, then fall back to
  * Sitemap: directives in /robots.txt. Returns the first URL that 200s.
  */
-export async function discoverSitemapUrl(origin: string, allowPrivateHost?: string): Promise<string | null> {
+export async function discoverSitemapUrl(
+  origin: string,
+  allowPrivateHost?: string,
+  signal?: AbortSignal,
+  onOutboundAttempt?: () => void,
+): Promise<string | null> {
   const candidates = [`${origin}/sitemap.xml`, `${origin}/sitemap-index.xml`]
 
   for (const candidate of candidates) {
     try {
-      const result = await fetchSitemapResponse(candidate, allowPrivateHost)
+      const result = await fetchSitemapResponse(candidate, allowPrivateHost, signal, onOutboundAttempt)
       // Require an actual sitemap marker — many SPAs serve the HTML shell for
       // unknown routes, returning 200 with `<!doctype html>` for /sitemap.xml.
       if (result.status >= 200 && result.status < 300 && looksLikeSitemap(result.body)) {
         return candidate
       }
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error
+      rethrowExecutionControlFlow(error)
       // Network/timeout errors fall through to the next candidate so we don't
       // give up on the whole discovery just because one path was flaky.
     }
@@ -251,14 +278,16 @@ export async function discoverSitemapUrl(origin: string, allowPrivateHost?: stri
 
   // robots.txt fallback — many sites declare a non-standard sitemap location there.
   try {
-    const robots = await fetchSitemapResponse(`${origin}/robots.txt`, allowPrivateHost)
+    const robots = await fetchSitemapResponse(`${origin}/robots.txt`, allowPrivateHost, signal, onOutboundAttempt)
     if (robots.status >= 200 && robots.status < 300 && robots.body) {
       const sitemapDirective = parseRobotsSitemap(robots.body, origin)
       if (sitemapDirective) {
         return sitemapDirective
       }
     }
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error
+    rethrowExecutionControlFlow(error)
     /* ignore — discovery failure surfaces as null */
   }
 
@@ -300,8 +329,13 @@ interface ResolvedSitemap {
   childSitemapsSkipped: number
 }
 
-async function resolveSitemapUrls(sitemapUrl: string, allowPrivateHost?: string): Promise<ResolvedSitemap> {
-  const body = await fetchSitemapBody(sitemapUrl, allowPrivateHost)
+async function resolveSitemapUrls(
+  sitemapUrl: string,
+  allowPrivateHost?: string,
+  signal?: AbortSignal,
+  onOutboundAttempt?: () => void,
+): Promise<ResolvedSitemap> {
+  const body = await fetchSitemapBody(sitemapUrl, allowPrivateHost, signal, onOutboundAttempt, true)
   const entries = parseSitemapXml(body)
 
   // If it's a sitemap index, fetch child sitemaps. Each child <loc> is fully
@@ -316,9 +350,11 @@ async function resolveSitemapUrls(sitemapUrl: string, allowPrivateHost?: string)
     const childSitemapsSkipped = entries.length - children.length
     const childResults = await mapWithConcurrency(children, DEFAULT_CONCURRENCY, async (entry) => {
       try {
-        const childBody = await fetchSitemapBody(entry.loc, allowPrivateHost)
+        const childBody = await fetchSitemapBody(entry.loc, allowPrivateHost, signal, onOutboundAttempt)
         return parseSitemapXml(childBody)
-      } catch {
+      } catch (error) {
+        if (signal?.aborted) throw error
+        rethrowExecutionControlFlow(error)
         return []
       }
     })
@@ -567,175 +603,254 @@ function buildPrioritizedFixes(
   return [...criticalFixes, ...crossCuttingFixes]
 }
 
-export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptions = {}): Promise<SitemapAuditReport> {
-  const normalizedUrl = normalizeTargetUrl(rawUrl)
-  const origin = normalizedUrl.origin
+interface SitemapReportParts {
+  sitemapUrl: string
+  discovered: number
+  filtered: number
+  truncated: number
+  effectiveLimit: number
+  pageResults: SitemapPageResult[]
+  successReports: AuditReport[]
+  pagesSkipped: number
+  budget: SitemapAuditReport['budget']
+}
 
-  // Determine sitemap URL. When the user passes one explicitly we honor it
-  // verbatim. Otherwise we try /sitemap.xml first, then /sitemap-index.xml,
-  // then the Sitemap: directive in robots.txt (issue #32).
-  let sitemapUrl: string
-  if (options.sitemapUrl) {
-    sitemapUrl = options.sitemapUrl
-  } else {
-    const discovered = await discoverSitemapUrl(origin, options.allowPrivateHost)
-    if (!discovered) {
-      throw new AeoAuditError(
-        'UNREACHABLE',
-        'No sitemap found. Tried /sitemap.xml, /sitemap-index.xml, and the Sitemap: directive in /robots.txt. Pass --sitemap <url> with an explicit URL if your sitemap lives elsewhere.',
-      )
-    }
-    sitemapUrl = discovered
-  }
-
-  // Fetch and parse sitemap
-  const { entries: resolvedEntries, childSitemapsSkipped } = await resolveSitemapUrls(sitemapUrl, options.allowPrivateHost)
-  let allEntries = resolvedEntries
-
-  // Opt-in origin rewriting (issue from field feedback): re-home every <loc> onto
-  // the origin the user named so a sitemap hardcoding the prod/canonical domain can
-  // be audited against a staging host or local dev server. Rewriting can collapse
-  // http/https or www variants onto the same URL, so dedupe afterward.
-  if (options.rewriteOrigin) {
-    const seen = new Set<string>()
-    allEntries = allEntries
-      .map((e) => ({ ...e, loc: rewriteLocOrigin(e.loc, origin) }))
-      .filter((e) => {
-        if (seen.has(e.loc)) return false
-        seen.add(e.loc)
-        return true
-      })
-  }
-
-  const discovered = allEntries.length
-
-  // Filter to HTML content pages, then optionally to changed/critical paths.
-  const pathFilter = buildPathFilter(options.includePaths)
-  const eligible = allEntries.filter((e) => (
-    !shouldSkipUrl(e.loc)
-    && (!pathFilter || pathFilter.has(normalizePathForFilter(e.loc) || ''))
-  ))
-  const filtered = discovered - eligible.length
-
-  // Sort by priority (highest first) if priorities exist
-  eligible.sort((a, b) => (b.priority ?? 0.5) - (a.priority ?? 0.5))
-
-  // Apply limit (default 200 when not specified — large sitemaps are common and
-  // a full sweep is rarely what the user wants).
-  const effectiveLimit = options.limit && options.limit > 0 ? options.limit : DEFAULT_LIMIT
-  const entries = eligible.slice(0, effectiveLimit)
-  const truncated = eligible.length - entries.length
-
-  if (entries.length === 0) {
-    throw new AeoAuditError(
-      'BAD_INPUT',
-      pathFilter
-        ? 'No auditable URLs found in sitemap after applying the changed-page path filter.'
-        : 'No auditable URLs found in sitemap.',
-    )
-  }
-
-  options.onPlan?.({
-    discovered,
-    filtered,
-    truncated,
-    willAudit: entries.length,
-    effectiveLimit,
-    childSitemapsSkipped,
-  })
-
-  // Forward the in-process optional factors so opt-in flags behave the same as in
-  // single-URL mode. includeLighthouse is deliberately NOT forwarded: each
-  // PageSpeed Insights call takes 15-30s, so running it across a sitemap would be
-  // pathological — the CLI rejects --lighthouse + --sitemap for the same reason.
-  const auditOptions: RunAeoAuditOptions = {
-    factors: options.factors,
-    includeGeo: options.includeGeo,
-    includeAgentSkills: options.includeAgentSkills,
-    // Forward the target-scoped private-host allowance so `--allow-local` reaches
-    // per-page fetches. It only ever matches the single host the user named, so a
-    // <loc> on any other private host stays blocked even with this set. With
-    // --rewrite-sitemap-origin, every <loc> is on that named host, so a local dev
-    // server's whole sitemap becomes auditable.
-    allowPrivateHost: options.allowPrivateHost,
-  }
-
-  // Audit pages with bounded concurrency: 5 workers is a polite ceiling for one
-  // origin while giving a meaningful speedup over fully sequential.
-  const settled = await mapWithConcurrency(
-    entries,
-    DEFAULT_CONCURRENCY,
-    async (entry): Promise<{ pageResult: SitemapPageResult; report: AuditReport | null }> => {
-      try {
-        const report = await runAeoAudit(entry.loc, auditOptions)
-        return {
-          pageResult: {
-            url: report.finalUrl,
-            overallScore: report.overallScore,
-            status: 'success',
-            factors: report.factors,
-            metadata: report.metadata,
-            priority: entry.priority,
-          },
-          report,
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        return {
-          pageResult: {
-            url: entry.loc,
-            overallScore: 0,
-            status: 'error',
-            error: message,
-            priority: entry.priority,
-          },
-          report: null,
-        }
-      }
-    },
-  )
-
-  const pageResults: SitemapPageResult[] = settled.map((s) => s.pageResult)
-  const successReports: AuditReport[] = settled
-    .map((s) => s.report)
-    .filter((r): r is AuditReport => r !== null)
-
-  // Calculate aggregate score from successful audits
-  const successScores = pageResults.filter((p) => p.status === 'success').map((p) => p.overallScore)
+function buildSitemapReport(parts: SitemapReportParts): SitemapAuditReport {
+  const successScores = parts.pageResults.filter((page) => page.status === 'success').map((page) => page.overallScore)
   const aggregateScore = successScores.length > 0
     ? Math.round(successScores.reduce((a, b) => a + b, 0) / successScores.length)
     : 0
 
-  // Map each successful page's final URL to its sitemap priority so the critical
-  // defect rollup can rank affected pages by importance (issue #42).
   const priorityByUrl = new Map<string, number | undefined>()
-  for (const page of pageResults) {
+  for (const page of parts.pageResults) {
     if (page.status === 'success') priorityByUrl.set(page.url, page.priority)
   }
 
-  const criticalDefects = buildCriticalDefects(successReports, priorityByUrl)
-  const crossCuttingIssues = buildCrossCuttingIssues(successReports)
-  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length, criticalDefects, successReports)
+  const criticalDefects = buildCriticalDefects(parts.successReports, priorityByUrl)
+  const crossCuttingIssues = buildCrossCuttingIssues(parts.successReports)
+  const prioritizedFixes = buildPrioritizedFixes(
+    crossCuttingIssues,
+    parts.successReports.length,
+    criticalDefects,
+    parts.successReports,
+  )
 
   return {
     schemaVersion: SCHEMA_VERSION,
     compareMeta: {
       engineVersion: engineVersion(),
-      factorIds: unionFactorIds(successReports),
+      factorIds: unionFactorIds(parts.successReports),
     },
-    sitemapUrl,
+    sitemapUrl: parts.sitemapUrl,
     auditedAt: new Date().toISOString(),
-    pagesDiscovered: discovered,
-    pagesAudited: entries.length,
-    pagesSkipped: filtered + truncated,
-    pagesFiltered: filtered,
-    pagesTruncated: truncated,
-    effectiveLimit,
+    pagesDiscovered: parts.discovered,
+    pagesAudited: parts.pageResults.length,
+    pagesSkipped: parts.pagesSkipped,
+    pagesFiltered: parts.filtered,
+    pagesTruncated: parts.truncated,
+    effectiveLimit: parts.effectiveLimit,
     aggregateScore,
-    pages: pageResults,
+    pages: parts.pageResults,
     criticalDefects,
     crossCuttingIssues,
     prioritizedFixes,
+    budget: parts.budget,
+  }
+}
+
+export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptions = {}): Promise<SitemapAuditReport> {
+  const normalizedUrl = normalizeTargetUrl(rawUrl)
+  const origin = normalizedUrl.origin
+  const effectiveLimit = options.limit && options.limit > 0 ? options.limit : DEFAULT_LIMIT
+  const execution = new AbortController()
+  const relayCallerAbort = () => execution.abort(options.signal?.reason)
+  if (options.signal?.aborted) relayCallerAbort()
+  else options.signal?.addEventListener('abort', relayCallerAbort, { once: true })
+
+  const durationTimer = options.maxDurationMs && options.maxDurationMs > 0
+    ? setTimeout(() => execution.abort(new SitemapBudgetExceededError('duration')), options.maxDurationMs)
+    : null
+  let fetchesStarted = 0
+  const reserveOutboundAttempt = () => {
+    if (options.maxTotalFetches !== undefined && fetchesStarted >= options.maxTotalFetches) {
+      throw new SitemapBudgetExceededError('fetches')
+    }
+    fetchesStarted += 1
+    options.onOutboundAttempt?.()
+  }
+  const budgetErrorFrom = (error: unknown): SitemapBudgetExceededError | null => {
+    if (isSitemapBudgetExceeded(error)) return error
+    return isSitemapBudgetExceeded(execution.signal.reason) ? execution.signal.reason : null
+  }
+  const emptyPartial = (
+    sitemapUrl: string,
+    reason: 'fetches' | 'duration',
+    discoveryComplete: boolean,
+  ): SitemapAuditReport => buildSitemapReport({
+    sitemapUrl,
+    discovered: 0,
+    filtered: 0,
+    truncated: 0,
+    effectiveLimit,
+    pageResults: [],
+    successReports: [],
+    pagesSkipped: 0,
+    budget: { exhausted: true, reason, discoveryComplete },
+  })
+
+  try {
+    let sitemapUrl: string
+    if (options.sitemapUrl) {
+      sitemapUrl = options.sitemapUrl
+    } else {
+      try {
+        const discoveredUrl = await discoverSitemapUrl(
+          origin,
+          options.allowPrivateHost,
+          execution.signal,
+          reserveOutboundAttempt,
+        )
+        if (!discoveredUrl) {
+          throw new AeoAuditError(
+            'SITEMAP_INVALID',
+            'No sitemap found. Tried /sitemap.xml, /sitemap-index.xml, and the Sitemap: directive in /robots.txt. Pass --sitemap <url> with an explicit URL if your sitemap lives elsewhere.',
+          )
+        }
+        sitemapUrl = discoveredUrl
+      } catch (error) {
+        const budgetError = budgetErrorFrom(error)
+        if (budgetError) {
+          return emptyPartial(normalizedUrl.toString(), budgetError.reason, false)
+        }
+        throw error
+      }
+    }
+
+    let resolved: ResolvedSitemap
+    try {
+      resolved = await resolveSitemapUrls(
+        sitemapUrl,
+        options.allowPrivateHost,
+        execution.signal,
+        reserveOutboundAttempt,
+      )
+    } catch (error) {
+      const budgetError = budgetErrorFrom(error)
+      if (budgetError) return emptyPartial(sitemapUrl, budgetError.reason, true)
+      throw error
+    }
+    let allEntries = resolved.entries
+
+    if (options.rewriteOrigin) {
+      const seen = new Set<string>()
+      allEntries = allEntries
+        .map((entry) => ({ ...entry, loc: rewriteLocOrigin(entry.loc, origin) }))
+        .filter((entry) => {
+          if (seen.has(entry.loc)) return false
+          seen.add(entry.loc)
+          return true
+        })
+    }
+
+    const discovered = allEntries.length
+    const pathFilter = buildPathFilter(options.includePaths)
+    const eligible = allEntries.filter((entry) => (
+      !shouldSkipUrl(entry.loc)
+      && (!pathFilter || pathFilter.has(normalizePathForFilter(entry.loc) || ''))
+    ))
+    const filtered = discovered - eligible.length
+    eligible.sort((a, b) => (b.priority ?? 0.5) - (a.priority ?? 0.5))
+    const entries = eligible.slice(0, effectiveLimit)
+    const truncated = eligible.length - entries.length
+
+    if (entries.length === 0) {
+      throw new AeoAuditError(
+        'SITEMAP_INVALID',
+        pathFilter
+          ? 'No auditable URLs found in sitemap after applying the changed-page path filter.'
+          : 'No auditable URLs found in sitemap.',
+      )
+    }
+
+    options.onPlan?.({
+      discovered,
+      filtered,
+      truncated,
+      willAudit: entries.length,
+      effectiveLimit,
+      childSitemapsSkipped: resolved.childSitemapsSkipped,
+    })
+
+    const auditOptions: RunAeoAuditOptions = {
+      factors: options.factors,
+      includeGeo: options.includeGeo,
+      includeAgentSkills: options.includeAgentSkills,
+      allowPrivateHost: options.allowPrivateHost,
+      signal: execution.signal,
+      onOutboundAttempt: reserveOutboundAttempt,
+    }
+    const budgetState: { reason: 'fetches' | 'duration' | null } = { reason: null }
+    const settled = await mapWithConcurrency(
+      entries,
+      DEFAULT_CONCURRENCY,
+      async (entry): Promise<{ pageResult: SitemapPageResult; report: AuditReport | null } | null> => {
+        if (budgetState.reason) return null
+        try {
+          const report = await runAeoAudit(entry.loc, auditOptions)
+          return {
+            pageResult: {
+              url: report.finalUrl,
+              overallScore: report.overallScore,
+              status: 'success',
+              factors: report.factors,
+              metadata: report.metadata,
+              priority: entry.priority,
+            },
+            report,
+          }
+        } catch (error) {
+          const budgetError = budgetErrorFrom(error)
+          if (budgetError) {
+            budgetState.reason ??= budgetError.reason
+            return null
+          }
+          if (execution.signal.aborted) throw error
+          const message = error instanceof Error ? error.message : String(error)
+          return {
+            pageResult: {
+              url: entry.loc,
+              overallScore: 0,
+              status: 'error',
+              error: message,
+              priority: entry.priority,
+            },
+            report: null,
+          }
+        }
+      },
+    )
+    const completed = settled.filter((result): result is NonNullable<typeof result> => result !== null)
+    const pageResults = completed.map((result) => result.pageResult)
+    const successReports = completed
+      .map((result) => result.report)
+      .filter((report): report is AuditReport => report !== null)
+
+    return buildSitemapReport({
+      sitemapUrl,
+      discovered,
+      filtered,
+      truncated,
+      effectiveLimit,
+      pageResults,
+      successReports,
+      pagesSkipped: budgetState.reason ? entries.length - pageResults.length : 0,
+      budget: budgetState.reason
+        ? { exhausted: true, reason: budgetState.reason, discoveryComplete: true }
+        : { exhausted: false, discoveryComplete: true },
+    })
+  } finally {
+    if (durationTimer) clearTimeout(durationTimer)
+    options.signal?.removeEventListener('abort', relayCallerAbort)
   }
 }
 

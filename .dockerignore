@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+dist
+apps/api/dist
+apps/api/test
+test
+data
+*.log
+.DS_Store

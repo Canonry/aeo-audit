@@ -101,6 +101,7 @@ describe('agentSummaryFromSitemap', () => {
       criticalDefects,
       crossCuttingIssues: [],
       prioritizedFixes,
+      budget: { exhausted: false, discoveryComplete: true },
     }
   }
 
@@ -162,6 +163,7 @@ describe('formatAgent / formatSitemapAgent', () => {
       criticalDefects: [],
       crossCuttingIssues: [],
       prioritizedFixes: [],
+      budget: { exhausted: false, discoveryComplete: true },
     }
     const parsed = JSON.parse(formatSitemapAgent(report))
     expect(parsed.mode).toBe('sitemap')

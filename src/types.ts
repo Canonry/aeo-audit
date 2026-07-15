@@ -104,6 +104,10 @@ export interface RunAeoAuditOptions {
    * and service callers that never set it remain fully protected.
    */
   allowPrivateHost?: string
+  /** Abort all in-flight outbound work. Intended for server/runtime ownership. */
+  signal?: AbortSignal
+  /** Called immediately before each outbound HTTP attempt begins. */
+  onOutboundAttempt?: () => void
 }
 
 export interface RawFactorResult extends AnalysisResult {
@@ -369,7 +373,13 @@ export interface SitemapAuditReport {
   prioritizedFixes: PrioritizedFix[]
   /** Provenance for regression comparison; see `AuditReport.compareMeta`. */
   compareMeta?: CompareMeta
+  /** Cumulative crawler-budget outcome for this sitemap run. */
+  budget: SitemapAuditBudget
 }
+
+export type SitemapAuditBudget =
+  | { exhausted: false; discoveryComplete: true }
+  | { exhausted: true; reason: 'fetches' | 'duration'; discoveryComplete: boolean }
 
 export interface SitemapAuditPlan {
   discovered: number
@@ -399,6 +409,10 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
    */
   includePaths?: string[]
   onPlan?: (plan: SitemapAuditPlan) => void
+  /** Maximum HTTP attempts across discovery, child sitemaps, pages, and auxiliary probes. */
+  maxTotalFetches?: number
+  /** Wall-clock deadline for the whole sitemap run. */
+  maxDurationMs?: number
 }
 
 /* ── Platform detection types ── */
