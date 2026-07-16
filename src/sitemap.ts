@@ -1,6 +1,13 @@
 import { AeoAuditError } from './errors.js'
 import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
-import { fetchWithValidatedRedirects, normalizeTargetUrl } from './fetch-page.js'
+import {
+  FetchBudgetController,
+  fetchWithValidatedRedirects,
+  isCallerAbort,
+  isFetchBudgetExceededError,
+  normalizeTargetUrl,
+  throwIfAborted,
+} from './fetch-page.js'
 import { runAeoAudit } from './index.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { PAGE_SPECIFIC_FACTOR_IDS, PAGE_SPECIFIC_PRESENT_THRESHOLD } from './scoring.js'
@@ -13,6 +20,8 @@ import type {
   RunAeoAuditOptions,
   SitemapAuditOptions,
   SitemapAuditReport,
+  SitemapAuditBudgetMetadata,
+  SitemapAuditMetadata,
   SitemapPageResult,
 } from './types.js'
 
@@ -152,6 +161,22 @@ interface SitemapFetchResult {
   status: number
 }
 
+interface SitemapFetchOptions {
+  allowPrivateHost?: string
+  signal?: AbortSignal
+  onOutboundAttempt?: RunAeoAuditOptions['onOutboundAttempt']
+  budget?: FetchBudgetController
+  kind?: 'sitemap' | 'robots'
+}
+
+function normalizeSitemapFetchOptions(options?: string | SitemapFetchOptions): SitemapFetchOptions {
+  if (typeof options === 'string') {
+    return { allowPrivateHost: options }
+  }
+
+  return options ?? {}
+}
+
 /**
  * Fetch a sitemap / robots / child-`<loc>` URL through the SSRF guard.
  *
@@ -167,15 +192,24 @@ interface SitemapFetchResult {
  * privately; the match is host-only and per-hop, so a redirect or `<loc>` to any OTHER
  * private host stays blocked even when it is set.
  */
-async function fetchSitemapResponse(url: string, allowPrivateHost?: string): Promise<SitemapFetchResult> {
+async function fetchSitemapResponse(url: string, fetchOptions?: string | SitemapFetchOptions): Promise<SitemapFetchResult> {
+  const options = normalizeSitemapFetchOptions(fetchOptions)
+  const { allowPrivateHost, signal, onOutboundAttempt, budget, kind = 'sitemap' } = options
+  throwIfAborted(signal)
+
   let response: Response
   try {
     const result = await fetchWithValidatedRedirects(url, {
       timeoutMs: SITEMAP_TIMEOUT_MS,
       allowPrivateHost,
+      signal,
+      onOutboundAttempt,
+      budget,
+      outboundAttemptKind: kind,
     })
     response = result.response
   } catch (error) {
+    if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) throw error
     if (error instanceof AeoAuditError) throw error
     throw new AeoAuditError('UNREACHABLE', 'Could not fetch sitemap.', { cause: error })
   }
@@ -197,6 +231,7 @@ async function fetchSitemapResponse(url: string, allowPrivateHost?: string): Pro
   let totalBytes = 0
   try {
     for (;;) {
+      throwIfAborted(signal)
       const { done, value } = await reader.read()
       if (done) break
       const chunk = Buffer.from(value)
@@ -208,6 +243,7 @@ async function fetchSitemapResponse(url: string, allowPrivateHost?: string): Pro
       chunks.push(chunk)
     }
   } catch (error) {
+    if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) throw error
     if (error instanceof AeoAuditError) throw error
     throw new AeoAuditError('UNREACHABLE', 'Could not read sitemap response.', { cause: error })
   }
@@ -215,8 +251,8 @@ async function fetchSitemapResponse(url: string, allowPrivateHost?: string): Pro
   return { body: Buffer.concat(chunks).toString('utf8'), status: response.status }
 }
 
-async function fetchSitemapBody(url: string, allowPrivateHost?: string): Promise<string> {
-  const result = await fetchSitemapResponse(url, allowPrivateHost)
+async function fetchSitemapBody(url: string, options?: string | SitemapFetchOptions): Promise<string> {
+  const result = await fetchSitemapResponse(url, options)
   if (result.status < 200 || result.status >= 300) {
     throw new AeoAuditError('UNREACHABLE', `Sitemap returned HTTP ${result.status}.`)
   }
@@ -232,18 +268,20 @@ function looksLikeSitemap(body: string): boolean {
  * Issue #32: try the documented sitemap paths in order, then fall back to
  * Sitemap: directives in /robots.txt. Returns the first URL that 200s.
  */
-export async function discoverSitemapUrl(origin: string, allowPrivateHost?: string): Promise<string | null> {
+export async function discoverSitemapUrl(origin: string, fetchOptions?: string | SitemapFetchOptions): Promise<string | null> {
+  const options = normalizeSitemapFetchOptions(fetchOptions)
   const candidates = [`${origin}/sitemap.xml`, `${origin}/sitemap-index.xml`]
 
   for (const candidate of candidates) {
     try {
-      const result = await fetchSitemapResponse(candidate, allowPrivateHost)
+      const result = await fetchSitemapResponse(candidate, { ...options, kind: 'sitemap' })
       // Require an actual sitemap marker — many SPAs serve the HTML shell for
       // unknown routes, returning 200 with `<!doctype html>` for /sitemap.xml.
       if (result.status >= 200 && result.status < 300 && looksLikeSitemap(result.body)) {
         return candidate
       }
-    } catch {
+    } catch (error) {
+      if (isCallerAbort(error, options.signal) || isFetchBudgetExceededError(error)) throw error
       // Network/timeout errors fall through to the next candidate so we don't
       // give up on the whole discovery just because one path was flaky.
     }
@@ -251,14 +289,15 @@ export async function discoverSitemapUrl(origin: string, allowPrivateHost?: stri
 
   // robots.txt fallback — many sites declare a non-standard sitemap location there.
   try {
-    const robots = await fetchSitemapResponse(`${origin}/robots.txt`, allowPrivateHost)
+    const robots = await fetchSitemapResponse(`${origin}/robots.txt`, { ...options, kind: 'robots' })
     if (robots.status >= 200 && robots.status < 300 && robots.body) {
       const sitemapDirective = parseRobotsSitemap(robots.body, origin)
       if (sitemapDirective) {
         return sitemapDirective
       }
     }
-  } catch {
+  } catch (error) {
+    if (isCallerAbort(error, options.signal) || isFetchBudgetExceededError(error)) throw error
     /* ignore — discovery failure surfaces as null */
   }
 
@@ -300,8 +339,9 @@ interface ResolvedSitemap {
   childSitemapsSkipped: number
 }
 
-async function resolveSitemapUrls(sitemapUrl: string, allowPrivateHost?: string): Promise<ResolvedSitemap> {
-  const body = await fetchSitemapBody(sitemapUrl, allowPrivateHost)
+async function resolveSitemapUrls(sitemapUrl: string, fetchOptions?: string | SitemapFetchOptions): Promise<ResolvedSitemap> {
+  const options = normalizeSitemapFetchOptions(fetchOptions)
+  const body = await fetchSitemapBody(sitemapUrl, { ...options, kind: 'sitemap' })
   const entries = parseSitemapXml(body)
 
   // If it's a sitemap index, fetch child sitemaps. Each child <loc> is fully
@@ -316,9 +356,15 @@ async function resolveSitemapUrls(sitemapUrl: string, allowPrivateHost?: string)
     const childSitemapsSkipped = entries.length - children.length
     const childResults = await mapWithConcurrency(children, DEFAULT_CONCURRENCY, async (entry) => {
       try {
-        const childBody = await fetchSitemapBody(entry.loc, allowPrivateHost)
+        if (options.budget?.isExhausted()) {
+          return []
+        }
+
+        const childBody = await fetchSitemapBody(entry.loc, { ...options, kind: 'sitemap' })
         return parseSitemapXml(childBody)
-      } catch {
+      } catch (error) {
+        if (isCallerAbort(error, options.signal)) throw error
+        if (isFetchBudgetExceededError(error)) return []
         return []
       }
     })
@@ -567,7 +613,57 @@ function buildPrioritizedFixes(
   return [...criticalFixes, ...crossCuttingFixes]
 }
 
+function assertPositiveIntegerOption(name: string, value: number | undefined): void {
+  if (value === undefined) return
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new AeoAuditError('BAD_INPUT', `${name} must be a positive integer.`)
+  }
+}
+
+function createFetchBudget(options: SitemapAuditOptions): FetchBudgetController | undefined {
+  assertPositiveIntegerOption('maxFetches', options.maxFetches)
+  assertPositiveIntegerOption('maxDurationMs', options.maxDurationMs)
+
+  if (options.maxFetches === undefined && options.maxDurationMs === undefined) {
+    return undefined
+  }
+
+  return new FetchBudgetController({
+    maxFetches: options.maxFetches,
+    maxDurationMs: options.maxDurationMs,
+  })
+}
+
+function sitemapMetadata(
+  budget: FetchBudgetController | undefined,
+  pagesQueued: number,
+  pagesCompleted: number,
+): SitemapAuditMetadata {
+  if (!budget) {
+    return { partial: false }
+  }
+
+  const snapshot = budget.snapshot()
+  const budgetMetadata: SitemapAuditBudgetMetadata = {
+    maxFetches: snapshot.maxFetches,
+    fetchesStarted: snapshot.fetchesStarted,
+    maxDurationMs: snapshot.maxDurationMs,
+    elapsedMs: snapshot.elapsedMs,
+    pagesQueued,
+    pagesCompleted,
+    pagesRemaining: Math.max(0, pagesQueued - pagesCompleted),
+    exhaustedReason: snapshot.exhaustedReason,
+  }
+
+  return {
+    partial: snapshot.exhaustedReason !== undefined,
+    budget: budgetMetadata,
+  }
+}
+
 export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptions = {}): Promise<SitemapAuditReport> {
+  throwIfAborted(options.signal)
+  const budget = createFetchBudget(options)
   const normalizedUrl = normalizeTargetUrl(rawUrl)
   const origin = normalizedUrl.origin
 
@@ -578,7 +674,12 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   if (options.sitemapUrl) {
     sitemapUrl = options.sitemapUrl
   } else {
-    const discovered = await discoverSitemapUrl(origin, options.allowPrivateHost)
+    const discovered = await discoverSitemapUrl(origin, {
+      allowPrivateHost: options.allowPrivateHost,
+      signal: options.signal,
+      onOutboundAttempt: options.onOutboundAttempt,
+      budget,
+    })
     if (!discovered) {
       throw new AeoAuditError(
         'UNREACHABLE',
@@ -589,7 +690,12 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   }
 
   // Fetch and parse sitemap
-  const { entries: resolvedEntries, childSitemapsSkipped } = await resolveSitemapUrls(sitemapUrl, options.allowPrivateHost)
+  const { entries: resolvedEntries, childSitemapsSkipped } = await resolveSitemapUrls(sitemapUrl, {
+    allowPrivateHost: options.allowPrivateHost,
+    signal: options.signal,
+    onOutboundAttempt: options.onOutboundAttempt,
+    budget,
+  })
   let allEntries = resolvedEntries
 
   // Opt-in origin rewriting (issue from field feedback): re-home every <loc> onto
@@ -627,6 +733,30 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   const truncated = eligible.length - entries.length
 
   if (entries.length === 0) {
+    if (budget?.exhaustedReason) {
+      return {
+        schemaVersion: SCHEMA_VERSION,
+        compareMeta: {
+          engineVersion: engineVersion(),
+          factorIds: [],
+        },
+        sitemapUrl,
+        auditedAt: new Date().toISOString(),
+        pagesDiscovered: discovered,
+        pagesAudited: 0,
+        pagesSkipped: filtered + truncated,
+        pagesFiltered: filtered,
+        pagesTruncated: truncated,
+        effectiveLimit,
+        aggregateScore: 0,
+        pages: [],
+        criticalDefects: [],
+        crossCuttingIssues: [],
+        prioritizedFixes: [],
+        metadata: sitemapMetadata(budget, 0, 0),
+      }
+    }
+
     throw new AeoAuditError(
       'BAD_INPUT',
       pathFilter
@@ -648,57 +778,74 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   // single-URL mode. includeLighthouse is deliberately NOT forwarded: each
   // PageSpeed Insights call takes 15-30s, so running it across a sitemap would be
   // pathological — the CLI rejects --lighthouse + --sitemap for the same reason.
-  const auditOptions: RunAeoAuditOptions = {
+  const auditOptions: RunAeoAuditOptions & { budget?: FetchBudgetController } = {
     factors: options.factors,
     includeGeo: options.includeGeo,
     includeAgentSkills: options.includeAgentSkills,
+    signal: options.signal,
+    onOutboundAttempt: options.onOutboundAttempt,
     // Forward the target-scoped private-host allowance so `--allow-local` reaches
     // per-page fetches. It only ever matches the single host the user named, so a
     // <loc> on any other private host stays blocked even with this set. With
     // --rewrite-sitemap-origin, every <loc> is on that named host, so a local dev
     // server's whole sitemap becomes auditable.
     allowPrivateHost: options.allowPrivateHost,
+    budget,
   }
 
   // Audit pages with bounded concurrency: 5 workers is a polite ceiling for one
   // origin while giving a meaningful speedup over fully sequential.
-  const settled = await mapWithConcurrency(
-    entries,
-    DEFAULT_CONCURRENCY,
-    async (entry): Promise<{ pageResult: SitemapPageResult; report: AuditReport | null }> => {
-      try {
-        const report = await runAeoAudit(entry.loc, auditOptions)
-        return {
-          pageResult: {
-            url: report.finalUrl,
-            overallScore: report.overallScore,
-            status: 'success',
-            factors: report.factors,
-            metadata: report.metadata,
-            priority: entry.priority,
-          },
-          report,
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        return {
-          pageResult: {
-            url: entry.loc,
-            overallScore: 0,
-            status: 'error',
-            error: message,
-            priority: entry.priority,
-          },
-          report: null,
+  const settled = new Array<{ pageResult: SitemapPageResult; report: AuditReport | null } | undefined>(entries.length)
+  let nextIndex = 0
+  const workerCount = Math.max(1, Math.min(DEFAULT_CONCURRENCY, entries.length))
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        throwIfAborted(options.signal)
+        if (budget?.isExhausted()) return
+
+        const i = nextIndex++
+        if (i >= entries.length) return
+        const entry = entries[i]
+
+        try {
+          const report = await runAeoAudit(entry.loc, auditOptions)
+          settled[i] = {
+            pageResult: {
+              url: report.finalUrl,
+              overallScore: report.overallScore,
+              status: 'success',
+              factors: report.factors,
+              metadata: report.metadata,
+              priority: entry.priority,
+            },
+            report,
+          }
+        } catch (error) {
+          if (isCallerAbort(error, options.signal)) throw error
+          if (isFetchBudgetExceededError(error)) return
+
+          const message = error instanceof Error ? error.message : String(error)
+          settled[i] = {
+            pageResult: {
+              url: entry.loc,
+              overallScore: 0,
+              status: 'error',
+              error: message,
+              priority: entry.priority,
+            },
+            report: null,
+          }
         }
       }
-    },
+    }),
   )
 
-  const pageResults: SitemapPageResult[] = settled.map((s) => s.pageResult)
+  const completed = settled.filter((s): s is { pageResult: SitemapPageResult; report: AuditReport | null } => Boolean(s))
+  const pageResults: SitemapPageResult[] = completed.map((s) => s.pageResult)
   const successReports: AuditReport[] = settled
-    .map((s) => s.report)
-    .filter((r): r is AuditReport => r !== null)
+    .map((s) => s?.report)
+    .filter((r): r is AuditReport => Boolean(r))
 
   // Calculate aggregate score from successful audits
   const successScores = pageResults.filter((p) => p.status === 'success').map((p) => p.overallScore)
@@ -726,8 +873,8 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     sitemapUrl,
     auditedAt: new Date().toISOString(),
     pagesDiscovered: discovered,
-    pagesAudited: entries.length,
-    pagesSkipped: filtered + truncated,
+    pagesAudited: pageResults.length,
+    pagesSkipped: filtered + truncated + Math.max(0, entries.length - pageResults.length),
     pagesFiltered: filtered,
     pagesTruncated: truncated,
     effectiveLimit,
@@ -736,6 +883,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     criticalDefects,
     crossCuttingIssues,
     prioritizedFixes,
+    metadata: sitemapMetadata(budget, entries.length, pageResults.length),
   }
 }
 

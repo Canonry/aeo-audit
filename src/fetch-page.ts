@@ -5,12 +5,15 @@ import ipaddr from 'ipaddr.js'
 import { fetch as undiciFetch, Agent } from 'undici'
 import { AeoAuditError, isAeoAuditError } from './errors.js'
 import type {
+  AeoAuditOutboundAttemptKind,
+  AeoAuditOutboundAttemptObserver,
   AuxiliaryDiagnostics,
   AuxiliaryResource,
   AuxiliaryResourceState,
   AuxiliaryResources,
   FetchedPage,
   RedirectHop,
+  SitemapAuditPartialReason,
 } from './types.js'
 
 interface AuxiliarySpec {
@@ -28,17 +31,23 @@ interface TimedFetchOptions {
   redirect?: RequestRedirect
   /** Single host allowed to resolve privately; when it matches, DNS pinning is skipped. */
   allowPrivateHost?: string
+  signal?: AbortSignal
 }
 
 interface ReadBodyOptions {
   maxBytes: number
   requireHtmlSniff?: boolean
+  signal?: AbortSignal
 }
 
 export interface FetchWithRedirectOptions {
   timeoutMs: number
   maxRedirects?: number
   allowPrivateHost?: string
+  signal?: AbortSignal
+  onOutboundAttempt?: AeoAuditOutboundAttemptObserver
+  outboundAttemptKind?: AeoAuditOutboundAttemptKind
+  budget?: FetchBudgetController
 }
 
 export interface RedirectFetchResult {
@@ -73,6 +82,116 @@ const BLOCKED_HOST_SUFFIXES = ['.localhost', '.local', '.internal', '.home', '.l
 const HTML_CONTENT_TYPES = ['text/html', 'application/xhtml+xml']
 const TEXT_LIKE_CONTENT_TYPES = ['text/', 'application/json', 'application/xml', 'text/xml', 'application/xhtml+xml']
 const AMBIGUOUS_CONTENT_TYPES = ['text/plain', 'application/octet-stream']
+
+export interface FetchBudgetSnapshot {
+  maxFetches?: number
+  fetchesStarted: number
+  maxDurationMs?: number
+  elapsedMs: number
+  exhaustedReason?: SitemapAuditPartialReason
+}
+
+export class FetchBudgetController {
+  readonly startedAt: number
+  readonly maxFetches?: number
+  readonly maxDurationMs?: number
+  fetchesStarted = 0
+  exhaustedReason?: SitemapAuditPartialReason
+
+  constructor(options: { maxFetches?: number; maxDurationMs?: number; startedAt?: number }) {
+    this.startedAt = options.startedAt ?? Date.now()
+    this.maxFetches = options.maxFetches
+    this.maxDurationMs = options.maxDurationMs
+  }
+
+  consumeFetch(): void {
+    this.assertWithinDuration()
+
+    if (this.maxFetches !== undefined && this.fetchesStarted >= this.maxFetches) {
+      this.exhaustedReason = 'fetch-budget-exceeded'
+      throw new AeoAuditError('BUDGET_EXCEEDED', `Sitemap audit exceeded the maxFetches budget of ${this.maxFetches}.`, {
+        details: { reason: this.exhaustedReason, maxFetches: this.maxFetches },
+      })
+    }
+
+    this.fetchesStarted += 1
+  }
+
+  assertWithinDuration(): void {
+    if (this.maxDurationMs !== undefined && Date.now() - this.startedAt >= this.maxDurationMs) {
+      this.exhaustedReason = 'duration-budget-exceeded'
+      throw new AeoAuditError('BUDGET_EXCEEDED', `Sitemap audit exceeded the maxDurationMs budget of ${this.maxDurationMs}.`, {
+        details: { reason: this.exhaustedReason, maxDurationMs: this.maxDurationMs },
+      })
+    }
+  }
+
+  isExhausted(): boolean {
+    if (this.maxFetches !== undefined && this.fetchesStarted >= this.maxFetches) {
+      this.exhaustedReason = 'fetch-budget-exceeded'
+      return true
+    }
+
+    try {
+      this.assertWithinDuration()
+    } catch (error) {
+      if (isFetchBudgetExceededError(error)) return true
+      throw error
+    }
+    return this.exhaustedReason !== undefined
+  }
+
+  snapshot(): FetchBudgetSnapshot {
+    return {
+      maxFetches: this.maxFetches,
+      fetchesStarted: this.fetchesStarted,
+      maxDurationMs: this.maxDurationMs,
+      elapsedMs: Date.now() - this.startedAt,
+      exhaustedReason: this.exhaustedReason,
+    }
+  }
+}
+
+export function isFetchBudgetExceededError(error: unknown): error is AeoAuditError & {
+  details: { reason?: SitemapAuditPartialReason }
+} {
+  return isAeoAuditError(error) && error.code === 'BUDGET_EXCEEDED'
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('This operation was aborted.', 'AbortError')
+}
+
+export function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw abortReason(signal)
+  }
+}
+
+export function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
+  if (!signal?.aborted) {
+    return false
+  }
+
+  const reason = signal.reason
+  return error === reason || (
+    reason === undefined
+    && error instanceof DOMException
+    && error.name === 'AbortError'
+  )
+}
+
+function findAeoAuditError(error: unknown): AeoAuditError | null {
+  if (isAeoAuditError(error)) {
+    return error
+  }
+
+  if (typeof error === 'object' && error !== null && 'cause' in error) {
+    return findAeoAuditError((error as { cause?: unknown }).cause)
+  }
+
+  return null
+}
 
 function stripPort(hostname = ''): string {
   const closingBracketIndex = hostname.indexOf(']')
@@ -304,9 +423,19 @@ async function pinnedHostFetch(url: string, init: RequestInit, pin: boolean): Pr
 }
 
 async function timedFetch(url: URL | string, options: TimedFetchOptions): Promise<Response> {
-  const { timeoutMs, headers, redirect = 'manual', allowPrivateHost } = options
+  const { timeoutMs, headers, redirect = 'manual', allowPrivateHost, signal } = options
+  throwIfAborted(signal)
+
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutError = new AeoAuditError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`)
+  const timer = setTimeout(() => controller.abort(timeoutError), timeoutMs)
+  const abortListener = signal
+    ? (): void => controller.abort(abortReason(signal))
+    : null
+
+  if (abortListener) {
+    signal?.addEventListener('abort', abortListener, { once: true })
+  }
 
   // Skip pinning only for the single host the caller opted out via --allow-local; that
   // host legitimately resolves to a private IP and the pinning lookup would block it.
@@ -324,13 +453,19 @@ async function timedFetch(url: URL | string, options: TimedFetchOptions): Promis
       },
     }, pin)
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new AeoAuditError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`, { cause: error })
+    if (controller.signal.aborted) {
+      throw controller.signal.reason ?? error
+    }
+
+    const knownError = findAeoAuditError(error)
+    if (knownError) {
+      throw knownError
     }
 
     throw new AeoAuditError('UNREACHABLE', 'Target URL could not be reached.', { cause: error })
   } finally {
     clearTimeout(timer)
+    if (abortListener) signal?.removeEventListener('abort', abortListener)
   }
 }
 
@@ -343,15 +478,33 @@ async function timedFetch(url: URL | string, options: TimedFetchOptions): Promis
  * caller gets a not-yet-read `Response` plus the final URL and redirect chain.
  */
 export async function fetchWithValidatedRedirects(startUrl: URL | string, options: FetchWithRedirectOptions): Promise<RedirectFetchResult> {
-  const { timeoutMs, maxRedirects = MAX_REDIRECTS, allowPrivateHost } = options
+  const {
+    timeoutMs,
+    maxRedirects = MAX_REDIRECTS,
+    allowPrivateHost,
+    signal,
+    onOutboundAttempt,
+    outboundAttemptKind = 'page',
+    budget,
+  } = options
 
   let currentUrl = new URL(startUrl.toString())
   const redirectChain: RedirectHop[] = []
 
   for (;;) {
+    throwIfAborted(signal)
+    budget?.assertWithinDuration()
     await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
+    throwIfAborted(signal)
+    budget?.consumeFetch()
+    await onOutboundAttempt?.({
+      kind: outboundAttemptKind,
+      method: 'GET',
+      url: currentUrl.toString(),
+      redirectDepth: redirectChain.length,
+    })
 
-    const response = await timedFetch(currentUrl, { timeoutMs, redirect: 'manual', allowPrivateHost })
+    const response = await timedFetch(currentUrl, { timeoutMs, redirect: 'manual', allowPrivateHost, signal })
 
     if (!isRedirectStatus(response.status)) {
       return {
@@ -444,7 +597,7 @@ function hasDisallowedControlChars(value: string): boolean {
 }
 
 async function readBodyAsText(response: Response, options: ReadBodyOptions): Promise<string> {
-  const { maxBytes, requireHtmlSniff = false } = options
+  const { maxBytes, requireHtmlSniff = false, signal } = options
   const reader = response.body?.getReader()
   if (!reader) {
     return ''
@@ -456,6 +609,7 @@ async function readBodyAsText(response: Response, options: ReadBodyOptions): Pro
   let sniffed = false
 
   for (;;) {
+    throwIfAborted(signal)
     const { done, value } = await reader.read()
     if (done) {
       break
@@ -526,20 +680,25 @@ async function attemptAuxiliaryFetch(
   origin: string,
   path: string,
   spec: AuxiliarySpec,
-  allowPrivateHost?: string,
+  options: FetchPageOptions = {},
 ): Promise<AuxiliaryFetchAttempt> {
   const startedAt = Date.now()
   const targetUrl = new URL(path, origin)
+  const { allowPrivateHost, signal, onOutboundAttempt, budget } = options
 
   try {
     const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(targetUrl, {
       timeoutMs: AUX_TIMEOUT_MS,
       maxRedirects: MAX_REDIRECTS,
       allowPrivateHost,
+      signal,
+      onOutboundAttempt,
+      budget,
+      outboundAttemptKind: 'auxiliary',
     })
 
     const body = response.ok
-      ? await readBodyAsText(response, { maxBytes: AUX_MAX_BYTES, requireHtmlSniff: false })
+      ? await readBodyAsText(response, { maxBytes: AUX_MAX_BYTES, requireHtmlSniff: false, signal })
       : ''
 
     const state = classifyAuxiliaryState(spec, response, body)
@@ -557,6 +716,10 @@ async function attemptAuxiliaryFetch(
       wasMissing: response.status === 404,
     }
   } catch (error) {
+    if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) {
+      throw error
+    }
+
     const knownError = isAeoAuditError(error)
       ? error
       : new AeoAuditError('UNREACHABLE', 'Failed to fetch auxiliary file.', { cause: error })
@@ -595,23 +758,38 @@ async function attemptAuxiliaryFetch(
 async function probeStatusWithHeaders(
   url: URL | string,
   headers: Record<string, string>,
-  allowPrivateHost?: string,
+  options: FetchPageOptions = {},
 ): Promise<number | null> {
   const startUrl = typeof url === 'string' ? new URL(url) : new URL(url.toString())
+  const { allowPrivateHost, signal, onOutboundAttempt, budget } = options
   let currentUrl = startUrl
   let redirects = 0
 
   for (;;) {
     let response: Response
     try {
+      throwIfAborted(signal)
+      budget?.assertWithinDuration()
       await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
+      throwIfAborted(signal)
+      budget?.consumeFetch()
+      await onOutboundAttempt?.({
+        kind: 'diagnostic',
+        method: 'GET',
+        url: currentUrl.toString(),
+        redirectDepth: redirects,
+      })
       response = await timedFetch(currentUrl, {
         timeoutMs: DIAGNOSTIC_TIMEOUT_MS,
         headers,
         redirect: 'manual',
         allowPrivateHost,
+        signal,
       })
-    } catch {
+    } catch (error) {
+      if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) {
+        throw error
+      }
       return null
     }
 
@@ -638,14 +816,14 @@ async function probeStatusWithHeaders(
   }
 }
 
-async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, allowPrivateHost?: string): Promise<AuxiliaryResource> {
-  let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec, allowPrivateHost)
+async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, options: FetchPageOptions = {}): Promise<AuxiliaryResource> {
+  let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec, options)
 
   // Issue #32: if the primary path 404s, try the documented fallbacks (e.g.
   // /sitemap-index.xml). The first successful fallback wins.
   if (attempt.wasMissing && spec.fallbackPaths?.length) {
     for (const fallback of spec.fallbackPaths) {
-      const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec, allowPrivateHost)
+      const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec, options)
       if (!fallbackAttempt.wasMissing && fallbackAttempt.resource.state === 'ok') {
         attempt = fallbackAttempt
         break
@@ -665,7 +843,7 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, allowPriv
     const probeStatus = await probeStatusWithHeaders(attempt.resource.url, {
       'User-Agent': USER_AGENT,
       Accept: MARKDOWN_PROBE_ACCEPT,
-    }, allowPrivateHost)
+    }, options)
     if (probeStatus !== null && (probeStatus < 200 || probeStatus >= 400)) {
       diagnostics.contentNegotiation = true
     }
@@ -682,17 +860,25 @@ export interface FetchPageOptions {
   skipAuxiliary?: boolean
   /** Permit this single host to resolve to a private/loopback IP. See RunAeoAuditOptions.allowPrivateHost. */
   allowPrivateHost?: string
+  signal?: AbortSignal
+  onOutboundAttempt?: AeoAuditOutboundAttemptObserver
+  budget?: FetchBudgetController
 }
 
 export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}): Promise<FetchedPage> {
   const startedAt = Date.now()
+  throwIfAborted(options.signal)
   const normalizedUrl = normalizeTargetUrl(rawUrl)
-  const { allowPrivateHost } = options
+  const { allowPrivateHost, signal, onOutboundAttempt, budget } = options
 
   const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(normalizedUrl, {
     timeoutMs: MAIN_TIMEOUT_MS,
     maxRedirects: MAX_REDIRECTS,
     allowPrivateHost,
+    signal,
+    onOutboundAttempt,
+    budget,
+    outboundAttemptKind: 'page',
   })
 
   const contentType = response.headers.get('content-type') || ''
@@ -708,6 +894,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
   const html = await readBodyAsText(response, {
     maxBytes: MAIN_MAX_BYTES,
     requireHtmlSniff,
+    signal,
   })
 
   if (!looksLikeHtml(html)) {
@@ -722,7 +909,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
     const origin = new URL(finalUrl).origin
     const auxiliaryEntries = await Promise.all(
       AUXILIARY_SPECS.map(async (spec): Promise<[keyof AuxiliaryResources, AuxiliaryResource]> => {
-        const result = await fetchAuxiliaryFile(origin, spec, allowPrivateHost)
+        const result = await fetchAuxiliaryFile(origin, spec, options)
         return [spec.key, result]
       }),
     )

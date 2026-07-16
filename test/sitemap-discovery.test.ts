@@ -1,8 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
 import { discoverSitemapUrl, parseRobotsSitemap } from '../src/sitemap.js'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('parseRobotsSitemap', () => {
   it('extracts a Sitemap: directive (case-insensitive)', () => {
@@ -118,5 +122,27 @@ describe('discoverSitemapUrl', () => {
       return { status: 404, body: '' }
     }
     expect(await discoverSitemapUrl(origin, ALLOW_LOOPBACK)).toBe(`${origin}/sitemap-index.xml`)
+  })
+
+  it('propagates the caller abort reason during sitemap discovery', async () => {
+    const controller = new AbortController()
+    const reason = new Error('caller cancelled sitemap discovery')
+
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal
+        if (!signal) {
+          reject(new Error('expected fetch signal'))
+          return
+        }
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      }),
+    ))
+
+    const promise = discoverSitemapUrl('http://1.1.1.1', { signal: controller.signal })
+    await new Promise((resolve) => setImmediate(resolve))
+    controller.abort(reason)
+
+    await expect(promise).rejects.toBe(reason)
   })
 })

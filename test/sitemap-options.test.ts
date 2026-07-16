@@ -20,6 +20,13 @@ const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>${PAGE_URL}</loc></url>
 </urlset>`
 
+function sitemapXml(urls: string[]): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map((url) => `  <url><loc>${url}</loc></url>`).join('\n')}
+</urlset>`
+}
+
 function fakeReport(url: string) {
   return {
     url,
@@ -115,5 +122,94 @@ describe('runSitemapAudit option forwarding', () => {
     expect(report.pagesDiscovered).toBe(3)
     expect(report.pagesAudited).toBe(2)
     expect(report.pagesFiltered).toBe(1)
+  })
+
+  it('returns a partial report when the cumulative fetch budget is spent before page audits start', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(sitemapXml([
+        'http://1.1.1.1/',
+        'http://1.1.1.1/about',
+        'http://1.1.1.1/contact',
+      ]), { status: 200, headers: { 'content-type': 'application/xml' } }),
+    ))
+
+    const report = await runSitemapAudit(PAGE_URL, {
+      sitemapUrl: SITEMAP_URL,
+      maxFetches: 1,
+    })
+
+    expect(runAeoAuditMock).not.toHaveBeenCalled()
+    expect(report.pagesAudited).toBe(0)
+    expect(report.pagesSkipped).toBe(3)
+    expect(report.metadata?.partial).toBe(true)
+    expect(report.metadata?.budget).toMatchObject({
+      maxFetches: 1,
+      fetchesStarted: 1,
+      pagesQueued: 3,
+      pagesCompleted: 0,
+      pagesRemaining: 3,
+      exhaustedReason: 'fetch-budget-exceeded',
+    })
+  })
+
+  it('stops starting pages when the shared fetch budget is exhausted by page audits', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(sitemapXml([
+        'http://1.1.1.1/',
+        'http://1.1.1.1/about',
+        'http://1.1.1.1/contact',
+        'http://1.1.1.1/pricing',
+      ]), { status: 200, headers: { 'content-type': 'application/xml' } }),
+    ))
+    runAeoAuditMock.mockImplementation((url: string, options?: { budget?: { consumeFetch: () => void } }) => {
+      options?.budget?.consumeFetch()
+      return Promise.resolve(fakeReport(url))
+    })
+
+    const report = await runSitemapAudit(PAGE_URL, {
+      sitemapUrl: SITEMAP_URL,
+      maxFetches: 3,
+    })
+
+    expect(runAeoAuditMock).toHaveBeenCalledTimes(2)
+    expect(report.pagesAudited).toBe(2)
+    expect(report.metadata?.partial).toBe(true)
+    expect(report.metadata?.budget).toMatchObject({
+      maxFetches: 3,
+      fetchesStarted: 3,
+      pagesQueued: 4,
+      pagesCompleted: 2,
+      pagesRemaining: 2,
+      exhaustedReason: 'fetch-budget-exceeded',
+    })
+  })
+
+  it('stops starting pages when the cumulative duration budget expires', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(sitemapXml(Array.from({ length: 10 }, (_, i) => `http://1.1.1.1/page-${i}`)), {
+        status: 200,
+        headers: { 'content-type': 'application/xml' },
+      }),
+    ))
+    runAeoAuditMock.mockImplementation(async (url: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return fakeReport(url)
+    })
+
+    const report = await runSitemapAudit(PAGE_URL, {
+      sitemapUrl: SITEMAP_URL,
+      maxDurationMs: 10,
+    })
+
+    expect(runAeoAuditMock).toHaveBeenCalledTimes(5)
+    expect(report.pagesAudited).toBe(5)
+    expect(report.metadata?.partial).toBe(true)
+    expect(report.metadata?.budget).toMatchObject({
+      maxDurationMs: 10,
+      pagesQueued: 10,
+      pagesCompleted: 5,
+      pagesRemaining: 5,
+      exhaustedReason: 'duration-budget-exceeded',
+    })
   })
 })

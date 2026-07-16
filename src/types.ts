@@ -86,11 +86,31 @@ export interface AuditContext {
   pageTitle: string
 }
 
+export type AeoAuditOutboundAttemptKind =
+  | 'page'
+  | 'auxiliary'
+  | 'sitemap'
+  | 'robots'
+  | 'diagnostic'
+
+export interface AeoAuditOutboundAttempt {
+  kind: AeoAuditOutboundAttemptKind
+  method: 'GET'
+  url: string
+  redirectDepth: number
+}
+
+export type AeoAuditOutboundAttemptObserver = (attempt: AeoAuditOutboundAttempt) => void | Promise<void>
+
 export interface RunAeoAuditOptions {
   factors?: string[] | null
   includeGeo?: boolean
   includeAgentSkills?: boolean
   includeLighthouse?: boolean
+  /** Abort the audit. Caller cancellation rejects with the signal's original reason. */
+  signal?: AbortSignal
+  /** Observes each outbound GET after SSRF preflight validation and before the socket is opened. */
+  onOutboundAttempt?: AeoAuditOutboundAttemptObserver
   /**
    * Narrowly-scoped escape hatch for the SSRF guard. Set to a single hostname
    * (e.g. `localhost`, `127.0.0.1`, `staging.internal`) to permit that ONE host
@@ -367,8 +387,28 @@ export interface SitemapAuditReport {
    * full affected-page set so an agent can act without parsing prose.
    */
   prioritizedFixes: PrioritizedFix[]
+  /** Run metadata for hosted/agent consumers, including partial budgeted results. */
+  metadata?: SitemapAuditMetadata
   /** Provenance for regression comparison; see `AuditReport.compareMeta`. */
   compareMeta?: CompareMeta
+}
+
+export type SitemapAuditPartialReason = 'fetch-budget-exceeded' | 'duration-budget-exceeded'
+
+export interface SitemapAuditBudgetMetadata {
+  maxFetches?: number
+  fetchesStarted: number
+  maxDurationMs?: number
+  elapsedMs: number
+  pagesQueued: number
+  pagesCompleted: number
+  pagesRemaining: number
+  exhaustedReason?: SitemapAuditPartialReason
+}
+
+export interface SitemapAuditMetadata {
+  partial: boolean
+  budget?: SitemapAuditBudgetMetadata
 }
 
 export interface SitemapAuditPlan {
@@ -385,6 +425,19 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
   sitemapUrl?: string
   limit?: number
   topIssuesOnly?: boolean
+  /**
+   * Cumulative outbound GET budget for sitemap mode. Counts sitemap discovery,
+   * child sitemaps, pages, auxiliary files, redirects, and diagnostics after SSRF
+   * preflight validation. When exhausted after discovery, the report is returned
+   * as partial with `metadata.budget.exhaustedReason`.
+   */
+  maxFetches?: number
+  /**
+   * Cumulative wall-clock budget for sitemap mode in milliseconds. When exhausted
+   * after discovery, no additional pages are started and the partial report records
+   * the budget metadata.
+   */
+  maxDurationMs?: number
   /**
    * Rewrite every sitemap `<loc>`'s origin to the origin of the target URL passed
    * to `runSitemapAudit` before crawling. Useful when a sitemap hardcodes the
@@ -462,7 +515,7 @@ export interface BatchPlatformDetectionReport {
  * comparable. Embedded at audit time; absent on reports from older engines.
  */
 export interface CompareMeta {
-  /** npm package version (`@ainyc/aeo-audit`) that produced the report. */
+  /** npm package version (`@canonry/aeo-audit`) that produced the report. */
   engineVersion: string
   /** Active factor-id set for the audit, sorted. A mismatch means the weighted
    * basis differs (`--factors`/`--include-*`), so score deltas are apples-to-oranges. */

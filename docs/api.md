@@ -7,13 +7,15 @@ TypeScript declaration files are included automatically.
 ## Single page
 
 ```ts
-import { runAeoAudit } from '@ainyc/aeo-audit'
+import { runAeoAudit } from '@canonry/aeo-audit'
 
 const report = await runAeoAudit('https://example.com/specific-page', {
   includeGeo: false,         // Include geographic signals (default: false)
   includeAgentSkills: false, // Include agent skill exposure (default: false)
   includeLighthouse: false,  // Include Lighthouse via PageSpeed Insights (default: false; adds ~15-30s)
   factors: undefined,        // Run all factors (or pass array of factor IDs)
+  signal: undefined,         // AbortSignal; rejects with the caller's original abort reason
+  onOutboundAttempt: undefined, // Observer called before each SSRF-validated outbound GET
   allowPrivateHost: undefined, // Permit ONE named host to resolve to a private/loopback IP (e.g. 'localhost').
                                // Scoped to that exact host; redirects/sitemap entries to other private hosts stay blocked.
 })
@@ -25,19 +27,22 @@ console.log(report.factors)      // Array of factor results with scores, finding
 ## Site-wide (sitemap)
 
 ```ts
-import { runSitemapAudit } from '@ainyc/aeo-audit'
+import { runSitemapAudit } from '@canonry/aeo-audit'
 
 const report = await runSitemapAudit('https://example.com', {
   limit: 200,               // Max pages to audit (default 200, sorted by sitemap priority)
+  maxFetches: 500,          // Optional cumulative outbound GET budget
+  maxDurationMs: 60_000,    // Optional cumulative wall-clock budget
   factors: ['schema-validity', 'structured-data'],  // Optional subset
 })
 
-console.log(report.schemaVersion)      // '3.1', JSON shape version (see "Machine-readable output")
+console.log(report.schemaVersion)      // '3.2', JSON shape version (see "Machine-readable output")
 console.log(report.aggregateScore)     // 84
 console.log(report.pagesAudited)       // 22
 console.log(report.criticalDefects)    // Binary per-page defects (multiple/missing H1, missing title/meta), grouped by defect
 console.log(report.crossCuttingIssues) // Per-factor rollup with affectedUrls for every recommendation
 console.log(report.prioritizedFixes)   // Ranked PrioritizedFix[]: critical defects first, then cross-cutting by impact
+console.log(report.metadata?.partial)  // true when a sitemap budget stopped the run early
 ```
 
 Each entry in `crossCuttingIssues[].topIssues` carries a `recommendation` plus the exact `affectedUrls` so you can attribute each problem to specific pages, e.g. "FAQPage duplicate" pointing at every blog post that has it. Every issue also carries `bestScore` / `bestPageUrl` (the strongest page for that factor, to propagate from) and a `status` — `sitewide`, `limited`, or `opportunity` — that classifies page-specific factors (FAQ, definitions) so an isolated-but-present FAQ reads as a `limited` tune-up rather than a site-wide gap. See [Sitemap aggregation](scoring.md#sitemap-aggregation-cross-cutting-issues-and-page-specific-factors).
@@ -55,7 +60,7 @@ Each entry in `crossCuttingIssues[].topIssues` carries a `recommendation` plus t
 ## Static output (offline, from disk)
 
 ```ts
-import { runStaticAudit } from '@ainyc/aeo-audit'
+import { runStaticAudit } from '@canonry/aeo-audit'
 
 const result = await runStaticAudit('./out', {
   baseUrl: 'https://example.com', // maps files to page URLs (default https://localhost)

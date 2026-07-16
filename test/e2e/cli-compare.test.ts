@@ -15,7 +15,10 @@ function captureConsole(t: TestContext): { stdout: string[]; stderr: string[] } 
     stdout.push(args.map(String).join(' '))
   }
   console.error = (...args: unknown[]) => {
-    stderr.push(args.map(String).join(' '))
+    const line = args.map(String).join(' ')
+    if (!line.includes('[DEP0205]')) {
+      stderr.push(line)
+    }
   }
   t.after(() => {
     console.log = realLog

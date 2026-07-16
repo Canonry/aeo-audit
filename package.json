@@ -1,6 +1,6 @@
 {
-  "name": "@ainyc/aeo-audit",
-  "version": "4.2.0",
+  "name": "@canonry/aeo-audit",
+  "version": "4.3.0",
   "description": "The most comprehensive open-source Answer Engine Optimization (AEO) audit tool. Scores websites across 16 ranking factors that determine AI citation.",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,6 +29,9 @@
       "types": "./dist/formatters/*.d.ts",
       "default": "./dist/formatters/*.js"
     }
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "files": [
     "dist/",
@@ -81,9 +84,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Canonry/aeo-audit.git"
+    "url": "git+https://github.com/Canonry/aeo-audit.git"
   },
-  "homepage": "https://ainyc.ai",
+  "homepage": "https://canonry.ai",
   "bugs": {
     "url": "https://github.com/Canonry/aeo-audit/issues"
   }
