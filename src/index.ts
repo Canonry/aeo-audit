@@ -33,7 +33,15 @@ import type {
   RunAeoAuditOptions,
   ScoredFactor,
 } from './types.js'
+import type { FetchBudgetController } from './fetch-page.js'
 
+export {
+  AeoAuditError,
+  getAeoAuditErrorCode,
+  isAeoAuditError,
+  isAeoAuditErrorCode,
+} from './errors.js'
+export type { AeoAuditErrorCode, AeoAuditErrorOptions } from './errors.js'
 export { runSitemapAudit } from './sitemap.js'
 export { runStaticAudit } from './static-audit.js'
 export { detectCriticalDefects, buildCriticalDefects } from './critical-defects.js'
@@ -43,7 +51,18 @@ export { compareReports, renderCompareMarkdown, isSitemapReport, driftLevel, DEF
 export { detectPlatform, detectPlatformBatch } from './detect-platform.js'
 export { SPEC_RULES, FACTOR_SPEC_RULES, SPEC_SITE, specCitation } from './spec-references.js'
 export type { SpecRule, SpecRuleId, SpecStatus } from './spec-references.js'
-export type { SitemapAuditReport, SitemapAuditOptions } from './types.js'
+export type {
+  AeoAuditOutboundAttempt,
+  AeoAuditOutboundAttemptKind,
+  AeoAuditOutboundAttemptObserver,
+  AuditReport,
+  RunAeoAuditOptions,
+  SitemapAuditBudgetMetadata,
+  SitemapAuditMetadata,
+  SitemapAuditOptions,
+  SitemapAuditPartialReason,
+  SitemapAuditReport,
+} from './types.js'
 export type {
   AgentSummary,
   CriticalDefect,
@@ -232,6 +251,7 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
 }
 
 export async function runAeoAudit(rawUrl: string, options: RunAeoAuditOptions = {}): Promise<AuditReport> {
+  const internalOptions = options as RunAeoAuditOptions & { budget?: FetchBudgetController }
   const normalizedUrl = normalizeTargetUrl(rawUrl)
 
   // Validate factor IDs up front so a typo'd --factors fails before the fetch.
@@ -239,6 +259,9 @@ export async function runAeoAudit(rawUrl: string, options: RunAeoAuditOptions = 
 
   const fetchedPage = await fetchPage(normalizedUrl.toString(), {
     allowPrivateHost: options.allowPrivateHost,
+    signal: options.signal,
+    onOutboundAttempt: options.onOutboundAttempt,
+    budget: internalOptions.budget,
   })
 
   return auditHtmlPage(

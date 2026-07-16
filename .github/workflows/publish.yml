@@ -1,15 +1,14 @@
 name: Publish
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,7 +33,8 @@ jobs:
         if: steps.version.outputs.changed == 'true'
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+          registry-url: https://npm.pkg.github.com
+          scope: '@canonry'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
         if: steps.version.outputs.changed == 'true'
@@ -42,35 +42,22 @@ jobs:
         if: steps.version.outputs.changed == 'true'
       - run: pnpm run build
         if: steps.version.outputs.changed == 'true'
+      - run: pnpm run lint
+        if: steps.version.outputs.changed == 'true'
       - run: pnpm test
         if: steps.version.outputs.changed == 'true'
       - run: pnpm run test:e2e
         if: steps.version.outputs.changed == 'true'
-      - run: npm publish --provenance --access public
+      - run: npm publish
         if: steps.version.outputs.changed == 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish to ClawHub
         if: steps.version.outputs.changed == 'true'
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
-          COMMIT_SUBJECT: ${{ github.event.head_commit.message }}
         run: |
           npx -y clawhub@0 login --token "$CLAWHUB_TOKEN" --no-browser
-          CHANGELOG="${COMMIT_SUBJECT%%$'\n'*}"
+          CHANGELOG="$(git log -1 --pretty=%s)"
           npx -y clawhub@0 publish skills/aeo --version "$VERSION" --changelog "$CHANGELOG"
-      - name: Create git tag
-        if: steps.version.outputs.changed == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git tag "v${VERSION}"
-          git push origin "v${VERSION}"
-          # Move the floating major tag (e.g. v4) that the composite Action is
-          # referenced by (Canonry/aeo-audit/action@v4) to this release commit.
-          # Safe under the single-trigger rule: this workflow fires on push to main,
-          # not on tags, so re-pushing the major tag does not re-trigger it.
-          MAJOR="v${VERSION%%.*}"
-          git tag -f "$MAJOR"
-          git push -f origin "$MAJOR"

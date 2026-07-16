@@ -8,12 +8,12 @@ import { readFileSync } from 'node:fs'
  * Lives in its own module (not `index.ts`) so report builders can read it without
  * importing the audit entry points — which test suites routinely mock.
  */
-export const SCHEMA_VERSION = '3.1'
+export const SCHEMA_VERSION = '3.2'
 
 let cachedEngineVersion: string | null = null
 
 /**
- * The npm package version of `@ainyc/aeo-audit` at runtime, read once from the
+ * The npm package version of `@canonry/aeo-audit` at runtime, read once from the
  * package's own `package.json`. Embedded into report `compareMeta` so a stored
  * baseline records which engine produced it — scoring changes can ship under a
  * package version bump without changing `SCHEMA_VERSION`, so `compare` needs the

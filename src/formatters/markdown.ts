@@ -77,6 +77,10 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
     lines.push(``)
     lines.push(`> **Note:** ${report.pagesTruncated} additional pages were skipped because of the page limit. Pass \`--limit ${Math.max(report.pagesDiscovered, 9999)}\` to audit them all.`)
   }
+  if (report.metadata?.partial && report.metadata.budget?.exhaustedReason) {
+    lines.push(``)
+    lines.push(`> **Partial:** ${report.metadata.budget.exhaustedReason}; ${report.metadata.budget.pagesRemaining} queued pages were not started.`)
+  }
   lines.push(`**Audited:** ${report.auditedAt}`)
   lines.push(``)
 

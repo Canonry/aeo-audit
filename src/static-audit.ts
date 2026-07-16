@@ -299,6 +299,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     criticalDefects,
     crossCuttingIssues,
     prioritizedFixes,
+    metadata: { partial: false },
   }
 
   return { kind: 'multi', report }

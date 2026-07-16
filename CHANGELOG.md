@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.3.0 (2026-07-16)
+
+### Added
+- **Private GitHub Packages engine package.** The package now publishes as `@canonry/aeo-audit@4.3.0` to `https://npm.pkg.github.com` via `publishConfig`, with a committed scope-only `.npmrc` (`@canonry:registry=https://npm.pkg.github.com`) and no committed auth token.
+- **Hosted engine contract from the package root.** Root exports now include the typed `AeoAuditErrorCode` union, `AeoAuditError`, `isAeoAuditError`, `isAeoAuditErrorCode`, `getAeoAuditErrorCode`, `runAeoAudit`, `runSitemapAudit`, `engineVersion`, abort-aware options, outbound-attempt observer types, and typed sitemap partial/budget metadata.
+- **Abort and budget controls for hosted sitemap audits.** `runAeoAudit` and `runSitemapAudit` accept `AbortSignal`; sitemap mode adds cumulative `maxFetches` and `maxDurationMs` budgets. When a sitemap audit stops after discovery because a budget is exhausted, the returned `SitemapAuditReport.metadata` marks the report partial and records fetch count, elapsed time, queued/completed/remaining pages, and the budget stop reason.
+
+### Changed
+- **`schemaVersion` bumped `3.1` → `3.2`** (additive: `SitemapAuditReport.metadata` for partial/budgeted reports). Existing report fields are unchanged.
+- **Release workflow publishes to GitHub Packages with `GITHUB_TOKEN`.** The publish job now uses `permissions: contents: read, packages: write`, configures Node for `https://npm.pkg.github.com`, sets `NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`, and runs `npm publish` against GitHub Packages. It is manually dispatched so downstream consumers can receive package read access and dependency/authentication PRs before production publication.
+- **ClawHub skill publishing remains part of the release.** The workflow still publishes `skills/aeo` to ClawHub with the release changelog so the documented `/aeo` skill path stays current.
+- **Consumer migration is documented.** `docs/private-github-packages.md` records the required `.npmrc`, `packages: read`, token, and compatibility gate for private-package consumers. Existing `@ainyc/aeo-audit` consumers must not lose access before they migrate.
+
+### Fixed
+- **Sitemap discovery cancellation preserves the caller's abort reason.** Caller aborts during `/sitemap.xml`, `/sitemap-index.xml`, or `robots.txt` discovery now escape as the original abort reason instead of being swallowed and rewrapped as a generic unreachable sitemap failure.
+- **DNS rebinding regression coverage.** Added coverage for a host that resolves public during preflight and private at connect time, proving the private endpoint is never contacted.
+
 ## 4.2.0 (2026-06-27)
 
 ### Changed

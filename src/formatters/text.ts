@@ -96,6 +96,9 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
   if (report.pagesTruncated > 0) {
     lines.push(`  ${DIM}Note: ${report.pagesTruncated} additional pages skipped by --limit. Pass --limit ${Math.max(report.pagesDiscovered, 9999)} to audit them all.${RESET}`)
   }
+  if (report.metadata?.partial && report.metadata.budget?.exhaustedReason) {
+    lines.push(`  ${YELLOW}Partial:${RESET} ${report.metadata.budget.exhaustedReason}; ${report.metadata.budget.pagesRemaining} queued pages not started.`)
+  }
   lines.push(``)
 
   if (!topIssuesOnly) {
