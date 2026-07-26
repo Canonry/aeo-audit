@@ -42,6 +42,8 @@ function singleReport(score: number, schemaVersion = '3.0'): AuditReport {
       fetchTimeMs: 0,
       pageTitle: '',
       wordCount: 0,
+      metaDescription: null,
+      internalLinks: [],
       auxiliary: { llmsTxt: 'missing', llmsFullTxt: 'missing', robotsTxt: 'missing', sitemapXml: 'missing' },
       redirectChain: [],
     },
@@ -71,6 +73,7 @@ function sitemapReport(score: number): SitemapAuditReport {
     ],
     criticalDefects: [],
     crossCuttingIssues: [],
+    siteIssues: [],
     prioritizedFixes: [],
   }
 }

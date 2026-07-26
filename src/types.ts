@@ -143,6 +143,24 @@ export interface AuditMetadata {
   fetchTimeMs: number
   pageTitle: string
   wordCount: number
+  /**
+   * The page's meta description, verbatim, or `null` when it has none.
+   *
+   * Only its LENGTH used to survive scoring, which meant a report could say a
+   * description was the wrong length but never what it said. Two pages sharing
+   * one description word for word is a real and common fault, and it is
+   * undetectable without the text: a consumer had no way to compare pages it
+   * only had numbers about.
+   */
+  metaDescription: string | null
+  /**
+   * Same-origin links found on this page, absolute and de-duplicated.
+   *
+   * Kept so the report can answer a question no single page can: which pages
+   * nothing links to. `citations` already walks every anchor and throws the
+   * internal ones away as not its concern; this keeps them.
+   */
+  internalLinks: string[]
   auxiliary: {
     llmsTxt: AuxiliaryResourceState | 'missing'
     llmsFullTxt: AuxiliaryResourceState | 'missing'
@@ -230,6 +248,23 @@ export interface FetchedPage {
 export type Analyzer = (context: AuditContext) => AnalysisResult | Promise<AnalysisResult>
 
 /* ── Sitemap audit types ── */
+
+/**
+ * Something wrong with the site that no single page can see.
+ *
+ * Every other finding in this report is scoped to one page, because an analyzer
+ * is handed one page and nothing else. These are the ones that only exist in the
+ * comparison: two pages sharing a description, a page nothing links to. They are
+ * computed after the crawl, over the pages that came back.
+ */
+export interface SiteIssue {
+  /** Stable machine code. Messages may change; this may not. */
+  code: string
+  /** One plain sentence naming what is wrong. */
+  message: string
+  /** Every page involved. For a duplicate, all of them; for an orphan, the one. */
+  affectedUrls: string[]
+}
 
 export interface SitemapPageResult {
   url: string
@@ -381,6 +416,11 @@ export interface SitemapAuditReport {
    */
   criticalDefects: CriticalDefectGroup[]
   crossCuttingIssues: CrossCuttingIssue[]
+  /**
+   * Faults only visible across pages. Absent from single-page audits, which by
+   * definition have nothing to compare against.
+   */
+  siteIssues: SiteIssue[]
   /**
    * The ranked, machine-readable to-do list: critical per-page defects first, then
    * cross-cutting factor issues by prevalence. Each entry carries stable ids and the

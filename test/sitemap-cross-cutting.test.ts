@@ -28,6 +28,8 @@ function report(url: string, factors: ScoredFactor[]): AuditReport {
       fetchTimeMs: 0,
       pageTitle: '',
       wordCount: 0,
+      metaDescription: null,
+      internalLinks: [],
       auxiliary: { llmsTxt: 'missing', llmsFullTxt: 'missing', robotsTxt: 'missing', sitemapXml: 'missing' },
       redirectChain: [],
     },

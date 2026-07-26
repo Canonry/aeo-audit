@@ -56,6 +56,8 @@ function report(url: string, criticalDefects: CriticalDefect[]): AuditReport {
       fetchTimeMs: 0,
       pageTitle: '',
       wordCount: 0,
+      metaDescription: null,
+      internalLinks: [],
       auxiliary: { llmsTxt: 'missing', llmsFullTxt: 'missing', robotsTxt: 'missing', sitemapXml: 'missing' },
       redirectChain: [],
     },
@@ -310,6 +312,7 @@ describe('formatters list every affected page (no truncation)', () => {
       pages: [],
       criticalDefects,
       crossCuttingIssues: [],
+      siteIssues: [],
       prioritizedFixes,
     }
   }

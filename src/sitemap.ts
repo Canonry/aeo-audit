@@ -23,6 +23,7 @@ import type {
   SitemapAuditBudgetMetadata,
   SitemapAuditMetadata,
   SitemapPageResult,
+  SiteIssue,
 } from './types.js'
 
 const SITEMAP_TIMEOUT_MS = 10_000
@@ -394,6 +395,82 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
+/**
+ * Faults that only exist in the comparison between pages.
+ *
+ * An analyzer is handed one page and can never see a second, so nothing inside
+ * the scoring layer can answer "do two pages say the same thing" or "does
+ * anything link here". Both questions become answerable once the crawl is done,
+ * and both are cheap: the data is already on every page result.
+ */
+export function buildSiteIssues(
+  pages: SitemapPageResult[],
+  truncated: number,
+  filtered: number,
+): SiteIssue[] {
+  const issues: SiteIssue[] = []
+
+  // Two pages describing themselves with the same sentence tell a reader, and a
+  // model, that they are the same page. Exact match after trimming: a near-match
+  // is an editorial judgement and this layer does not make those.
+  const byDescription = new Map<string, string[]>()
+  for (const page of pages) {
+    const description = page.metadata?.metaDescription?.trim()
+    if (!description) continue
+    byDescription.set(description, [...(byDescription.get(description) ?? []), page.url])
+  }
+  for (const [description, urls] of byDescription) {
+    if (urls.length < 2) continue
+    issues.push({
+      code: 'site.duplicate-meta-description',
+      message: `${urls.length} pages share the same meta description word for word: "${description.slice(0, 120)}"`,
+      affectedUrls: [...urls].sort(),
+    })
+  }
+
+  // A page nothing links to can only be arrived at through the sitemap.
+  //
+  // ONLY WHEN THE CRAWL SAW THE WHOLE SITE. Inbound links from a page that was
+  // never fetched are never observed, so on a site whose sitemap was truncated or
+  // filtered this would report orphans on the strength of not having looked.
+  // Silence is the honest answer there; a hedged "possible orphan" on an
+  // automated to-do board is worse than none at all.
+  if (truncated === 0 && filtered === 0 && pages.length >= MIN_PAGES_FOR_ORPHANS) {
+    const linked = new Set<string>()
+    for (const page of pages) {
+      for (const href of page.metadata?.internalLinks ?? []) linked.add(normalizePageUrl(href))
+    }
+    const first = pages[0]
+    const homepage = first === undefined ? '' : normalizePageUrl(new URL(first.url).origin)
+    for (const page of pages) {
+      const self = normalizePageUrl(page.url)
+      // The homepage is arrived at directly; nothing linking to it is not a fault.
+      if (self === homepage || linked.has(self)) continue
+      issues.push({
+        code: 'site.orphan-page',
+        message: `Nothing on the site links to ${new URL(page.url).pathname}, so it can only be found through the sitemap.`,
+        affectedUrls: [page.url],
+      })
+    }
+  }
+  return issues
+}
+
+/** Compare URLs the way a reader would: no fragment, no query, no trailing slash. */
+function normalizePageUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    u.hash = ''
+    u.search = ''
+    return u.toString().replace(/\/$/, '') || u.origin
+  } catch {
+    return url
+  }
+}
+
+/** Below this a link graph is too sparse for "nothing links here" to mean much. */
+const MIN_PAGES_FOR_ORPHANS = 5
+
 function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue[] {
   if (successPages.length === 0) return []
 
@@ -752,6 +829,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
         pages: [],
         criticalDefects: [],
         crossCuttingIssues: [],
+        siteIssues: [],
         prioritizedFixes: [],
         metadata: sitemapMetadata(budget, 0, 0),
       }
@@ -862,6 +940,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
 
   const criticalDefects = buildCriticalDefects(successReports, priorityByUrl)
   const crossCuttingIssues = buildCrossCuttingIssues(successReports)
+  const siteIssues = buildSiteIssues(pageResults, truncated, filtered)
   const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length, criticalDefects, successReports)
 
   return {
@@ -882,6 +961,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     pages: pageResults,
     criticalDefects,
     crossCuttingIssues,
+    siteIssues,
     prioritizedFixes,
     metadata: sitemapMetadata(budget, entries.length, pageResults.length),
   }
