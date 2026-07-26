@@ -5,7 +5,7 @@ import { normalizeTargetUrl } from './fetch-page.js'
 import { auditHtmlPage } from './index.js'
 import { buildCriticalDefects } from './critical-defects.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
-import { buildCrossCuttingIssues, buildPrioritizedFixes, mapWithConcurrency, unionFactorIds } from './sitemap.js'
+import { buildCrossCuttingIssues, buildPrioritizedFixes, mapWithConcurrency, unionFactorIds, buildSiteIssues } from './sitemap.js'
 import type {
   AuditReport,
   AuxiliaryResources,
@@ -298,6 +298,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     pages: pageResults,
     criticalDefects,
     crossCuttingIssues,
+    siteIssues: buildSiteIssues(pageResults, 0, 0),
     prioritizedFixes,
     metadata: { partial: false },
   }

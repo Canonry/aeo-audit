@@ -285,6 +285,8 @@ test('compiled CLI returns the expected JSON report for the fixture site', async
     fetchTimeMs: 0,
     pageTitle: 'AI NYC | Answer Engine Optimization',
     wordCount: 74,
+    metaDescription: null,
+    internalLinks: [],
     auxiliary: {
       llmsTxt: 'ok',
       llmsFullTxt: 'ok',

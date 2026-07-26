@@ -36,6 +36,8 @@ function auditReport(overrides: Partial<AuditReport> = {}): AuditReport {
       fetchTimeMs: 0,
       pageTitle: '',
       wordCount: 0,
+      metaDescription: null,
+      internalLinks: [],
       auxiliary: { llmsTxt: 'missing', llmsFullTxt: 'missing', robotsTxt: 'missing', sitemapXml: 'missing' },
       redirectChain: [],
     },
@@ -100,6 +102,7 @@ describe('agentSummaryFromSitemap', () => {
       pages: [],
       criticalDefects,
       crossCuttingIssues: [],
+      siteIssues: [],
       prioritizedFixes,
     }
   }
@@ -161,6 +164,7 @@ describe('formatAgent / formatSitemapAgent', () => {
       pages: [],
       criticalDefects: [],
       crossCuttingIssues: [],
+      siteIssues: [],
       prioritizedFixes: [],
     }
     const parsed = JSON.parse(formatSitemapAgent(report))

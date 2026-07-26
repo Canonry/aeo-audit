@@ -19,6 +19,7 @@ function sitemapReport(prioritizedFixes: PrioritizedFix[]): SitemapAuditReport {
     pages: [],
     criticalDefects: [],
     crossCuttingIssues: [],
+    siteIssues: [],
     prioritizedFixes,
   }
 }

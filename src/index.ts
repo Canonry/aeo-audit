@@ -1,4 +1,5 @@
 import { load } from 'cheerio'
+import type { CheerioAPI } from 'cheerio'
 import { fetchPage, normalizeTargetUrl } from './fetch-page.js'
 import { AeoAuditError } from './errors.js'
 import { analyzeStructuredData } from './analyzers/structured-data.js'
@@ -168,6 +169,45 @@ export interface AuditHtmlPageInput {
  * no network I/O, so callers are responsible for sourcing `html`, `headers`, and
  * `auxiliary` (over the network, or from the filesystem).
  */
+/** The page's meta description, verbatim, or null when it has none. */
+function readMetaDescription($: CheerioAPI): string | null {
+  const raw = $('meta[name="description"]').first().attr('content')
+  const text = (raw ?? '').trim()
+  return text === '' ? null : text
+}
+
+/**
+ * Same-origin links on the page, absolute and de-duplicated.
+ *
+ * Same walk `citations` does, with the host test inverted: it keeps what leaves
+ * the site, this keeps what stays on it. Fragments and query strings are
+ * stripped, because `/faq#hours` and `/faq?x=1` are the same page for the
+ * purpose of asking whether anything links to `/faq`.
+ */
+function readInternalLinks($: CheerioAPI, pageUrl: string): string[] {
+  let origin: string
+  try {
+    origin = new URL(pageUrl).origin
+  } catch {
+    return []
+  }
+  const out = new Set<string>()
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href')
+    if (!href) return
+    try {
+      const abs = new URL(href, pageUrl)
+      if (abs.origin !== origin) return
+      abs.hash = ''
+      abs.search = ''
+      out.add(abs.toString().replace(/\/$/, '') || abs.origin)
+    } catch {
+      // Malformed href: not a link we can reason about.
+    }
+  })
+  return [...out]
+}
+
 export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAuditOptions = {}): Promise<AuditReport> {
   const selectedFactors = options.factors ?? []
   assertValidFactorIds(selectedFactors)
@@ -239,6 +279,8 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
       fetchTimeMs: page.fetchTimeMs,
       pageTitle: context.pageTitle,
       wordCount: countWords(textContent),
+      metaDescription: readMetaDescription($),
+      internalLinks: readInternalLinks($, page.finalUrl),
       auxiliary: {
         llmsTxt: page.auxiliary.llmsTxt?.state || 'missing',
         llmsFullTxt: page.auxiliary.llmsFullTxt?.state || 'missing',

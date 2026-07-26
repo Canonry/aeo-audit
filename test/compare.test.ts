@@ -44,6 +44,8 @@ function singleReport(opts: {
       fetchTimeMs: 0,
       pageTitle: '',
       wordCount: 0,
+      metaDescription: null,
+      internalLinks: [],
       auxiliary: { llmsTxt: 'missing', llmsFullTxt: 'missing', robotsTxt: 'missing', sitemapXml: 'missing' },
       redirectChain: [],
     },
@@ -112,6 +114,7 @@ function sitemapReport(opts: {
     pages: opts.pages,
     criticalDefects: opts.defects ?? [],
     crossCuttingIssues: [],
+    siteIssues: [],
     prioritizedFixes: [],
   }
   if (opts.engineVersion !== null) {
