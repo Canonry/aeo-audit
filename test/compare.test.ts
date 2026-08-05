@@ -113,6 +113,8 @@ function sitemapReport(opts: {
     aggregateScore: agg,
     pages: opts.pages,
     criticalDefects: opts.defects ?? [],
+    coverage: { pagesAudited: 1, pagesDiscovered: 1, coveragePct: 100, sampled: false, selection: 'all', templatesDiscovered: 1, templatesRepresented: 1, confidence: 'full' },
+    templateGroups: [],
     crossCuttingIssues: [],
     siteIssues: [],
     prioritizedFixes: [],

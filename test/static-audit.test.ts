@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { runStaticAudit, staticFileToUrl } from '../src/static-audit.js'
+import { SCHEMA_VERSION } from '../src/schema.js'
 
 const BASE = new URL('https://example.com')
 
@@ -133,8 +134,10 @@ describe('runStaticAudit critical defects (issue #42)', () => {
     expect(topFix.affectsHomepage).toBe(true)
     expect(topFix.affectedPages).toContain('https://example.com/')
 
-    // The report carries a schema version so agent parsers can detect shape drift.
-    expect(result.report.schemaVersion).toBe('3.3')
+    // The report carries a schema version so agent parsers can detect shape
+    // drift. Compared against the constant, not a literal: the point is that the
+    // builder stamps it, and a hardcoded copy just fails on every additive bump.
+    expect(result.report.schemaVersion).toBe(SCHEMA_VERSION)
   })
 })
 

@@ -111,7 +111,7 @@ npx @ainyc/aeo-audit@1 "<url>" --sitemap --top-issues --format json
 
 Flags:
 - `--sitemap [url]` — auto-discover the sitemap (tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`) or provide an explicit URL
-- `--limit <n>` — cap pages audited (default 200, sorted by sitemap priority)
+- `--limit <n>` — cap pages audited (default 200, sampled across the site's URL templates rather than taken in sitemap order; `<priority>` orders instances within a template)
 - `--top-issues` — skip per-page output, show only cross-cutting patterns and critical defects
 - `--rewrite-sitemap-origin` — rewrite every `<loc>`'s origin to the target URL's origin (preserving path/query) before crawling. Use when the sitemap hardcodes the prod/canonical domain but you want to audit a staging host or local dev server.
 - `--changed` — filter sitemap URLs to static routes changed since `--base`; use for PR work
@@ -128,7 +128,9 @@ Returns:
 - **Critical defects** — binary, one-line-fix structural defects (an `<h1>` count other than one, a missing `<title>`, a missing meta description) surfaced **regardless of how few pages they affect**, with the offending pages named (homepage and high sitemap-`priority` pages first). These would otherwise be averaged into a passing factor score; the JSON field is `criticalDefects` and critical-severity ones are also promoted to the top of `prioritizedFixes`. Shown even with `--top-issues`.
 - Cross-cutting issues (factors failing across multiple pages), each with the best-scoring page (`bestScore`/`bestPageUrl`) and a `status`: `sitewide` (a real coverage gap) vs. `limited`/`opportunity` for page-specific factors (FAQ, definitions) that legitimately apply to only some page types
 - Aggregate score
-- Prioritized fixes (critical defects first, then site-wide gaps; page-specific `limited`/`opportunity` factors demoted below them, scoped to the page(s) that carry them)
+- Prioritized fixes (critical defects first, then site-wide gaps; page-specific `limited`/`opportunity` factors demoted below them, scoped to the page(s) that carry them), each costed as `templateCount` templates over `instanceCount` pages
+- **Templates** — pages that share a URL shape *and* score alike, collapsed into the template that produced them, with the page to fix on. "194 property pages missing schema" is one template edit, not 194
+- **Coverage** — what the aggregate score was taken over: pages audited/discovered and how many URL templates the sample reached, with a `confidence` of `full` / `representative` / `indicative`. A sample that missed whole templates is labelled `indicative` and does not speak for the sections it never saw
 
 ### Preview / PR Audit Workflow
 

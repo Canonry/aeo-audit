@@ -80,7 +80,7 @@ npx @canonry/aeo-audit https://example.com --sitemap
 # Provide an explicit sitemap URL
 npx @canonry/aeo-audit https://example.com --sitemap https://example.com/sitemap.xml
 
-# Cap the number of pages (default 200, sorted by sitemap priority)
+# Cap the number of pages (default 200, sampled across the site's URL templates)
 npx @canonry/aeo-audit https://example.com --sitemap --limit 50
 
 # Skip per-page output and show only the cross-cutting issues and critical defects
@@ -101,7 +101,7 @@ Auto-discovery checks `/sitemap.xml` → `/sitemap-index.xml` → `Sitemap:` dir
 
 `--rewrite-sitemap-origin` re-homes every `<loc>` onto the origin of the target URL you passed (preserving path and query) before crawling. Use it when a sitemap hardcodes the canonical/prod domain but you want to audit a different origin that serves the same paths: a staging host, or a local dev server. Every crawled URL is pinned to the origin you explicitly named, so there's no SSRF cost; combined with `--allow-local` it makes a local dev server's whole sitemap auditable in one command.
 
-When the sitemap has more URLs than `--limit`, the run audits the highest-priority pages and prints a notice to stderr listing how many were skipped and how to audit them all.
+When the sitemap has more URLs than `--limit`, the run **samples across the site's URL templates** rather than taking the first N in sitemap order — identifier segments are inferred from the URL corpus (`/properties/austin/the-mark` → `/properties/*/*`), the budget is round-robined across the resulting templates largest-first, the homepage is always kept, and `<priority>` decides which instances of a template get picked. Picks also cycle across the first identifier segment, so a property-page budget spans every city instead of landing entirely on whichever sorts first. Selection is deterministic: the same sitemap always yields the same pages, so `--compare` stays valid. A notice on stderr lists how many pages were skipped and how to audit them all, and the report's `coverage` block records how many URL templates the sample reached.
 
 ### Changed-page sitemap mode
 
@@ -247,7 +247,7 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 | `--include-agent-skills` | Include the optional agent skill exposure factor |
 | `--lighthouse` | Include the optional Lighthouse factor (Performance + Accessibility + Best Practices, mobile strategy) via Google PageSpeed Insights. Single-URL only; cannot combine with `--sitemap` or `--detect-platform`. Adds ~15-30s. Set `PAGESPEED_API_KEY` env var to lift anonymous rate limits. |
 | `--sitemap [url]` | Audit all pages from the sitemap. Auto-discovery tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`. Pass an explicit URL to override. |
-| `--limit <n>` | Max pages to audit in sitemap mode (default 200, sorted by sitemap priority) |
+| `--limit <n>` | Max pages to audit in sitemap/static mode (default 200, sampled across URL templates, `<priority>` ordering within each) |
 | `--top-issues` | In sitemap mode, skip per-page output and show only the cross-cutting issues and critical defects |
 | `--changed` | With `--sitemap`, audit only sitemap URLs whose paths map to static routes changed since `--base` |
 | `--base <ref>` | Git base ref for `--changed` (default `main`) |

@@ -18,6 +18,21 @@ export interface AnalysisResult {
   score: number
   findings: AuditFinding[]
   recommendations: string[]
+  /**
+   * Whether this factor is one this page was ever meant to satisfy.
+   *
+   * A product page correctly has no FAQ, so its 0 is not a failure and must not
+   * be averaged in as one: rolled up across a site, 8 real FAQ pages among 500
+   * produce "FAQ Content: 1/100, 100% of pages affected", which is arithmetically
+   * true about the wrong denominator and false about the site.
+   *
+   * Only analyzers that can actually tell need to answer. Omitting it means
+   * "applicable" for a factor expected everywhere, and falls back to a
+   * presence threshold for the page-specific ones (see `PAGE_SPECIFIC_FACTOR_IDS`).
+   * The score is unaffected either way — this changes what a site-wide average
+   * is taken over, not what a page is worth.
+   */
+  applicable?: boolean
 }
 
 export interface StructuredDataEntry {
@@ -328,6 +343,21 @@ export interface PrioritizedFix {
   prevalencePct: number
   /** Average factor score (0–100) across audited pages (cross-cutting only). */
   avgScore?: number
+  /** Average factor score over the pages the factor applies to (cross-cutting only). */
+  applicableAvgScore?: number
+  /** Pages the factor applies to — the denominator behind `prevalencePct` (cross-cutting only). */
+  applicablePages?: number
+  /**
+   * Distinct templates the affected pages belong to — the unit of work.
+   *
+   * `affectedPages.length` counts instances, which on a templated site is the
+   * wrong number to plan against: 194 property pages missing schema is one
+   * template edit, not 194. Pages belonging to no detected template count
+   * individually, so this never understates the job.
+   */
+  templateCount?: number
+  /** Affected page count, i.e. `affectedPages.length`, alongside `templateCount`. */
+  instanceCount?: number
   /** How the factor reads site-wide (cross-cutting only): `sitewide`, `limited`, or `opportunity`. */
   status?: CrossCuttingStatus
   /** Best single-page factor score across the audit (cross-cutting only). */
@@ -380,10 +410,33 @@ export type CrossCuttingStatus = 'sitewide' | 'limited' | 'opportunity'
 export interface CrossCuttingIssue {
   factorId: string
   factorName: string
-  /** Mean factor score across every audited page — an honest coverage number. */
+  /**
+   * Mean factor score across every audited page, applicable or not — the
+   * site-wide coverage number. Unchanged in meaning; for a factor that only some
+   * page types can satisfy, read `applicableAvgScore` instead, and see it for why.
+   */
   avgScore: number
+  /** Pages scoring below 70, counted across every audited page. */
   affectedPages: number
   totalPages: number
+  /**
+   * Pages this factor was ever meant to apply to — the denominator that makes
+   * `applicableAvgScore` and `applicableAffectedPages` mean what a reader
+   * assumes they mean. Equal to `totalPages` for factors expected site-wide.
+   */
+  applicablePages: number
+  /**
+   * Mean factor score over the applicable pages only.
+   *
+   * This is the number to show: "FAQ Content 58/100 across the 8 pages that have
+   * one" is actionable, where the same factor's 1/100 across all 500 pages
+   * describes a site that doesn't exist. Both are reported because they answer
+   * different questions — how good is it where it exists, and how much of the
+   * site has it.
+   */
+  applicableAvgScore: number
+  /** Pages scoring below 70 among the applicable ones. */
+  applicableAffectedPages: number
   topRecommendations: string[]
   topIssues: CrossCuttingIssueDetail[]
   /** True when this factor legitimately applies to only some page types (FAQ, definitions). */
@@ -408,7 +461,19 @@ export interface SitemapAuditReport {
   pagesTruncated: number
   effectiveLimit: number
   aggregateScore: number
+  /**
+   * Sample size and reach for `aggregateScore`. The score itself is unchanged —
+   * the mean of every successfully audited page — but a consumer reading it as a
+   * site score needs to know what it was taken over.
+   */
+  coverage: AuditCoverage
   pages: SitemapPageResult[]
+  /**
+   * Pages collapsed into the templates that produced them, so a fix can be
+   * costed as one template edit rather than N page edits. An overlay on the
+   * per-page results, which stay complete and authoritative.
+   */
+  templateGroups: TemplateGroup[]
   /**
    * High-impact binary defects surfaced regardless of prevalence (issue #42).
    * These do not depend on the prevalence ranking that drives `prioritizedFixes`,
@@ -431,6 +496,55 @@ export interface SitemapAuditReport {
   metadata?: SitemapAuditMetadata
   /** Provenance for regression comparison; see `AuditReport.compareMeta`. */
   compareMeta?: CompareMeta
+}
+
+/**
+ * One route rendered many times, and the pages that are instances of it.
+ * See `buildTemplateGroups` for how a group is established.
+ */
+export interface TemplateGroup {
+  /** Inferred URL shape, identifier segments collapsed, e.g. `/properties/*`. */
+  templateKey: string
+  /** The instance to inspect and fix — homepage if present, else the strongest. */
+  representativeUrl: string
+  /** Every page in the group, sorted. Complete: grouping never drops a URL. */
+  urls: string[]
+  pageCount: number
+  /** Mean overall score across the group's pages. */
+  avgScore: number
+  /** Spread between the group's best and worst overall score; near 0 by construction. */
+  scoreRange: number
+}
+
+/**
+ * What share of the site the report actually looked at.
+ *
+ * An aggregate score with no sample size attached reads as a statement about the
+ * site when it may be a statement about 6% of it. The number worth reporting is
+ * not the raw percentage, though: a stratified sample covering every URL template
+ * generalizes, and a much larger prefix that missed whole sections does not.
+ */
+export interface AuditCoverage {
+  pagesAudited: number
+  pagesDiscovered: number
+  /** Audited share of discovered pages, 0–100. */
+  coveragePct: number
+  /** True when fewer pages were audited than discovered. */
+  sampled: boolean
+  /** How the audited set was chosen. */
+  selection: 'all' | 'stratified'
+  /** Distinct URL templates across every discovered page. */
+  templatesDiscovered: number
+  /** Distinct URL templates with at least one audited page. */
+  templatesRepresented: number
+  /**
+   * How far the aggregate generalizes:
+   * - `full`           — every discovered page was audited.
+   * - `representative` — sampled, but every template has at least one page in it.
+   * - `indicative`     — whole templates went unsampled; sections of the site are
+   *                      unmeasured and the aggregate cannot speak for them.
+   */
+  confidence: 'full' | 'representative' | 'indicative'
 }
 
 export type SitemapAuditPartialReason = 'fetch-budget-exceeded' | 'duration-budget-exceeded'

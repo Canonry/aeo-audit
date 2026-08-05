@@ -333,6 +333,7 @@ export type SiteCategory =
   | 'local-business'
   | 'service-business'
   | 'blog-or-content'
+  | 'real-estate'
   | 'unknown'
 
 export interface SiteCategoryDetection {
@@ -341,6 +342,12 @@ export interface SiteCategoryDetection {
   confidence: number
   /** Recommended JSON-LD types for this category, in priority order. */
   recommendedSchemas: string[]
+  /**
+   * Whether the evidence supports naming vertical-specific types at all. When
+   * false, `recommendedSchemas` is deliberately generic and callers should ask
+   * for the type matching the site's primary entity rather than guess one.
+   */
+  specific: boolean
   /** Concrete signals that drove the classification. */
   evidence: string[]
 }
@@ -364,10 +371,22 @@ const ECOMMERCE_KEYWORDS = [
   'product details', 'sku', 'add to wishlist', 'view product',
 ]
 
+// Deliberately not restaurant-only. The original list was almost entirely
+// hospitality phrasing, so any premises-based business that isn't a restaurant
+// scored near zero here and lost to whichever category had looser keywords.
 const LOCAL_BUSINESS_KEYWORDS = [
   'opening hours', 'business hours', 'directions', 'visit us', 'our location',
   'find us', 'reservations', 'book a table', 'menu', 'walk-ins welcome',
-  'serving the', 'in the heart of',
+  'serving the', 'in the heart of', 'get directions', 'our locations',
+  'schedule a tour', 'book a tour', 'visit our', 'nearest location',
+  'parking', 'neighborhood',
+]
+
+const REAL_ESTATE_KEYWORDS = [
+  'floor plan', 'floorplan', 'square feet', 'sq ft', 'bedroom', 'bathroom',
+  'apartments', 'for rent', 'for lease', 'lease now', 'available units',
+  'amenities', 'residents', 'resident portal', 'schedule a tour', 'pet policy',
+  'move-in', 'per month', 'studio', 'listing', 'property', 'realtor', 'mls',
 ]
 
 const SERVICE_BUSINESS_KEYWORDS = [
@@ -420,6 +439,7 @@ export function detectSiteCategory(
     { category: 'local-business', score: 0, evidence: [] },
     { category: 'service-business', score: 0, evidence: [] },
     { category: 'blog-or-content', score: 0, evidence: [] },
+    { category: 'real-estate', score: 0, evidence: [] },
   ]
 
   const saas = accumulators[0]
@@ -427,6 +447,7 @@ export function detectSiteCategory(
   const local = accumulators[2]
   const service = accumulators[3]
   const blog = accumulators[4]
+  const realEstate = accumulators[5]
 
   // Schema-level signals (highest confidence — the site told us what it is).
   if (schemaTypes.has('SoftwareApplication') || schemaTypes.has('WebApplication') || schemaTypes.has('MobileApplication')) {
@@ -448,6 +469,13 @@ export function detectSiteCategory(
   if (schemaTypes.has('Article') || schemaTypes.has('BlogPosting') || schemaTypes.has('NewsArticle')) {
     blog.score += 4
     blog.evidence.push('Article/BlogPosting schema present')
+  }
+  if (
+    schemaTypes.has('ApartmentComplex') || schemaTypes.has('Apartment') || schemaTypes.has('Residence') ||
+    schemaTypes.has('SingleFamilyResidence') || schemaTypes.has('RealEstateListing') || schemaTypes.has('Accommodation')
+  ) {
+    realEstate.score += 4
+    realEstate.evidence.push('ApartmentComplex/Residence schema present')
   }
 
   // Text keyword signals.
@@ -476,16 +504,26 @@ export function detectSiteCategory(
     blog.score += blogHits.count * 0.75 // blog phrases overlap with many sites
     blog.evidence.push(`Blog/content keywords: ${blogHits.matched.join(', ')}`)
   }
+  const realEstateHits = countKeywordHits(text, REAL_ESTATE_KEYWORDS)
+  if (realEstateHits.count > 0) {
+    realEstate.score += realEstateHits.count * 1.5 // property phrasing is specific
+    realEstate.evidence.push(`Real-estate keywords: ${realEstateHits.matched.join(', ')}`)
+  }
 
-  // Outbound/script URL signals for SaaS — GitHub repo, npm package, package manager mentions.
-  if (/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/i.test(html)) {
+  // A GitHub link corroborates a SaaS/dev-tools read; it does not establish one.
+  // Plenty of non-software companies link a repo somewhere, and on its own this
+  // was enough to tip a close race — so it only counts once the page text has
+  // already said something developer-shaped.
+  if (saasHits.count > 0 && /github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/i.test(html)) {
     saas.score += 1
     saas.evidence.push('GitHub repo link in HTML')
   }
-  if (/(npmjs\.com|unpkg\.com|jsdelivr\.net|cdnjs\.cloudflare\.com)/i.test(html)) {
-    saas.score += 1
-    saas.evidence.push('npm/CDN registry reference')
-  }
+
+  // A jsdelivr/unpkg/cdnjs reference used to add a point here. That is a fact
+  // about how the page loads its assets, true of most of the modern web, and it
+  // was free evidence for "this is a developer tool" on sites that are nothing of
+  // the kind — an apartment operator on a CDN picked up the same point a real
+  // SDK vendor did. Removed rather than reweighted: it carries no signal at all.
 
   // Pick the strongest signal and decide whether to commit.
   accumulators.sort((a, b) => b.score - a.score)
@@ -500,6 +538,7 @@ export function detectSiteCategory(
       category: 'unknown',
       confidence: 0,
       recommendedSchemas: ['Organization'],
+      specific: false,
       evidence: [],
     }
   }
@@ -507,12 +546,48 @@ export function detectSiteCategory(
   const totalScore = accumulators.reduce((sum, a) => sum + a.score, 0)
   const confidence = totalScore > 0 ? Math.min(1, top.score / Math.max(totalScore, 1)) : 0
 
+  // Naming a type is a much stronger claim than picking a category, and it is the
+  // one a developer implements literally: telling an apartment operator to add
+  // SoftwareApplication produces exactly that markup on 194 property pages. So a
+  // named type needs a clear win, not just a win.
+  //
+  // The test is margin, not absolute score. Absolute score can't carry
+  // confidence here — `countKeywordHits` stops at 3 matches and each category
+  // multiplies differently, so an unmistakable blog tops out at 2.25 while an
+  // unmistakable local business reaches 4.5. What separates a safe call from a
+  // coin flip is whether anything else came close.
+  const STRONG_MARGIN = 2
+  const specific = top.score - next.score >= STRONG_MARGIN
+
   return {
     category: top.category,
     confidence,
-    recommendedSchemas: recommendedSchemasFor(top.category),
+    recommendedSchemas: specific ? recommendedSchemasFor(top.category) : ['Organization'],
+    specific,
     evidence: top.evidence,
   }
+}
+
+function formatSchemaList(schemas: string[]): string {
+  if (schemas.length === 0) return 'Organization'
+  if (schemas.length === 1) return schemas[0] as string
+  if (schemas.length === 2) return `${schemas[0]} and ${schemas[1]}`
+  return `${schemas.slice(0, -1).join(', ')}, and ${schemas[schemas.length - 1]}`
+}
+
+/**
+ * Phrase a schema recommendation at the confidence the detection actually has.
+ *
+ * A named type is what gets implemented, verbatim and site-wide. When the
+ * evidence doesn't support naming one, say what to look for instead of guessing
+ * — a wrong guess here is worse than no guess, because it reads as instruction.
+ *
+ * Includes the word "schema" so both forms stay grammatical: the generic phrase
+ * ends in a noun phrase of its own and can't take a trailing "schema" after it.
+ */
+export function describeRecommendedSchemas(detection: SiteCategoryDetection): string {
+  if (detection.specific) return `${formatSchemaList(detection.recommendedSchemas)} schema`
+  return 'Organization schema, plus the schema.org type that matches your primary entity'
 }
 
 function recommendedSchemasFor(category: SiteCategory): string[] {
@@ -527,6 +602,8 @@ function recommendedSchemasFor(category: SiteCategory): string[] {
       return ['Organization', 'Service', 'FAQPage']
     case 'blog-or-content':
       return ['Organization', 'Article', 'BreadcrumbList']
+    case 'real-estate':
+      return ['Organization', 'ApartmentComplex', 'FAQPage']
     case 'unknown':
     default:
       // Organization is the safest broad default; suggest Article and FAQPage

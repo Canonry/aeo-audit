@@ -11,19 +11,24 @@ import {
 import { runAeoAudit } from './index.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { PAGE_SPECIFIC_FACTOR_IDS, PAGE_SPECIFIC_PRESENT_THRESHOLD } from './scoring.js'
+import { buildTemplateGroups, summarizeFixReach } from './templates.js'
+import { buildCoverage, deriveUrlShapes, selectRepresentativeSample } from './url-templates.js'
 import type {
+  AuditCoverage,
   AuditReport,
   CriticalDefectGroup,
   CrossCuttingIssue,
   CrossCuttingStatus,
   PrioritizedFix,
   RunAeoAuditOptions,
+  ScoredFactor,
   SitemapAuditOptions,
   SitemapAuditReport,
   SitemapAuditBudgetMetadata,
   SitemapAuditMetadata,
   SitemapPageResult,
   SiteIssue,
+  TemplateGroup,
 } from './types.js'
 
 const SITEMAP_TIMEOUT_MS = 10_000
@@ -471,15 +476,34 @@ function normalizePageUrl(url: string): string {
 /** Below this a link graph is too sparse for "nothing links here" to mean much. */
 const MIN_PAGES_FOR_ORPHANS = 5
 
+/**
+ * Whether a factor result should count toward this factor's site-wide average.
+ *
+ * An analyzer that can tell says so directly. Everything else falls back: a
+ * factor expected on every page always counts, and a page-specific one counts
+ * where it is actually present, which is the only signal available without the
+ * analyzer's help. The fallback is deliberately the pre-existing presence rule,
+ * so an analyzer that stays silent behaves exactly as it did before.
+ */
+function factorApplies(factor: ScoredFactor): boolean {
+  if (typeof factor.applicable === 'boolean') return factor.applicable
+  if (!PAGE_SPECIFIC_FACTOR_IDS.has(factor.id)) return true
+  return factor.score >= PAGE_SPECIFIC_PRESENT_THRESHOLD
+}
+
 function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue[] {
   if (successPages.length === 0) return []
 
-  // Per factor: every (url, score) pair plus a recommendation→URLs map. The scored
-  // pairs drive the average, the best-page surfacing, and the page-specific
+  // Per factor: every (url, score, applicable) row plus a recommendation→URLs map.
+  // The rows drive both averages, the best-page surfacing, and the page-specific
   // presence classification; the map drives the per-issue breakdown.
   const factorScores = new Map<
     string,
-    { name: string; scored: { url: string; score: number }[]; recommendations: Map<string, string[]> }
+    {
+      name: string
+      scored: { url: string; score: number; applicable: boolean }[]
+      recommendations: Map<string, string[]>
+    }
   >()
 
   for (const page of successPages) {
@@ -489,7 +513,7 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
         entry = { name: factor.name, scored: [], recommendations: new Map() }
         factorScores.set(factor.id, entry)
       }
-      entry.scored.push({ url: page.finalUrl, score: factor.score })
+      entry.scored.push({ url: page.finalUrl, score: factor.score, applicable: factorApplies(factor) })
 
       for (const rec of factor.recommendations) {
         const urls = entry.recommendations.get(rec)
@@ -509,6 +533,17 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
     const avgScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
     const affectedPages = scores.filter((s) => s < 70).length
 
+    // The same two numbers over the pages the factor was ever meant to apply to.
+    // For a site-wide factor these are identical to the pair above; for FAQ or
+    // definitions they are the difference between "1/100, 100% of pages" and
+    // "58/100 across the 8 pages that have one".
+    const applicableScored = entry.scored.filter((s) => s.applicable)
+    const applicablePages = applicableScored.length
+    const applicableAvgScore = applicablePages > 0
+      ? Math.round(applicableScored.reduce((sum, s) => sum + s.score, 0) / applicablePages)
+      : 0
+    const applicableAffectedPages = applicableScored.filter((s) => s.score < 70).length
+
     if (affectedPages === 0 && entry.recommendations.size === 0) continue
 
     // Best single page for this factor. Homepage wins ties — it makes the most
@@ -522,12 +557,15 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
     )[0]
 
     // Classify. Site-wide factors keep prevalence-based ranking. A page-specific
-    // factor present somewhere (best clears the threshold) is a `limited` tune-up;
-    // otherwise it is an `opportunity` (not yet present on any audited page).
+    // factor that applies somewhere is a `limited` tune-up; one that applies
+    // nowhere is an `opportunity` (not yet present on any audited page). Under
+    // the presence fallback in `factorApplies` this is the same test as before —
+    // an applicable page is one clearing the threshold — but it now defers to an
+    // analyzer that declares applicability outright.
     const pageSpecific = PAGE_SPECIFIC_FACTOR_IDS.has(factorId)
     const status: CrossCuttingStatus = !pageSpecific
       ? 'sitewide'
-      : best.score >= PAGE_SPECIFIC_PRESENT_THRESHOLD
+      : applicablePages > 0
         ? 'limited'
         : 'opportunity'
 
@@ -542,6 +580,9 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
       avgScore,
       affectedPages,
       totalPages: successPages.length,
+      applicablePages,
+      applicableAvgScore,
+      applicableAffectedPages,
       topRecommendations: sortedIssues.slice(0, 3).map((i) => i.recommendation),
       topIssues: sortedIssues,
       pageSpecific,
@@ -573,19 +614,50 @@ function buildPrioritizedFixes(
   totalPages: number,
   criticalDefects: CriticalDefectGroup[] = [],
   successPages: AuditReport[] = [],
+  templateGroups: TemplateGroup[] = [],
 ): PrioritizedFix[] {
   const pct = (n: number): number => (totalPages > 0 ? Math.round((n / totalPages) * 100) : 0)
+  const pctOf = (n: number, denominator: number): number =>
+    (denominator > 0 ? Math.round((n / denominator) * 100) : 0)
   const homepageFirst = (a: string, b: string): number =>
     Number(isHomepageUrl(b)) - Number(isHomepageUrl(a)) || a.localeCompare(b)
+
+  // "194 pages" and "1 template" are the same fault costed two ways, and only one
+  // of them is a plan. Phrase reach as templates whenever grouping found fewer of
+  // them than instances; otherwise the page count is already the honest number.
+  const reachOf = (affected: readonly string[]): { templateCount: number; instanceCount: number } => {
+    const { templates, instances } = summarizeFixReach(affected, templateGroups)
+    return { templateCount: templates, instanceCount: instances }
+  }
+  const reachPhrase = (affected: readonly string[]): string => {
+    const count = affected.length
+    const pages = `${count} page${count === 1 ? '' : 's'}`
+    const { templates } = summarizeFixReach(affected, templateGroups)
+    if (templates === 0 || templates >= count) return pages
+    return `${pages} across ${templates} template${templates === 1 ? '' : 's'}`
+  }
 
   // Per-factor page rows (url, score, recommendations) — consulted only for the
   // page-specific (`limited`/`opportunity`) rewrite below, to scope the fix to the
   // pages that actually carry the factor and to source its tune-up recommendation.
-  const rowsByFactor = new Map<string, { url: string; score: number; recommendations: string[] }[]>()
+  const rowsByFactor = new Map<
+    string,
+    { url: string; score: number; applicable: boolean; recommendations: string[] }[]
+  >()
   for (const page of successPages) {
     for (const factor of page.factors) {
       const rows = rowsByFactor.get(factor.id) ?? []
-      rows.push({ url: page.finalUrl, score: factor.score, recommendations: factor.recommendations })
+      rows.push({
+        url: page.finalUrl,
+        score: factor.score,
+        // Same applicability test the rollup uses. These two must not diverge:
+        // scoping the fix by a bare threshold while the rollup honours an
+        // analyzer's declaration reports "present on 0 pages" for a factor the
+        // rollup just counted on 18, and drops every one of them from the
+        // affected list.
+        applicable: factorApplies(factor),
+        recommendations: factor.recommendations,
+      })
       rowsByFactor.set(factor.id, rows)
     }
   }
@@ -610,7 +682,8 @@ function buildPrioritizedFixes(
         affectedPages,
         affectsHomepage,
         prevalencePct: pct(count),
-        summary: `${group.title} (${group.severity}) — ${count} page${count === 1 ? '' : 's'}${affectsHomepage ? ', incl. homepage' : ''}: ${group.recommendation}`,
+        ...reachOf(affectedPages),
+        summary: `${group.title} (${group.severity}) — ${reachPhrase(affectedPages)}${affectsHomepage ? ', incl. homepage' : ''}: ${group.recommendation}`,
       }
     })
 
@@ -629,6 +702,8 @@ function buildPrioritizedFixes(
       bestScore: issue.bestScore,
       bestPageUrl: issue.bestPageUrl,
       avgScore: issue.avgScore,
+      applicableAvgScore: issue.applicableAvgScore,
+      applicablePages: issue.applicablePages,
     }
 
     if (issue.status === 'limited') {
@@ -637,10 +712,10 @@ function buildPrioritizedFixes(
       // but-imperfect pages and source the recommendation from the strongest of them.
       const rows = rowsByFactor.get(issue.factorId) ?? []
       const presentImperfect = rows
-        .filter((r) => r.score >= PAGE_SPECIFIC_PRESENT_THRESHOLD && r.score < 70)
+        .filter((r) => r.applicable && r.score < 70)
         .sort((a, b) => b.score - a.score)
       const affectedPages = presentImperfect.map((r) => r.url).sort(homepageFirst)
-      const presentCount = rows.filter((r) => r.score >= PAGE_SPECIFIC_PRESENT_THRESHOLD).length
+      const presentCount = rows.filter((r) => r.applicable).length
       const where = presentCount === 1 ? '1 page' : `${presentCount} pages`
       const recommendation =
         presentImperfect.find((r) => r.recommendations.length > 0)?.recommendations[0] ??
@@ -650,8 +725,12 @@ function buildPrioritizedFixes(
         recommendation,
         affectedPages,
         affectsHomepage: affectedPages.some(isHomepageUrl),
-        prevalencePct: pct(affectedPages.length),
-        summary: `${issue.factorName} (limited — present on ${where}, best ${issue.bestScore}/100 on ${issue.bestPageUrl}): ${recommendation}`,
+        // Share of the pages that carry this factor, not of the whole site: the
+        // pages that correctly lack an FAQ are not part of the job and must not
+        // sit in the denominator of how much of the job is left.
+        prevalencePct: pctOf(affectedPages.length, issue.applicablePages),
+        ...reachOf(affectedPages),
+        summary: `${issue.factorName} (limited — present on ${where}, avg ${issue.applicableAvgScore}/100 there, best ${issue.bestScore}/100 on ${issue.bestPageUrl}): ${recommendation}`,
       }
     }
 
@@ -665,6 +744,8 @@ function buildPrioritizedFixes(
         affectedPages: [],
         affectsHomepage: false,
         prevalencePct: 0,
+        templateCount: 0,
+        instanceCount: 0,
         summary: `${issue.factorName} (optional — not present on any audited page): ${recommendation}`,
       }
     }
@@ -676,14 +757,14 @@ function buildPrioritizedFixes(
     // prevalence, and the homepage flag describe the whole factor, which is what
     // the entry is identified by (factorId / factorName). Sorted homepage-first.
     const affectedPages = [...new Set(issue.topIssues.flatMap((d) => d.affectedUrls))].sort(homepageFirst)
-    const count = affectedPages.length
     return {
       ...base,
       recommendation,
       affectedPages,
       affectsHomepage: affectedPages.some(isHomepageUrl),
-      prevalencePct: pct(count),
-      summary: `${issue.factorName} (avg ${issue.avgScore}/100) — ${count} page${count === 1 ? '' : 's'}: ${recommendation}`,
+      prevalencePct: pct(affectedPages.length),
+      ...reachOf(affectedPages),
+      summary: `${issue.factorName} (avg ${issue.avgScore}/100) — ${reachPhrase(affectedPages)}: ${recommendation}`,
     }
   })
 
@@ -806,7 +887,23 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   // Apply limit (default 200 when not specified — large sitemaps are common and
   // a full sweep is rarely what the user wants).
   const effectiveLimit = options.limit && options.limit > 0 ? options.limit : DEFAULT_LIMIT
-  const entries = eligible.slice(0, effectiveLimit)
+
+  // Spread that budget over the site's URL shapes rather than taking it off the
+  // front. Slicing here was effectively document order: most sitemaps declare no
+  // <priority>, so every entry tied at 0.5 and the sort above was a no-op. On a
+  // templated site that hands one section 16 pages and the next 1 for no reason
+  // but list order, and every rollup downstream inherits the skew.
+  //
+  // Priority still decides which instances of a template get picked, so a site
+  // that does declare it keeps its say — it just no longer determines which
+  // parts of the site are looked at.
+  const shapes = deriveUrlShapes(eligible.map((entry) => entry.loc))
+  const entries = selectRepresentativeSample(eligible, effectiveLimit, {
+    keyOf: (entry) => shapes.get(entry.loc)?.templateKey ?? entry.loc,
+    pin: (entry) => isHomepageUrl(entry.loc),
+    rank: (a, b) => (b.priority ?? 0.5) - (a.priority ?? 0.5) || a.loc.localeCompare(b.loc),
+    spreadBy: (entry) => shapes.get(entry.loc)?.identifiers[0] ?? '',
+  })
   const truncated = eligible.length - entries.length
 
   if (entries.length === 0) {
@@ -826,7 +923,9 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
         pagesTruncated: truncated,
         effectiveLimit,
         aggregateScore: 0,
+        coverage: buildCoverage(eligible.map((entry) => entry.loc), []),
         pages: [],
+        templateGroups: [],
         criticalDefects: [],
         crossCuttingIssues: [],
         siteIssues: [],
@@ -941,7 +1040,23 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   const criticalDefects = buildCriticalDefects(successReports, priorityByUrl)
   const crossCuttingIssues = buildCrossCuttingIssues(successReports)
   const siteIssues = buildSiteIssues(pageResults, truncated, filtered)
-  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length, criticalDefects, successReports)
+  // Keyed against every eligible URL, not just the audited ones — see the
+  // parameter's note; a sample is too thin to infer route-vs-identifier itself.
+  const corpusTemplateKeys = new Map([...shapes].map(([url, shape]) => [url, shape.templateKey]))
+  const templateGroups = buildTemplateGroups(pageResults, corpusTemplateKeys)
+  const prioritizedFixes = buildPrioritizedFixes(
+    crossCuttingIssues,
+    successReports.length,
+    criticalDefects,
+    successReports,
+    templateGroups,
+  )
+  // Coverage is measured against everything eligible, not everything discovered:
+  // a PDF or an image the crawl was never going to audit is not a gap in it.
+  const coverage = buildCoverage(
+    eligible.map((entry) => entry.loc),
+    pageResults.map((page) => page.url),
+  )
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -958,7 +1073,9 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     pagesTruncated: truncated,
     effectiveLimit,
     aggregateScore,
+    coverage,
     pages: pageResults,
+    templateGroups,
     criticalDefects,
     crossCuttingIssues,
     siteIssues,

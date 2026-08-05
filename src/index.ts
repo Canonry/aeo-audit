@@ -256,6 +256,9 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
         score: result.score,
         findings: result.findings,
         recommendations: result.recommendations,
+        // Only analyzers that can tell answer this; spread conditionally so the
+        // rest don't emit `applicable: undefined` into every report's JSON.
+        ...(result.applicable === undefined ? {} : { applicable: result.applicable }),
       }
     }),
   )

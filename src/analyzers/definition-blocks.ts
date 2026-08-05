@@ -1,6 +1,9 @@
 import { clampScore, extractSchemaTypes } from './helpers.js'
 import type { AnalysisResult, AuditContext } from '../types.js'
 
+/** Route names sites give explanatory and instructional content. */
+const EXPLANATORY_URL_PATTERN = /\/(guides?|docs?|documentation|glossary|how-to|howto|learn|resources|tutorials?|blog|support)(\/|$)/i
+
 export function analyzeDefinitionBlocks(context: AuditContext): AnalysisResult {
   const findings: AnalysisResult['findings'] = []
   const recommendations: string[] = []
@@ -52,16 +55,28 @@ export function analyzeDefinitionBlocks(context: AuditContext): AnalysisResult {
     recommendations.push('Add HowTo schema where instructional content exists.')
   }
 
-  if (context.$('dl').length > 0) {
+  const definitionLists = context.$('dl').length
+  if (definitionLists > 0) {
     score += 20
     findings.push({ type: 'found', code: 'definition-blocks.dl.found', message: 'Definition list (<dl>) elements detected.' })
   } else {
     findings.push({ type: 'info', code: 'definition-blocks.dl.none', message: 'No <dl> definition lists detected.' })
   }
 
+  // Explanatory structure is expected on pages that explain things. A property
+  // listing or a checkout page is not one, and averaging its 0 into the site-wide
+  // figure reports a documentation gap on a site that has no documentation to gap.
+  // See the equivalent note in `faq-content` — same rule, same reason.
+  const applicable =
+    schemaTypes.has('HowTo') ||
+    EXPLANATORY_URL_PATTERN.test(context.url) ||
+    definitionHeadingCount > 0 ||
+    definitionLists > 0
+
   return {
     score: clampScore(score),
     findings,
     recommendations,
+    applicable,
   }
 }

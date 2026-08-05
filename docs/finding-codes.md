@@ -17,6 +17,7 @@ Every `AuditFinding` carries a stable `code` so integrations can key on a machin
 - `structured-data.schema-depth.strong`
 - `structured-data.schema-depth.moderate`
 - `structured-data.schema-depth.low`
+- `structured-data.site-category.detected`
 
 ### Content Depth
 

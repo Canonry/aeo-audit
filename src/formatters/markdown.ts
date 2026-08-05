@@ -1,5 +1,6 @@
 import { isHomepageUrl } from '../critical-defects.js'
 import type {
+  AuditCoverage,
   AuditReport,
   BatchDetectionEntry,
   BatchPlatformDetectionReport,
@@ -65,14 +66,28 @@ export function formatMarkdown(report: AuditReport): string {
   return lines.join('\n')
 }
 
+/**
+ * A score with no sample size next to it gets read as a statement about the
+ * whole site. Say what it was taken over, in templates as well as pages —
+ * a sample that reached every URL shape generalizes, and one that didn't can't.
+ */
+function coverageSuffix(coverage: AuditCoverage): string {
+  if (!coverage.sampled) return ''
+  return ` _(${coverage.confidence}: ${coverage.pagesAudited} of ${coverage.pagesDiscovered} pages, ${coverage.coveragePct}%, covering ${coverage.templatesRepresented}/${coverage.templatesDiscovered} URL templates)_`
+}
+
 export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly = false): string {
   const lines = []
 
   lines.push(`# AEO Sitemap Audit Report`)
   lines.push(``)
   lines.push(`**Sitemap:** ${report.sitemapUrl}`)
-  lines.push(`**Aggregate Score:** ${report.aggregateScore}/100`)
+  lines.push(`**Aggregate Score:** ${report.aggregateScore}/100${coverageSuffix(report.coverage)}`)
   lines.push(`**Pages:** ${report.pagesAudited} audited of ${report.pagesDiscovered} discovered (${report.pagesFiltered} filtered as non-HTML, ${report.pagesTruncated} truncated by --limit ${report.effectiveLimit})`)
+  if (report.coverage.confidence === 'indicative') {
+    lines.push(``)
+    lines.push(`> **Indicative only:** the sample reached ${report.coverage.templatesRepresented} of ${report.coverage.templatesDiscovered} URL templates. Whole sections of the site were never audited, so this score does not describe them. Raise \`--limit\` for a figure that covers the site.`)
+  }
   if (report.pagesTruncated > 0) {
     lines.push(``)
     lines.push(`> **Note:** ${report.pagesTruncated} additional pages were skipped because of the page limit. Pass \`--limit ${Math.max(report.pagesDiscovered, 9999)}\` to audit them all.`)
@@ -99,6 +114,19 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
       }
     }
 
+    lines.push(``)
+  }
+
+  if (report.templateGroups.length > 0) {
+    lines.push(`## Templates`)
+    lines.push(``)
+    lines.push(`Pages sharing a URL shape and scoring alike — one change to each template reaches every page under it.`)
+    lines.push(``)
+    lines.push(`| Template | Pages | Avg | Fix on |`)
+    lines.push(`|----------|-------|-----|--------|`)
+    for (const group of report.templateGroups) {
+      lines.push(`| \`${group.templateKey}\` | ${group.pageCount} | ${group.avgScore} | ${group.representativeUrl} |`)
+    }
     lines.push(``)
   }
 
@@ -129,8 +157,10 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
 
     lines.push(`## Cross-Cutting Issues`)
     lines.push(``)
-    lines.push(`| Factor | Status | Avg | Best (page) | Affected Pages |`)
-    lines.push(`|--------|--------|-----|-------------|----------------|`)
+    lines.push(`\`Avg\` is over the pages the factor applies to; \`Coverage\` is how many pages that is.`)
+    lines.push(``)
+    lines.push(`| Factor | Status | Avg | Best (page) | Affected Pages | Coverage |`)
+    lines.push(`|--------|--------|-----|-------------|----------------|----------|`)
 
     for (const issue of report.crossCuttingIssues) {
       // Page-specific factors carry a structurally-low average across pages that
@@ -138,11 +168,16 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
       // a misleading near-100% gap.
       const affected = issue.pageSpecific
         ? issue.status === 'limited'
-          ? 'isolated'
+          ? `${issue.applicableAffectedPages}/${issue.applicablePages} with it`
           : 'none'
         : `${issue.affectedPages}/${issue.totalPages} (${Math.round((issue.affectedPages / issue.totalPages) * 100)}%)`
+      // Site-wide factors apply everywhere, so the two denominators agree and
+      // repeating it adds nothing.
+      const coverage = issue.applicablePages === issue.totalPages
+        ? 'all pages'
+        : `${issue.applicablePages}/${issue.totalPages} pages`
       lines.push(
-        `| ${issue.factorName} | ${statusLabel[issue.status]} | ${issue.avgScore} | ${issue.bestScore} (${shortUrl(issue.bestPageUrl)}) | ${affected} |`,
+        `| ${issue.factorName} | ${statusLabel[issue.status]} | ${issue.applicableAvgScore} | ${issue.bestScore} (${shortUrl(issue.bestPageUrl)}) | ${affected} | ${coverage} |`,
       )
     }
 
@@ -181,9 +216,16 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
       const showBest = fix.bestScore !== undefined && fix.status !== 'opportunity'
       const avg =
         fix.avgScore !== undefined
-          ? ` (avg ${fix.avgScore}/100${showBest ? `, best ${fix.bestScore}/100 on ${fix.bestPageUrl}` : ''})`
+          ? ` (avg ${fix.applicableAvgScore ?? fix.avgScore}/100${showBest ? `, best ${fix.bestScore}/100 on ${fix.bestPageUrl}` : ''})`
           : ''
-      lines.push(`${i + 1}. ${tag}${statusTag}**${fix.title}**${avg} _(${fix.prevalencePct}% of pages)_ — ${fix.recommendation}`)
+      // Lead with the unit of work. "1 template" and "194 pages" describe the
+      // same fault, and only the first is something anyone can schedule.
+      const reach =
+        fix.templateCount !== undefined && fix.instanceCount !== undefined &&
+        fix.templateCount > 0 && fix.templateCount < fix.instanceCount
+          ? `${fix.templateCount} template${fix.templateCount === 1 ? '' : 's'} · ${fix.instanceCount} pages · ${fix.prevalencePct}%`
+          : `${fix.prevalencePct}% of pages`
+      lines.push(`${i + 1}. ${tag}${statusTag}**${fix.title}**${avg} _(${reach})_ — ${fix.recommendation}`)
       // Spell out every affected page — agents and humans both need the full set.
       for (const url of fix.affectedPages) {
         const home = isHomepageUrl(url) ? ' **(homepage)**' : ''
