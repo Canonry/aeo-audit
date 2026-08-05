@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { buildCoverage, countTemplates, deriveTemplateKeys, deriveUrlShapes, selectRepresentativeSample } from '../src/url-templates.js'
+import { buildCoverage, countTemplates, deriveTemplateKeys, deriveUrlShapes, routeKey, selectRepresentativeSample } from '../src/url-templates.js'
 
 const propertyUrls = (count: number): string[] =>
   Array.from({ length: count }, (_, i) => `https://example.com/properties/city${i % 12}/building-${i}`)
@@ -151,6 +151,34 @@ describe('buildCoverage', () => {
     expect(coverage.coveragePct).toBe(45)
     expect(coverage.confidence).toBe('indicative')
     expect(coverage.templatesRepresented).toBeLessThan(coverage.templatesDiscovered)
+  })
+
+  it('resolves audited final URLs back to discovered templates across a redirect', () => {
+    // Sampling audits each <loc>, but the report records the final URL — here
+    // every audited page 301s http->https and gains a trailing slash. Matched by
+    // raw string none would find a discovered template and coverage would read
+    // 0 templates represented, mislabelling a full-reach sample as indicative.
+    const keys = deriveTemplateKeys(discovered)
+    const sample = selectRepresentativeSample(discovered, 12, { keyOf: (u) => keys.get(u) ?? u })
+    const finalUrls = sample.map((u) => `${u.replace('https://', 'http://')}/`)
+
+    const coverage = buildCoverage(discovered, finalUrls)
+
+    expect(coverage.templatesRepresented).toBe(coverage.templatesDiscovered)
+    expect(coverage.confidence).toBe('representative')
+  })
+})
+
+describe('routeKey', () => {
+  it('is stable across the URL differences a redirect introduces', () => {
+    const canonical = routeKey('https://example.com/about')
+    expect(routeKey('https://example.com/about/')).toBe(canonical) // trailing slash
+    expect(routeKey('http://example.com/about')).toBe(canonical) // protocol
+    expect(routeKey('https://www.example.com/about')).toBe(canonical) // host
+  })
+
+  it('keeps genuinely different routes distinct', () => {
+    expect(routeKey('https://example.com/a')).not.toBe(routeKey('https://example.com/b'))
   })
 })
 

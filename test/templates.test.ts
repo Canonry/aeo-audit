@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { buildTemplateGroups, summarizeFixReach } from '../src/templates.js'
+import { deriveTemplateKeys } from '../src/url-templates.js'
 import type { ScoredFactor, SitemapPageResult } from '../src/types.js'
 
 function factors(scores: Record<string, number>): ScoredFactor[] {
@@ -30,6 +31,22 @@ describe('buildTemplateGroups', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0]?.templateKey).toBe('/properties/*/*')
     expect(groups[0]?.pageCount).toBe(194)
+  })
+
+  it('groups pages whose fetched final URL differs from the sitemap loc by a redirect', () => {
+    // The corpus map is keyed by sitemap <loc>, but each page carries the URL it
+    // was actually fetched at. Here every page 301s http->https and gains a
+    // trailing slash. Matched by raw string each page falls into a singleton and
+    // no template is found; matched by route they still collapse into one.
+    const locs = Array.from({ length: 20 }, (_, i) => `https://example.com/properties/p-${i}`)
+    const corpus = deriveTemplateKeys(locs)
+    const pages = locs.map((loc) => page(`${loc.replace('https://', 'http://')}/`, TEMPLATED))
+
+    const groups = buildTemplateGroups(pages, corpus)
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.templateKey).toBe('/properties/*')
+    expect(groups[0]?.pageCount).toBe(20)
   })
 
   it('absorbs boundary noise rather than splitting on a one-point drift', () => {

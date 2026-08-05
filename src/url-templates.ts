@@ -42,6 +42,20 @@ function pathSegments(url: string): string[] | null {
 }
 
 /**
+ * A key that identifies the same route across the trivial URL differences a fetch
+ * introduces — a redirect that adds a trailing slash, upgrades http to https, or
+ * canonicalizes the host. A sitemap `<loc>` and the final URL an audit lands on
+ * routinely differ in exactly those ways, and every one of them is already
+ * invisible to the template key (built from the lowercased path segments), so
+ * route identity ignores them too. Callers lining up loc-space URLs against
+ * audited final URLs bridge the two through this rather than raw string equality.
+ */
+export function routeKey(url: string): string {
+  const segments = pathSegments(url)
+  return segments ? `/${segments.join('/')}` : url
+}
+
+/**
  * Map every URL to its inferred template key, e.g. `/properties/*` + `/blog/*`.
  *
  * Keys are only meaningful relative to the corpus they were derived from: the
@@ -135,11 +149,20 @@ export function buildCoverage(
   discoveredUrls: readonly string[],
   auditedUrls: readonly string[],
 ): AuditCoverage {
-  const keys = deriveTemplateKeys(discoveredUrls)
-  const templatesDiscovered = new Set(keys.values()).size
+  // Index by route, not by raw URL string. The audited set carries each page's
+  // final URL after redirects, which routinely differs from the sitemap <loc> it
+  // came from (trailing slash, http->https, host case); keying both sides on
+  // routeKey lets a redirected page still resolve to its discovered template
+  // instead of missing the lookup and dragging templatesRepresented down.
+  const keyByRoute = new Map<string, string>()
+  for (const [url, key] of deriveTemplateKeys(discoveredUrls)) {
+    const route = routeKey(url)
+    if (!keyByRoute.has(route)) keyByRoute.set(route, key)
+  }
+  const templatesDiscovered = new Set(keyByRoute.values()).size
   const represented = new Set<string>()
   for (const url of auditedUrls) {
-    const key = keys.get(url)
+    const key = keyByRoute.get(routeKey(url))
     if (key !== undefined) represented.add(key)
   }
 
