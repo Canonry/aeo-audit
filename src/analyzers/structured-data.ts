@@ -1,14 +1,7 @@
-import { clampScore, detectSiteCategory, extractSchemaTypes } from './helpers.js'
+import { clampScore, describeRecommendedSchemas, detectSiteCategory, extractSchemaTypes } from './helpers.js'
 import type { AnalysisResult, AuditContext } from '../types.js'
 
 const PRIORITY_TYPES = ['LocalBusiness', 'FAQPage', 'Service', 'HowTo']
-
-function formatSchemaList(schemas: string[]): string {
-  if (schemas.length === 0) return 'Organization'
-  if (schemas.length === 1) return schemas[0]
-  if (schemas.length === 2) return `${schemas[0]} and ${schemas[1]}`
-  return `${schemas.slice(0, -1).join(', ')}, and ${schemas[schemas.length - 1]}`
-}
 
 export function analyzeStructuredData(context: AuditContext): AnalysisResult {
   const findings: AnalysisResult['findings'] = []
@@ -16,6 +9,19 @@ export function analyzeStructuredData(context: AuditContext): AnalysisResult {
   const structuredData = context.structuredData || []
   const schemaTypes = extractSchemaTypes(structuredData)
   const detection = detectSiteCategory(context)
+
+  // Record what the site was taken to be and on what evidence. Every schema
+  // recommendation below is downstream of this call, so when one comes out wrong
+  // — the reason is usually a keyword that fires on the wrong kind of site — the
+  // report already says which signals were responsible instead of requiring the
+  // detection to be re-run by hand to find out.
+  findings.push({
+    type: 'info',
+    code: 'structured-data.site-category.detected',
+    message: detection.category === 'unknown'
+      ? 'Site category could not be determined; schema advice stays generic.'
+      : `Site read as ${detection.category}${detection.evidence.length > 0 ? ` (${detection.evidence.join('; ')})` : ''}.`,
+  })
 
   let score = 0
 
@@ -27,7 +33,7 @@ export function analyzeStructuredData(context: AuditContext): AnalysisResult {
     // Issue #33: recommend schemas that fit the detected site category instead
     // of always suggesting LocalBusiness/Service (which is wrong for SaaS,
     // dev tools, blogs, e-commerce, etc.).
-    recommendations.push(`Add JSON-LD with ${formatSchemaList(detection.recommendedSchemas)} schema.`)
+    recommendations.push(`Add JSON-LD with ${describeRecommendedSchemas(detection)}.`)
   }
 
   for (const type of PRIORITY_TYPES) {

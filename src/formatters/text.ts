@@ -92,6 +92,14 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
   lines.push(`${DIM}${report.sitemapUrl}${RESET}`)
   lines.push(``)
   lines.push(`  ${BOLD}Aggregate Score:${RESET} ${sc}${BOLD}${report.aggregateScore}/100${RESET}  ${bar(report.aggregateScore, 30)}`)
+  // Never show the score bare when it was taken over a sample: at 6% coverage
+  // it is a statement about the sample, and reads as one about the site.
+  if (report.coverage.sampled) {
+    const cc = report.coverage.confidence === 'indicative' ? YELLOW : DIM
+    // "auditable", not "discovered": this is the eligible (HTML) URL count, below
+    // the report's pagesDiscovered (every sitemap entry) on the very next line.
+    lines.push(`  ${cc}${report.coverage.confidence}: ${report.coverage.pagesAudited} of ${report.coverage.pagesDiscovered} auditable pages (${report.coverage.coveragePct}%), ${report.coverage.templatesRepresented}/${report.coverage.templatesDiscovered} URL templates covered${RESET}`)
+  }
   lines.push(`  ${DIM}${report.pagesAudited} pages audited of ${report.pagesDiscovered} discovered (${report.pagesFiltered} filtered, ${report.pagesTruncated} truncated by --limit ${report.effectiveLimit})${RESET}`)
   if (report.pagesTruncated > 0) {
     lines.push(`  ${DIM}Note: ${report.pagesTruncated} additional pages skipped by --limit. Pass --limit ${Math.max(report.pagesDiscovered, 9999)} to audit them all.${RESET}`)
@@ -153,7 +161,7 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
       // "add it everywhere" dump (those pages have no business carrying it). The
       // actionable, scoped tune-up lives in Prioritized Fixes below.
       if (issue.status === 'limited') {
-        lines.push(`  ${YELLOW}${issue.factorName.padEnd(30)}${RESET} ${YELLOW}[limited]${RESET} ${DIM}avg ${issue.avgScore}/100${RESET} · ${best}`)
+        lines.push(`  ${YELLOW}${issue.factorName.padEnd(30)}${RESET} ${YELLOW}[limited]${RESET} ${DIM}avg ${issue.applicableAvgScore}/100 across ${issue.applicablePages} page${issue.applicablePages === 1 ? '' : 's'} with it${RESET} · ${best}`)
         lines.push(`      ${DIM}present but isolated — a tune-up where it exists, not a site-wide gap${RESET}`)
         continue
       }
@@ -163,8 +171,8 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
       }
 
       const pct = Math.round((issue.affectedPages / issue.totalPages) * 100)
-      const igc = scoreColor(issue.avgScore)
-      lines.push(`  ${igc}${issue.factorName.padEnd(32)}${RESET} ${DIM}avg ${issue.avgScore}/100${RESET} · ${best} ${DIM}(affects ${pct}% of pages)${RESET}`)
+      const igc = scoreColor(issue.applicableAvgScore)
+      lines.push(`  ${igc}${issue.factorName.padEnd(32)}${RESET} ${DIM}avg ${issue.applicableAvgScore}/100${RESET} · ${best} ${DIM}(affects ${pct}% of pages)${RESET}`)
 
       for (const detail of issue.topIssues) {
         lines.push(`      ${DIM}• ${detail.recommendation}${RESET} ${DIM}(${detail.affectedUrls.length}/${issue.totalPages} pages)${RESET}`)
@@ -189,13 +197,20 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
           : fix.status === 'opportunity'
             ? `${DIM}[opportunity]${RESET} `
             : ''
-      const avg = fix.avgScore !== undefined ? `${DIM} avg ${fix.avgScore}/100${RESET}` : ''
+      const avg = fix.avgScore !== undefined ? `${DIM} avg ${fix.applicableAvgScore ?? fix.avgScore}/100${RESET}` : ''
       // Skip best for `opportunity` — the factor is absent everywhere, so "best 0/100 on /" is noise.
       const best =
         fix.bestScore !== undefined && fix.status !== 'opportunity'
           ? `${DIM} · best ${fix.bestScore}/100 on ${fix.bestPageUrl}${RESET}`
           : ''
-      lines.push(`  ${CYAN}${i + 1}.${RESET} ${tag}${statusTag}${BOLD}${fix.title}${RESET}${avg}${best} ${DIM}(${fix.prevalencePct}% of pages)${RESET}`)
+      // Cost the fix in templates when grouping found fewer of them than pages —
+      // that is the number of edits, and the page count is the number of results.
+      const reach =
+        fix.templateCount !== undefined && fix.instanceCount !== undefined &&
+        fix.templateCount > 0 && fix.templateCount < fix.instanceCount
+          ? `${fix.templateCount} template${fix.templateCount === 1 ? '' : 's'} · ${fix.instanceCount} pages · ${fix.prevalencePct}%`
+          : `${fix.prevalencePct}% of pages`
+      lines.push(`  ${CYAN}${i + 1}.${RESET} ${tag}${statusTag}${BOLD}${fix.title}${RESET}${avg}${best} ${DIM}(${reach})${RESET}`)
       lines.push(`     ${DIM}→ ${fix.recommendation}${RESET}`)
       // Spell out every affected page — agents and humans both need the full set.
       for (const url of fix.affectedPages) {

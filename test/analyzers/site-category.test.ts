@@ -171,3 +171,95 @@ describe('analyzeSchemaCompleteness (issue #33)', () => {
     expect(recs).not.toMatch(/LocalBusiness/)
   })
 })
+
+describe('vertical detection does not guess a type it cannot support', () => {
+  function ctx(html: string): AuditContext {
+    const $ = load(html)
+    return {
+      $,
+      html,
+      url: 'https://example.com/',
+      headers: {},
+      auxiliary: defaultAuxiliary,
+      structuredData: parseJsonLdScripts($),
+      textContent: getVisibleText($, html),
+      pageTitle: $('title').first().text().trim(),
+    }
+  }
+
+  // The report that started this: an apartment operator was told to add
+  // SoftwareApplication schema, and that is the kind of thing a developer
+  // implements literally across 194 property pages.
+  const apartmentSite = wrap(`
+    <h1>Cortland Apartments</h1>
+    <p>Browse floor plans and available units. Studio, one bedroom, and two bedroom apartments for rent.</p>
+    <p>Pricing starts at $1,450 per month. Amenities include a pool and fitness center.</p>
+    <p>Schedule a tour today. Residents love our pet policy and resident portal.</p>
+    <script src="https://cdn.jsdelivr.net/npm/some-widget@1"></script>
+  `)
+
+  it('reads an apartment site as real-estate, not a developer tool', () => {
+    const detection = detectSiteCategory(ctx(apartmentSite))
+    expect(detection.category).toBe('real-estate')
+    expect(detection.recommendedSchemas).not.toContain('SoftwareApplication')
+  })
+
+  it('reads a property page with an ApartmentComplex node as real-estate despite its nested address', () => {
+    // The real property page carries an ApartmentComplex node with the address
+    // nested inside it, plus the local-sounding phrasing every listing has. The
+    // nested PostalAddress used to score local-business +4 and tie the
+    // ApartmentComplex's real-estate +4, collapsing the pick to `unknown`.
+    const withSchema = wrap(`
+      <h1>Cortland M Line</h1>
+      <script type="application/ld+json">${JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'ApartmentComplex',
+        name: 'Cortland M Line',
+        address: { '@type': 'PostalAddress', streetAddress: '123 Main St', addressLocality: 'Austin' },
+      })}</script>
+      <p>Browse floor plans and available units priced per month.</p>
+      <p>Schedule a tour and get directions to the neighborhood.</p>
+    `)
+    const detection = detectSiteCategory(ctx(withSchema))
+    expect(detection.category).toBe('real-estate')
+    expect(detection.specific).toBe(true)
+    expect(detection.recommendedSchemas).toContain('ApartmentComplex')
+  })
+
+  it('never recommends SoftwareApplication to an apartment operator', () => {
+    const recs = [
+      ...analyzeStructuredData(ctx(apartmentSite)).recommendations,
+      ...analyzeSchemaCompleteness(ctx(apartmentSite)).recommendations,
+    ].join('\n')
+    expect(recs).not.toMatch(/SoftwareApplication/)
+    expect(recs).toMatch(/ApartmentComplex/)
+  })
+
+  it('does not treat a CDN reference as evidence of a developer tool', () => {
+    // jsdelivr/unpkg/cdnjs used to add a point to SaaS. That is a fact about how
+    // the page loads assets, true of most of the web, and it decided close races.
+    const plain = wrap(`
+      <h1>Riverside Dental</h1>
+      <p>Visit us for a cleaning. Get directions to our location.</p>
+      <script src="https://cdn.jsdelivr.net/npm/thing@1"></script>
+    `)
+    const detection = detectSiteCategory(ctx(plain))
+    expect(detection.category).not.toBe('saas-devtools')
+    expect(detection.evidence.join(' ')).not.toMatch(/CDN/i)
+  })
+
+  it('stays generic instead of naming a type when two categories are close', () => {
+    const ambiguous = wrap(`
+      <h1>Acme</h1>
+      <p>Our services include integration work. Get a quote or view API documentation.</p>
+    `)
+    const detection = detectSiteCategory(ctx(ambiguous))
+    expect(detection.specific).toBe(false)
+    expect(detection.recommendedSchemas).toEqual(['Organization'])
+  })
+
+  it('records the detection and its evidence in the report findings', () => {
+    const codes = analyzeStructuredData(ctx(apartmentSite)).findings.map((f) => f.code)
+    expect(codes).toContain('structured-data.site-category.detected')
+  })
+})

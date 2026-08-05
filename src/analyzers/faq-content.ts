@@ -1,6 +1,10 @@
 import { clampScore, extractSchemaTypes } from './helpers.js'
 import type { AnalysisResult, AuditContext } from '../types.js'
 
+/** Route names sites give the page that answers questions. */
+const FAQ_URL_PATTERN = /\/(faqs?|frequently-asked[a-z-]*|questions|help|support)(\/|$)/i
+const FAQ_TITLE_PATTERN = /\bfaqs?\b|frequently asked/i
+
 export function analyzeFaqContent(context: AuditContext): AnalysisResult {
   const findings: AnalysisResult['findings'] = []
   const recommendations: string[] = []
@@ -60,9 +64,24 @@ export function analyzeFaqContent(context: AuditContext): AnalysisResult {
     findings.push({ type: 'info', code: 'faq-content.qa-pairs.none', message: 'Question-answer pairing appears limited.' })
   }
 
+  // Is this a page that was ever supposed to answer questions? A pricing or
+  // product page has no business carrying an FAQ, and rolling its 0 into the
+  // site-wide average is how "FAQ Content: 1/100, 100% of pages affected" gets
+  // reported about a site whose FAQ is fine. Declaring inapplicability leaves the
+  // score untouched and only removes the page from that average.
+  //
+  // Any one of: it says it's an FAQ (schema, URL, title), or it is built like one.
+  const applicable =
+    schemaTypes.has('FAQPage') ||
+    FAQ_URL_PATTERN.test(context.url) ||
+    FAQ_TITLE_PATTERN.test(context.pageTitle) ||
+    questionHeadingCount >= 3 ||
+    qaPairs >= 3
+
   return {
     score: clampScore(score),
     findings,
     recommendations,
+    applicable,
   }
 }

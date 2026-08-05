@@ -3,9 +3,11 @@ import path from 'node:path'
 import { AeoAuditError } from './errors.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { auditHtmlPage } from './index.js'
-import { buildCriticalDefects } from './critical-defects.js'
+import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { buildCrossCuttingIssues, buildPrioritizedFixes, mapWithConcurrency, unionFactorIds, buildSiteIssues } from './sitemap.js'
+import { buildTemplateGroups } from './templates.js'
+import { buildCoverage, deriveUrlShapes, selectRepresentativeSample } from './url-templates.js'
 import type {
   AuditReport,
   AuxiliaryResources,
@@ -218,7 +220,20 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
   }
 
   const effectiveLimit = options.limit && options.limit > 0 ? options.limit : DEFAULT_LIMIT
-  const selected = files.slice(0, effectiveLimit)
+
+  // Same stratified selection as a sitemap crawl, for the same reason: a lexical
+  // prefix of a build directory audits `/about` and the first few hundred entries
+  // of whatever section sorts first, and never reaches the rest of the site.
+  // Keyed on the URL each file maps to so the shapes match the live site's.
+  const urlForFile = new Map(files.map((file) => [file, staticFileToUrl(path.relative(resolved, file), baseUrl)]))
+  const shapes = deriveUrlShapes([...urlForFile.values()])
+  const shapeOf = (file: string): { templateKey: string; identifiers: string[] } | undefined =>
+    shapes.get(urlForFile.get(file) ?? file)
+  const selected = selectRepresentativeSample(files, effectiveLimit, {
+    keyOf: (file) => shapeOf(file)?.templateKey ?? file,
+    pin: (file) => isHomepageUrl(urlForFile.get(file) ?? ''),
+    spreadBy: (file) => shapeOf(file)?.identifiers[0] ?? '',
+  })
   const truncated = discovered - selected.length
 
   options.onPlan?.({
@@ -278,7 +293,16 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
   // (derived from the file path → URL) only — no priority map is passed.
   const criticalDefects = buildCriticalDefects(successReports)
   const crossCuttingIssues = buildCrossCuttingIssues(successReports)
-  const prioritizedFixes = buildPrioritizedFixes(crossCuttingIssues, successReports.length, criticalDefects, successReports)
+  const corpusTemplateKeys = new Map([...shapes].map(([url, shape]) => [url, shape.templateKey]))
+  const templateGroups = buildTemplateGroups(pageResults, corpusTemplateKeys)
+  const prioritizedFixes = buildPrioritizedFixes(
+    crossCuttingIssues,
+    successReports.length,
+    criticalDefects,
+    successReports,
+    templateGroups,
+  )
+  const coverage = buildCoverage([...urlForFile.values()], pageResults.map((page) => page.url))
 
   const report: SitemapAuditReport = {
     schemaVersion: SCHEMA_VERSION,
@@ -295,7 +319,9 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     pagesTruncated: truncated,
     effectiveLimit,
     aggregateScore,
+    coverage,
     pages: pageResults,
+    templateGroups,
     criticalDefects,
     crossCuttingIssues,
     siteIssues: buildSiteIssues(pageResults, 0, 0),

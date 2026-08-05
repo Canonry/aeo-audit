@@ -60,7 +60,18 @@ The CLI exits `0` for an overall score ≥ 70 and `1` below; see [Exit codes](cl
 
 A sitemap (or static) run averages each factor across every audited page into `crossCuttingIssues[]`, and the worst of those plus the per-page critical defects become the ranked `prioritizedFixes[]`. Two refinements keep that rollup honest:
 
-**Best-page context on every factor.** Each cross-cutting issue carries `bestScore` and `bestPageUrl` — the single highest-scoring page for that factor (homepage wins ties). A site-wide gap then reads as *"Structured Data is 100 on the homepage — propagate that template to the 393 other pages"* rather than a bare *"add schema"*. The average (`avgScore`) is unchanged: it's an honest coverage number and is never recomputed over a subset.
+**Best-page context on every factor.** Each cross-cutting issue carries `bestScore` and `bestPageUrl` — the single highest-scoring page for that factor (homepage wins ties). A site-wide gap then reads as *"Structured Data is 100 on the homepage — propagate that template to the 393 other pages"* rather than a bare *"add schema"*.
+
+**Two averages, because there are two questions.** A factor that only some page types can satisfy has a structurally low site-wide mean: an FAQ living on 8 of 500 pages averages ~1/100, which is arithmetically correct and describes a site that doesn't exist. Every cross-cutting issue therefore carries both:
+
+| Field | Denominator | Answers |
+|-------|-------------|---------|
+| `avgScore` | every audited page | How much of the site has this? |
+| `applicableAvgScore` | pages the factor applies to (`applicablePages`) | How good is it where it exists? |
+
+`affectedPages` / `applicableAffectedPages` split the same way. Reports show the applicable figure; `avgScore` keeps its original meaning and value so existing consumers are unaffected.
+
+**How applicability is decided.** An analyzer that can tell reports it directly by returning `applicable` (FAQ Content and Definition Blocks do, from schema, URL, title, and page structure). For any analyzer that stays silent, a factor expected site-wide always applies, and a page-specific one applies where it is present (score ≥ 30) — the pre-existing rule, so silence preserves the old behavior exactly.
 
 **Page-specific factors aren't site-wide failures.** Some factors legitimately apply to only certain page types — a product or portfolio page has no business carrying an **FAQ** or a glossary **Definition Block**, so a 0 there is correct, not a gap. Averaged across a whole site, these score near 0 and "affect" almost every page, which would otherwise float them to the top of the fix list and read as *"Critical: build an FAQ"* even when the site already has a good one on `/faq`. Each cross-cutting issue therefore carries a `status`:
 

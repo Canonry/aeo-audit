@@ -671,7 +671,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         onPlan: (plan) => {
           if (plan.truncated > 0) {
             console.error(
-              `Notice: ${plan.discovered} HTML files found; auditing the first ${plan.willAudit} (--limit ${plan.effectiveLimit}). ${plan.truncated} skipped. Pass --limit ${Math.max(plan.discovered, 9999)} to audit all.`,
+              `Notice: ${plan.discovered} HTML files found; auditing ${plan.willAudit} sampled across the site's URL templates (--limit ${plan.effectiveLimit}). ${plan.truncated} skipped. Pass --limit ${Math.max(plan.discovered, 9999)} to audit all.`,
             )
           }
         },
@@ -770,7 +770,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
           }
           if (plan.truncated > 0) {
             console.error(
-              `Notice: sitemap has ${plan.discovered} URLs; auditing top ${plan.willAudit} by priority (--limit ${plan.effectiveLimit}). ${plan.truncated} pages skipped. Pass --limit ${Math.max(plan.discovered, 9999)} to audit all.`,
+              `Notice: sitemap has ${plan.discovered} URLs; auditing ${plan.willAudit} sampled across the site's URL templates, highest <priority> first within each (--limit ${plan.effectiveLimit}). ${plan.truncated} pages skipped. Pass --limit ${Math.max(plan.discovered, 9999)} to audit all.`,
             )
           }
         },

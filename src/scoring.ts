@@ -34,11 +34,16 @@ export const OPTIONAL_FACTOR_DEFINITIONS: FactorDefinition[] = [
  * freshness, citations) is expected on every page, so a low average there is a
  * real coverage gap.
  *
- * The sitemap rollup still averages these across every page — that average is an
- * honest coverage number and stays put (see `buildCrossCuttingIssues`). What this
- * set changes is ranking and labelling: a page-specific factor must not float to
- * the top of the prioritized fixes on a structurally-inflated "affected" count and
- * read as "Critical: build an FAQ" when the site already has one on `/faq`.
+ * The sitemap rollup reports two averages for these (see `buildCrossCuttingIssues`).
+ * `avgScore` is still taken across every page — an honest coverage number, and the
+ * answer to "how much of the site has this". `applicableAvgScore` is taken over the
+ * pages the factor applies to, and answers "how good is it where it exists". The
+ * second is the one to show: a factor living on 8 of 500 pages averages ~1/100
+ * site-wide, which is arithmetically true and describes a site that doesn't exist.
+ *
+ * What this set changes is ranking and labelling: a page-specific factor must not
+ * float to the top of the prioritized fixes on a structurally-inflated "affected"
+ * count and read as "Critical: build an FAQ" when the site already has one on `/faq`.
  */
 export const PAGE_SPECIFIC_FACTOR_IDS: ReadonlySet<string> = new Set([
   'faq-content',
@@ -51,6 +56,12 @@ export const PAGE_SPECIFIC_FACTOR_IDS: ReadonlySet<string> = new Set([
  * clears a lone FAQPage schema (34) or the primary definition signal (30) without
  * being tripped by a stray question-mark heading (12). Tunable; presence — not
  * coverage breadth — is the gate, since low coverage is the expected state here.
+ *
+ * This is now the fallback rather than the primary test: an analyzer that can
+ * report `applicable` directly is believed instead (see `factorApplies`). The
+ * threshold is what a page-specific factor gets judged by when no analyzer says.
+ * It reads presence as applicability, which flatters the average slightly — a
+ * genuine FAQ page implemented badly drops out of its own denominator.
  */
 export const PAGE_SPECIFIC_PRESENT_THRESHOLD = 30
 
