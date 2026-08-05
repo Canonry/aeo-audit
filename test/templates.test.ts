@@ -179,6 +179,22 @@ describe('summarizeFixReach', () => {
     expect(reach).toEqual({ templates: 3, instances: 196 })
   })
 
+  it('counts two score clusters of one route as two edits, not one', () => {
+    // buildTemplateGroups emits one group per score cluster, so a single URL shape
+    // can back several groups. Keyed on templateKey the reach would collapse them
+    // to 1; they are separate template edits and must count as separate work.
+    const flat = [
+      ...Array.from({ length: 12 }, (_, i) => page(`https://example.com/p/lo-${i}`, { depth: 40 })),
+      ...Array.from({ length: 12 }, (_, i) => page(`https://example.com/p/hi-${i}`, { depth: 90 })),
+    ]
+    const twoClusters = buildTemplateGroups(flat)
+    expect(twoClusters).toHaveLength(2)
+    expect(new Set(twoClusters.map((g) => g.templateKey))).toEqual(new Set(['/p/*']))
+
+    const reach = summarizeFixReach(flat.map((p) => p.url), twoClusters)
+    expect(reach).toEqual({ templates: 2, instances: 24 })
+  })
+
   it('reports nothing for a fix with no affected pages', () => {
     expect(summarizeFixReach([], groups)).toEqual({ templates: 0, instances: 0 })
   })

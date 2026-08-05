@@ -73,7 +73,10 @@ export function formatMarkdown(report: AuditReport): string {
  */
 function coverageSuffix(coverage: AuditCoverage): string {
   if (!coverage.sampled) return ''
-  return ` _(${coverage.confidence}: ${coverage.pagesAudited} of ${coverage.pagesDiscovered} pages, ${coverage.coveragePct}%, covering ${coverage.templatesRepresented}/${coverage.templatesDiscovered} URL templates)_`
+  // "auditable", not "discovered": this denominator is the eligible (HTML) URLs,
+  // which is smaller than the report's `pagesDiscovered` (every sitemap entry)
+  // printed on the next line. Same word, two denominators, would read as a bug.
+  return ` _(${coverage.confidence}: ${coverage.pagesAudited} of ${coverage.pagesDiscovered} auditable pages, ${coverage.coveragePct}%, covering ${coverage.templatesRepresented}/${coverage.templatesDiscovered} URL templates)_`
 }
 
 export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly = false): string {

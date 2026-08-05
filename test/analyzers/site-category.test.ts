@@ -204,6 +204,28 @@ describe('vertical detection does not guess a type it cannot support', () => {
     expect(detection.recommendedSchemas).not.toContain('SoftwareApplication')
   })
 
+  it('reads a property page with an ApartmentComplex node as real-estate despite its nested address', () => {
+    // The real property page carries an ApartmentComplex node with the address
+    // nested inside it, plus the local-sounding phrasing every listing has. The
+    // nested PostalAddress used to score local-business +4 and tie the
+    // ApartmentComplex's real-estate +4, collapsing the pick to `unknown`.
+    const withSchema = wrap(`
+      <h1>Cortland M Line</h1>
+      <script type="application/ld+json">${JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'ApartmentComplex',
+        name: 'Cortland M Line',
+        address: { '@type': 'PostalAddress', streetAddress: '123 Main St', addressLocality: 'Austin' },
+      })}</script>
+      <p>Browse floor plans and available units priced per month.</p>
+      <p>Schedule a tour and get directions to the neighborhood.</p>
+    `)
+    const detection = detectSiteCategory(ctx(withSchema))
+    expect(detection.category).toBe('real-estate')
+    expect(detection.specific).toBe(true)
+    expect(detection.recommendedSchemas).toContain('ApartmentComplex')
+  })
+
   it('never recommends SoftwareApplication to an apartment operator', () => {
     const recs = [
       ...analyzeStructuredData(ctx(apartmentSite)).recommendations,

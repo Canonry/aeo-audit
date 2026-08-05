@@ -458,9 +458,14 @@ export function detectSiteCategory(
     ecom.score += 4
     ecom.evidence.push('Product/Offer schema present')
   }
-  if (schemaTypes.has('LocalBusiness') || schemaTypes.has('Restaurant') || schemaTypes.has('Store') || schemaTypes.has('PostalAddress')) {
+  // Not PostalAddress: extractSchemaTypes flattens nested nodes, and an address
+  // sits inside almost every schema graph (Organization, ApartmentComplex,
+  // Residence). Counting it as a local-business signal handed apartment operators
+  // a spurious +4 that tied the real-estate score their ApartmentComplex node had
+  // just earned, collapsing the pick to `unknown`. The distinguishing types stay.
+  if (schemaTypes.has('LocalBusiness') || schemaTypes.has('Restaurant') || schemaTypes.has('Store')) {
     local.score += 4
-    local.evidence.push('LocalBusiness/PostalAddress schema present')
+    local.evidence.push('LocalBusiness schema present')
   }
   if (schemaTypes.has('Service') || schemaTypes.has('ProfessionalService')) {
     service.score += 2

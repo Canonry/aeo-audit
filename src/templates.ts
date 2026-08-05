@@ -195,12 +195,18 @@ export function summarizeFixReach(
 ): { templates: number; instances: number } {
   if (affectedPages.length === 0) return { templates: 0, instances: 0 }
 
-  const groupByUrl = new Map<string, string>()
+  // Map each grouped URL to its group *object*, not its template key. One
+  // template key can back several groups — buildTemplateGroups emits one per
+  // score cluster, so a `/*/*` route split into unit pages (40) and metro pages
+  // (90) is two groups sharing that key — and each is a separate edit. Keying the
+  // dedup on the key would collapse them and undercount the very work this
+  // reports, the failure the doc above rules out.
+  const groupByUrl = new Map<string, TemplateGroup>()
   for (const group of groups) {
-    for (const url of group.urls) groupByUrl.set(url, group.templateKey)
+    for (const url of group.urls) groupByUrl.set(url, group)
   }
 
-  const distinct = new Set<string>()
+  const distinct = new Set<TemplateGroup | string>()
   for (const url of affectedPages) {
     // A page in no template is its own unit of work, keyed by URL so two
     // one-offs never collapse into each other.

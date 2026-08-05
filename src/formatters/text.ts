@@ -96,7 +96,9 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
   // it is a statement about the sample, and reads as one about the site.
   if (report.coverage.sampled) {
     const cc = report.coverage.confidence === 'indicative' ? YELLOW : DIM
-    lines.push(`  ${cc}${report.coverage.confidence}: ${report.coverage.pagesAudited} of ${report.coverage.pagesDiscovered} pages (${report.coverage.coveragePct}%), ${report.coverage.templatesRepresented}/${report.coverage.templatesDiscovered} URL templates covered${RESET}`)
+    // "auditable", not "discovered": this is the eligible (HTML) URL count, below
+    // the report's pagesDiscovered (every sitemap entry) on the very next line.
+    lines.push(`  ${cc}${report.coverage.confidence}: ${report.coverage.pagesAudited} of ${report.coverage.pagesDiscovered} auditable pages (${report.coverage.coveragePct}%), ${report.coverage.templatesRepresented}/${report.coverage.templatesDiscovered} URL templates covered${RESET}`)
   }
   lines.push(`  ${DIM}${report.pagesAudited} pages audited of ${report.pagesDiscovered} discovered (${report.pagesFiltered} filtered, ${report.pagesTruncated} truncated by --limit ${report.effectiveLimit})${RESET}`)
   if (report.pagesTruncated > 0) {
