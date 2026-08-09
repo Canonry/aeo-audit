@@ -49,7 +49,9 @@ export interface FetchWithRedirectOptions {
   signal?: AbortSignal
   onOutboundAttempt?: AeoAuditOutboundAttemptObserver
   outboundAttemptKind?: AeoAuditOutboundAttemptKind
-  budget?: FetchBudgetController
+  budget?: FetchBudget
+  /** Awaited after per-hop SSRF validation and immediately before a request starts. */
+  beforeOutboundAttempt?: () => void | Promise<void>
   /**
    * Optional caller-owned redirect boundary. Returning false records the redirect
    * hop but leaves its response unread, so host-scoped callers never fetch a
@@ -68,6 +70,8 @@ export interface RedirectFetchResult {
 
 export interface ReadResponseBodyOptions {
   maxBytes: number
+  /** Reject an ambiguous response as soon as its first 512 bytes are not HTML. */
+  requireHtmlSniff?: boolean
   signal?: AbortSignal
   deadlineAt?: number
   deadlineError?: () => unknown
@@ -88,6 +92,7 @@ const DIAGNOSTIC_TIMEOUT_MS = 4_000
 const MAIN_MAX_BYTES = 5 * 1024 * 1024
 const AUX_MAX_BYTES = 1024 * 1024
 const MAX_REDIRECTS = 5
+const HTML_SNIFF_MIN_BYTES = 512
 
 const AUXILIARY_SPECS: AuxiliarySpec[] = [
   { key: 'llmsTxt', path: '/llms.txt', kind: 'text' },
@@ -112,7 +117,12 @@ export interface FetchBudgetSnapshot {
   exhaustedReason?: SitemapAuditPartialReason
 }
 
-export class FetchBudgetController {
+export interface FetchBudget {
+  consumeFetch(): void
+  assertWithinDuration(): void
+}
+
+export class FetchBudgetController implements FetchBudget {
   readonly startedAt: number
   readonly maxFetches?: number
   readonly maxDurationMs?: number
@@ -508,6 +518,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     outboundAttemptKind = 'page',
     budget,
     shouldFollowRedirect,
+    beforeOutboundAttempt,
   } = options
 
   let currentUrl = new URL(startUrl.toString())
@@ -517,6 +528,8 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     throwIfAborted(signal)
     budget?.assertWithinDuration()
     await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
+    throwIfAborted(signal)
+    await beforeOutboundAttempt?.()
     throwIfAborted(signal)
     budget?.consumeFetch()
     await onOutboundAttempt?.({
@@ -603,6 +616,17 @@ function isAmbiguousContentType(contentType = ''): boolean {
   return !normalized || AMBIGUOUS_CONTENT_TYPES.some((type) => normalized.includes(type))
 }
 
+/**
+ * Shared acceptance policy for fetched HTML. Crawls preserve the historical
+ * behavior of trusting an explicit HTML content type, while the single-page
+ * audit can additionally require a document marker.
+ */
+export function isHtmlResponse(contentType = '', body = '', requireMarker = false): boolean {
+  const htmlByHeader = isHtmlContentType(contentType)
+  if (requireMarker) return (htmlByHeader || isAmbiguousContentType(contentType)) && looksLikeHtml(body)
+  return htmlByHeader || (isAmbiguousContentType(contentType) && looksLikeHtml(body))
+}
+
 function isLikelyTextContent(contentType = '', body = ''): boolean {
   const normalized = contentType.toLowerCase()
   if (!normalized) {
@@ -633,10 +657,18 @@ function hasDisallowedControlChars(value: string): boolean {
 
 export async function readResponseBodyAsText(response: Response, options: ReadResponseBodyOptions): Promise<string> {
   const reader = response.body?.getReader()
-  if (!reader) return ''
+  if (!reader) {
+    if (options.requireHtmlSniff) {
+      throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+    }
+    return ''
+  }
 
   const chunks: Buffer[] = []
   let totalBytes = 0
+  let sniffBytes = 0
+  let sniffSample = ''
+  let sniffed = false
   let completed = false
   let interrupted = false
   let rejectInterruption: (reason: unknown) => void = () => {}
@@ -689,7 +721,20 @@ export async function readResponseBodyAsText(response: Response, options: ReadRe
         )
       }
       options.onChunk?.(chunk.length)
+      if (options.requireHtmlSniff && !sniffed) {
+        sniffBytes += chunk.length
+        if (sniffSample.length < 4096) sniffSample += chunk.toString('utf8')
+        if (sniffBytes >= HTML_SNIFF_MIN_BYTES) {
+          sniffed = true
+          if (!looksLikeHtml(sniffSample)) {
+            throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+          }
+        }
+      }
       chunks.push(chunk)
+    }
+    if (options.requireHtmlSniff && !sniffed && !looksLikeHtml(sniffSample)) {
+      throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
     }
     completed = true
     return Buffer.concat(chunks).toString('utf8')
@@ -710,15 +755,13 @@ async function readBodyAsText(response: Response, options: ReadBodyOptions): Pro
   const { maxBytes, requireHtmlSniff = false, signal, deadlineAt, timeoutMs } = options
   const text = await readResponseBodyAsText(response, {
     maxBytes,
+    requireHtmlSniff,
     signal,
     deadlineAt,
     deadlineError: timeoutMs === undefined
       ? undefined
       : () => new AeoAuditError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`),
   })
-  if (requireHtmlSniff && !looksLikeHtml(text)) {
-    throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
-  }
   return text
 }
 
@@ -970,6 +1013,13 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
   const requireHtmlSniff = !htmlByHeader || isAmbiguousContentType(contentType)
 
   if (!htmlByHeader && !isAmbiguousContentType(contentType)) {
+    if (response.body) {
+      try {
+        void response.body.cancel().catch(() => {})
+      } catch {
+        // Best effort only; preserve the stable NOT_HTML error below.
+      }
+    }
     throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.', {
       details: { contentType },
     })
@@ -983,7 +1033,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
     timeoutMs: MAIN_TIMEOUT_MS,
   })
 
-  if (!looksLikeHtml(html)) {
+  if (!isHtmlResponse(contentType, html, true)) {
     throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.', {
       details: { contentType },
     })

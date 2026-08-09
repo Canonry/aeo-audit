@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { normalizeCrawlUrl, runSiteCrawl } from '../src/index.js'
 
-const html = (body: string, contentType = 'text/html') => new Response(body, {
+const html = (body: string, contentType = 'text/html') => new Response(`<!doctype html><html><body>${body}</body></html>`, {
   status: 200,
   headers: { 'content-type': contentType },
 })
@@ -258,6 +258,33 @@ describe('runSiteCrawl', () => {
     expect(pageEvents.flat()).toEqual(['https://example.test/'])
   })
 
+  test('admits the same redirect terminal at a page cap regardless of concurrent response order', async () => {
+    const run = async (delays: Record<string, number>) => {
+      vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+        const url = new URL(input)
+        if (url.pathname === '/robots.txt' || url.pathname === '/llms.txt' || url.pathname === '/llms-full.txt' || url.pathname === '/map.xml') {
+          return new Response('', { status: 404 })
+        }
+        if (url.pathname === '/') return html('<a href="/a">a</a><a href="/b">b</a>')
+        if (url.pathname === '/a') return new Response('', { status: 302, headers: { location: '/z' } })
+        if (url.pathname === '/b') return new Response('', { status: 302, headers: { location: '/c' } })
+        await new Promise((resolve) => setTimeout(resolve, delays[url.pathname] ?? 0))
+        return html('<p>terminal</p>')
+      }))
+      const report = await runSiteCrawl('https://example.test/', {
+        allowPrivateHost: 'example.test', sitemapUrl: 'https://example.test/map.xml', concurrency: 2, maxPages: 4,
+      })
+      if (report.mode !== 'full') throw new Error('expected full report')
+      return report.pages.map((page) => page.requestedUrl).sort()
+    }
+
+    const cFirst = await run({ '/c': 1, '/z': 30 })
+    const zFirst = await run({ '/c': 30, '/z': 1 })
+
+    expect(cFirst).toEqual(zFirst)
+    expect(cFirst).toContain('https://example.test/c')
+  })
+
   test('computes deterministic link scores and excludes nofollow paths from anchor depth', async () => {
     const handler = vi.fn(async (input: string) => {
       const url = new URL(input)
@@ -276,6 +303,39 @@ describe('runSiteCrawl', () => {
     expect(byPath(first, '/nofollow').metrics.shortestFollowableAnchorDepth).toBeNull()
     expect(byPath(first, '/orphan').metrics.shortestFollowableAnchorDepth).toBeNull()
     expect(first.pages.map((page) => [page.key, page.metrics.linkScoreRaw])).toEqual(second.pages.map((page) => [page.key, page.metrics.linkScoreRaw]))
+  })
+
+  test('indexes followable adjacency instead of rescanning the full graph for every BFS node', async () => {
+    const nodes = Array.from({ length: 20 }, (_, index) => `/node-${index}`)
+    const links = nodes.map((path) => `<a href="${path}">${path}</a>`).join('')
+    const expectedEdgeCount = nodes.length + nodes.length ** 2
+    let fullGraphFilters = 0
+    const originalFilter = Array.prototype.filter
+    const filterSpy = vi.spyOn(Array.prototype, 'filter').mockImplementation(function <T>(
+      this: T[],
+      predicate: (value: T, index: number, array: T[]) => unknown,
+      thisArg?: unknown,
+    ): T[] {
+      if (this.length === expectedEdgeCount) fullGraphFilters += 1
+      return originalFilter.call(this, predicate, thisArg)
+    })
+    try {
+      vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+        const url = new URL(input)
+        if (url.pathname === '/robots.txt' || url.pathname === '/llms.txt' || url.pathname === '/llms-full.txt' || url.pathname === '/map.xml') {
+          return new Response('', { status: 404 })
+        }
+        return html(url.pathname === '/' ? links : links)
+      }))
+      const report = await runSiteCrawl('https://example.test/', {
+        allowPrivateHost: 'example.test', sitemapUrl: 'https://example.test/map.xml', concurrency: nodes.length, maxPages: nodes.length + 1,
+      })
+      if (report.mode !== 'full') throw new Error('expected full report')
+      expect(report.pages).toHaveLength(nodes.length + 1)
+      expect(fullGraphFilters).toBeLessThanOrEqual(2)
+    } finally {
+      filterSpy.mockRestore()
+    }
   })
 
   test('applies page-level nofollow and keeps per-page link counts internal-only', async () => {

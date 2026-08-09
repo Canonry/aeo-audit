@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
 import { load } from 'cheerio'
 import { AeoAuditError, isAeoAuditError } from './errors.js'
-import { fetchWithValidatedRedirects, isCallerAbort, normalizeTargetUrl, readResponseBodyAsText, throwIfAborted } from './fetch-page.js'
+import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, normalizeTargetUrl, readResponseBodyAsText, throwIfAborted } from './fetch-page.js'
 import { assertValidFactorIds, auditHtmlPage } from './audit-html.js'
+import { RequestPacer } from './request-pacer.js'
 import { engineVersion } from './schema.js'
-import type { FetchBudgetController } from './fetch-page.js'
+import { parseSitemapXmlDocument } from './sitemap-xml.js'
+import type { FetchBudget } from './fetch-page.js'
 import type {
   CrawlAnchorSummary,
   CrawlDeadLinkFinding,
@@ -20,6 +22,7 @@ import type {
   CrawlProgress,
   CrawlSummary,
   CrawlTerminationReason,
+  CrawlWarning,
   FullSiteCrawlReport,
   RedirectHop,
   AuxiliaryResource,
@@ -39,7 +42,7 @@ import {
 
 const CRAWL_FETCH_TIMEOUT_MS = 10_000
 const MAX_ANCHOR_SUMMARIES = 5
-const TRACKING_PARAM = /^(?:utm_[^=]*|gclid|dclid|fbclid|msclkid|_ga(?:_.+)?|mc_[ce]id|ref|ref_|source|campaign)$/i
+const TRACKING_PARAM = /^(?:utm_[^=]*|gclid|dclid|fbclid|msclkid|_ga(?:_.+)?|mc_[ce]id)$/i
 
 interface FrontierItem {
   url: string
@@ -60,11 +63,7 @@ interface CrawlFetchResult {
 interface RobotsRules {
   rules: Array<{ allow: boolean; value: string }>
   sitemaps: string[]
-}
-
-interface SitemapDocument {
-  pages: string[]
-  children: string[]
+  crawlDelayMs: number | null
 }
 
 function hash(value: string): string {
@@ -142,10 +141,11 @@ function defaults(options: SiteCrawlOptions): SiteCrawlLimits {
     maxSitemapFanout: integer(options.maxSitemapFanout, DEFAULT_SITE_CRAWL_LIMITS.maxSitemapFanout),
     maxSitemapUrls: integer(options.maxSitemapUrls, DEFAULT_SITE_CRAWL_LIMITS.maxSitemapUrls),
     concurrency: integer(options.concurrency, DEFAULT_SITE_CRAWL_LIMITS.concurrency),
+    requestDelayMs: integer(options.requestDelayMs, DEFAULT_SITE_CRAWL_LIMITS.requestDelayMs, 0),
   }
 }
 
-class CrawlBudget {
+class CrawlBudget implements FetchBudget {
   readonly startedAt = Date.now()
   fetchesStarted = 0
   bytesRead = 0
@@ -195,7 +195,7 @@ function isBudgetError(error: unknown): boolean {
 }
 
 function isHardFetchStop(reason: CrawlTerminationReason | null): boolean {
-  return reason === 'max-fetches' || reason === 'max-duration' || reason === 'max-bytes'
+  return reason === 'max-fetches' || reason === 'max-duration' || reason === 'max-bytes' || reason === 'root-host-redirect'
 }
 
 function emptyMetrics(): CrawlPageMetrics {
@@ -219,7 +219,7 @@ function pathFields(url: string | null): { path: string | null; directory: strin
   }
 }
 
-function normaliseRobotsTokens(value: string | null): string[] {
+function normalizeRobotsTokens(value: string | null): string[] {
   return (value ?? '')
     .split(',')
     .flatMap((part) => part.trim().toLowerCase().split(/\s+/))
@@ -258,8 +258,8 @@ function deriveIndexability(input: {
 }
 
 function parseRobots(body: string, userAgent = 'ainyc-aeo-audit'): RobotsRules {
-  const groups: Array<{ agents: string[]; rules: Array<{ allow: boolean; value: string }> }> = []
-  let current: { agents: string[]; rules: Array<{ allow: boolean; value: string }> } | null = null
+  const groups: Array<{ agents: string[]; rules: Array<{ allow: boolean; value: string }>; crawlDelaysMs: number[] }> = []
+  let current: { agents: string[]; rules: Array<{ allow: boolean; value: string }>; crawlDelaysMs: number[] } | null = null
   const sitemaps: string[] = []
   for (const rawLine of body.split(/\r?\n/)) {
     const line = rawLine.replace(/#.*/, '').trim()
@@ -273,8 +273,8 @@ function parseRobots(body: string, userAgent = 'ainyc-aeo-audit'): RobotsRules {
       continue
     }
     if (name === 'user-agent') {
-      if (!current || current.rules.length > 0) {
-        current = { agents: [], rules: [] }
+      if (!current || current.rules.length > 0 || current.crawlDelaysMs.length > 0) {
+        current = { agents: [], rules: [], crawlDelaysMs: [] }
         groups.push(current)
       }
       current.agents.push(value.toLowerCase())
@@ -282,12 +282,24 @@ function parseRobots(body: string, userAgent = 'ainyc-aeo-audit'): RobotsRules {
     }
     if ((name === 'allow' || name === 'disallow') && current && value) {
       current.rules.push({ allow: name === 'allow', value })
+      continue
+    }
+    if (name === 'crawl-delay' && current) {
+      const seconds = Number(value)
+      const milliseconds = seconds * 1_000
+      if (Number.isFinite(milliseconds) && milliseconds >= 0) current.crawlDelaysMs.push(Math.ceil(milliseconds))
     }
   }
   const needle = userAgent.toLowerCase()
   const exact = groups.filter((group) => group.agents.some((agent) => agent && needle.includes(agent) && agent !== '*'))
   const wildcard = groups.filter((group) => group.agents.includes('*'))
-  return { rules: (exact.length ? exact : wildcard).flatMap((group) => group.rules), sitemaps }
+  const selected = exact.length ? exact : wildcard
+  const crawlDelaysMs = selected.flatMap((group) => group.crawlDelaysMs)
+  return {
+    rules: selected.flatMap((group) => group.rules),
+    sitemaps,
+    crawlDelayMs: crawlDelaysMs.length ? Math.max(...crawlDelaysMs) : null,
+  }
 }
 
 function robotsAllows(url: string, robots: RobotsRules): boolean {
@@ -305,41 +317,6 @@ function robotsAllows(url: string, robots: RobotsRules): boolean {
     }
   }
   return best?.allow ?? true
-}
-
-function parseSitemap(body: string): SitemapDocument {
-  const pages: string[] = []
-  const children: string[] = []
-  const urlBlock = /<url\b[^>]*>([\s\S]*?)<\/url>/gi
-  let match: RegExpExecArray | null
-  while ((match = urlBlock.exec(body)) !== null) {
-    const loc = match[1].match(/<loc\b[^>]*>([\s\S]*?)<\/loc>/i)?.[1]?.trim()
-    if (loc) pages.push(decodeXml(loc))
-  }
-  const sitemapBlock = /<sitemap\b[^>]*>([\s\S]*?)<\/sitemap>/gi
-  while ((match = sitemapBlock.exec(body)) !== null) {
-    const loc = match[1].match(/<loc\b[^>]*>([\s\S]*?)<\/loc>/i)?.[1]?.trim()
-    if (loc) children.push(decodeXml(loc))
-  }
-  return { pages, children }
-}
-
-function decodeXml(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&')
-}
-
-function looksLikeHtml(body: string): boolean {
-  const sample = body.slice(0, 4096).toLowerCase()
-  return sample.includes('<html') || sample.includes('<!doctype html') || sample.includes('<head') || sample.includes('<body')
-}
-
-function isHtml(contentType: string, body: string): boolean {
-  return /text\/html|application\/xhtml\+xml/i.test(contentType) || looksLikeHtml(body)
 }
 
 function collectLinks(html: string, from: string, limit: number): {
@@ -379,7 +356,7 @@ function collectLinks(html: string, from: string, limit: number): {
   return {
     links,
     canonicalUrl,
-    metaRobots: normaliseRobotsTokens($('meta[name="robots" i]').first().attr('content') ?? null),
+    metaRobots: normalizeRobotsTokens($('meta[name="robots" i]').first().attr('content') ?? null),
     truncated: total > limit,
   }
 }
@@ -417,6 +394,7 @@ async function fetchCrawlUrl(
   options: SiteCrawlOptions,
   budget: CrawlBudget,
   shouldFollowRedirect: (url: URL) => boolean,
+  beforeOutboundAttempt: () => Promise<void>,
 ): Promise<CrawlFetchResult> {
   const result = await fetchWithValidatedRedirects(requestedUrl, {
     timeoutMs: CRAWL_FETCH_TIMEOUT_MS,
@@ -424,14 +402,15 @@ async function fetchCrawlUrl(
     signal: options.signal,
     onOutboundAttempt: options.onOutboundAttempt,
     outboundAttemptKind: 'page',
-    budget: budget as unknown as FetchBudgetController,
+    budget,
     shouldFollowRedirect,
+    beforeOutboundAttempt,
   })
   const contentType = result.response.headers.get('content-type') ?? ''
   const body = result.response.status >= 400 || (result.response.status >= 300 && result.response.status < 400)
     ? ''
     : await readResponse(result.response, result.responseDeadlineAt, budget, budget.limits.maxPageBytes, options.signal)
-  if (result.response.status >= 300 && result.response.status < 400) {
+  if (result.response.status >= 300) {
     if (result.response.body) void result.response.body.cancel().catch(() => {})
   }
   return {
@@ -469,6 +448,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   const mode = options.summaryOnly ? 'summary' : options.mode ?? 'full'
   const startedAt = new Date().toISOString()
   const budget = new CrawlBudget(limits)
+  const pacer = new RequestPacer({ delayMs: limits.requestDelayMs })
   const rootUrl = normalizeCrawlUrl(rawUrl)
   const root = new URL(rootUrl)
   const allowedHost = hostBoundary(root)
@@ -485,15 +465,33 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   const queued = new Set<string>()
   const processed = new Set<string>()
   const queryVariants = new Map<string, Set<string>>()
+  const warnings: CrawlWarning[] = []
+  let robotsCrawlDelayMs: number | null = null
   let deferredLinkDiscoveries: Array<{
     url: string
     depth: number
     source: { from?: string; sitemap?: string; root?: boolean }
   }> | null = null
+  let deferredRedirectTerminals: Array<{
+    item: FrontierItem
+    fetched: CrawlFetchResult
+    provenance: CrawlDiscoveryProvenance
+  }> | null = null
   let sequence = 0
   let finalRootUrl: string | null = null
 
   const isAllowed = (url: URL): boolean => hostBoundary(url) === allowedHost
+  const paceRequest = async (): Promise<void> => {
+    await pacer.wait({
+      signal: options.signal,
+      deadlineAt: budget.startedAt + limits.maxDurationMs,
+      deadlineError: () => budget.durationExceededError(),
+    })
+  }
+  const addWarning = (warning: CrawlWarning): void => {
+    if (warnings.some((existing) => existing.code === warning.code && existing.from === warning.from && existing.to === warning.to)) return
+    warnings.push(warning)
+  }
   const provenanceFor = (url: string): CrawlDiscoveryProvenance => {
     const existing = discoveries.get(url)
     if (existing) return existing
@@ -697,8 +695,9 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         signal: options.signal,
         onOutboundAttempt: options.onOutboundAttempt,
         outboundAttemptKind: kind,
-        budget: budget as unknown as FetchBudgetController,
+        budget,
         shouldFollowRedirect: isAllowed,
+        beforeOutboundAttempt: paceRequest,
       })
       const contentType = result.response.headers.get('content-type') ?? ''
       const body = result.response.ok
@@ -736,12 +735,29 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     }
   }
   const globalAuxiliary: AuxiliaryResources = {}
-  let robots: RobotsRules = { rules: [], sitemaps: [] }
+  let robots: RobotsRules = { rules: [], sitemaps: [], crawlDelayMs: null }
   const robotsUrl = new URL('/robots.txt', root).toString()
   try {
     const robotsResult = await safeAuxFetch(robotsUrl, 'robots')
     globalAuxiliary.robotsTxt = auxiliaryResource(robotsResult, robotsUrl)
-    if (robotsResult?.response.ok) robots = parseRobots(robotsResult.body)
+    if (robotsResult?.response.ok) {
+      robots = parseRobots(robotsResult.body)
+      robotsCrawlDelayMs = robots.crawlDelayMs
+      if (options.respectRobots !== false && robotsCrawlDelayMs !== null) {
+        pacer.delayMs = Math.max(limits.requestDelayMs, robotsCrawlDelayMs)
+        pacer.applyDelaySinceLastGrant()
+      }
+    } else if (robotsResult?.redirectChain.length) {
+      const lastHop = robotsResult.redirectChain.at(-1)!
+      if (!isAllowed(new URL(lastHop.to))) {
+        addWarning({
+          code: 'robots-host-redirect',
+          message: 'robots.txt redirected outside the exact crawl host; its rules were not followed or applied.',
+          from: normalizeCrawlUrl(lastHop.from),
+          to: normalizeCrawlUrl(lastHop.to),
+        })
+      }
+    }
   } catch (error) {
     if (isCallerAbort(error, options.signal)) throw error
     if (!isBudgetError(error)) throw error
@@ -801,10 +817,13 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     if (!globalAuxiliary.sitemapXml || globalAuxiliary.sitemapXml.state !== 'ok') {
       globalAuxiliary.sitemapXml = auxiliaryResource(sitemap, sitemapUrl)
     }
-    const document = parseSitemap(sitemap.body)
+    const document = parseSitemapXmlDocument(sitemap.body)
     if (document.children.length > limits.maxSitemapFanout) budget.stop('max-sitemap-fanout')
-    for (const child of document.children.slice(0, limits.maxSitemapFanout).sort()) addSitemap(child, sitemap.finalUrl)
-    for (const pageUrl of document.pages.sort()) {
+    for (const child of document.children
+      .slice(0, limits.maxSitemapFanout)
+      .sort((left, right) => left.loc.localeCompare(right.loc))) addSitemap(child.loc, sitemap.finalUrl)
+    for (const page of document.pages.sort((left, right) => left.loc.localeCompare(right.loc))) {
+      const pageUrl = page.loc
       try {
         const normalized = normalizeCrawlUrl(pageUrl, sitemap.finalUrl)
         if (isAllowed(new URL(normalized))) {
@@ -826,6 +845,142 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
 
   if (!globalAuxiliary.sitemapXml) {
     globalAuxiliary.sitemapXml = auxiliaryResource(null, new URL('/sitemap.xml', root).toString())
+  }
+
+  const processTerminal = async (
+    item: FrontierItem,
+    fetched: CrawlFetchResult,
+    provenance: CrawlDiscoveryProvenance,
+  ): Promise<void> => {
+    const requestedFinal = fetched.finalUrl
+    const terminalAlreadyScheduled = requestedFinal !== item.url
+      && (processed.has(requestedFinal) || queued.has(requestedFinal) || admittedPageUrls.has(requestedFinal))
+    // Prefer the target's exact frontier item when it already exists. The alias
+    // request necessarily fetched the terminal body to resolve its redirect, but
+    // parsing it again would duplicate every target edge and analyzer result.
+    if (terminalAlreadyScheduled) {
+      mergeProvenance(requestedFinal, provenance)
+      return
+    }
+    if (requestedFinal !== item.url && admittedPageUrls.size >= limits.maxPages) {
+      budget.stop('max-pages')
+      return
+    }
+    const finalProvenance = mergeProvenance(requestedFinal, provenance)
+    admittedPageUrls.add(requestedFinal)
+    processed.add(requestedFinal)
+    queued.delete(requestedFinal)
+
+    const headersRobots = normalizeRobotsTokens(fetched.headers['x-robots-tag'] ?? null)
+    if (fetched.response.status >= 400) {
+      await recordPage(createObservation({
+        requestedUrl: requestedFinal,
+        finalUrl: requestedFinal,
+        state: 'fetch-error',
+        depth: item.depth,
+        provenance: finalProvenance,
+        statusCode: fetched.response.status,
+        contentType: fetched.contentType || null,
+        redirectChain: fetched.redirectChain,
+        canonicalUrl: null,
+        metaRobots: [],
+        xRobots: headersRobots,
+        ...pathFields(requestedFinal),
+        indexability: deriveIndexability({ state: 'fetch-error', metaRobots: [], xRobots: headersRobots }),
+        audit: null,
+        error: `HTTP ${fetched.response.status}`,
+      }))
+      return
+    }
+    if (!isHtmlResponse(fetched.contentType, fetched.body)) {
+      await recordPage(createObservation({
+        requestedUrl: requestedFinal,
+        finalUrl: requestedFinal,
+        state: 'non-html',
+        depth: item.depth,
+        provenance: finalProvenance,
+        statusCode: fetched.response.status,
+        contentType: fetched.contentType || null,
+        redirectChain: fetched.redirectChain,
+        canonicalUrl: null,
+        metaRobots: [],
+        xRobots: headersRobots,
+        ...pathFields(requestedFinal),
+        indexability: deriveIndexability({ state: 'non-html', metaRobots: [], xRobots: headersRobots }),
+        audit: null,
+        error: null,
+      }))
+      return
+    }
+
+    const parsed = collectLinks(fetched.body, requestedFinal, limits.maxLinksPerPage)
+    if (parsed.truncated) budget.stop('max-links-per-page')
+    let audit = null
+    let analyzerError: string | null = null
+    try {
+      audit = await auditHtmlPage({
+        inputUrl: requestedFinal,
+        finalUrl: requestedFinal,
+        html: fetched.body,
+        headers: fetched.headers,
+        redirectChain: fetched.redirectChain,
+        auxiliary: globalAuxiliary,
+        fetchTimeMs: 0,
+      }, {
+        factors: options.factors,
+        includeGeo: options.includeGeo,
+        includeAgentSkills: options.includeAgentSkills,
+        includeLighthouse: options.includeLighthouse,
+      })
+    } catch (error) {
+      // An analyzer failure must not discard the fetched crawl observation.
+      if (isCallerAbort(error, options.signal)) throw error
+      const message = error instanceof Error ? error.message : String(error)
+      analyzerError = `Analyzer failed: ${message}`
+    }
+    const page = await recordPage(createObservation({
+      requestedUrl: requestedFinal,
+      finalUrl: requestedFinal,
+      state: 'html',
+      depth: item.depth,
+      provenance: finalProvenance,
+      statusCode: fetched.response.status,
+      contentType: fetched.contentType || null,
+      redirectChain: fetched.redirectChain,
+      canonicalUrl: parsed.canonicalUrl,
+      metaRobots: parsed.metaRobots,
+      xRobots: headersRobots,
+      ...pathFields(requestedFinal),
+      indexability: deriveIndexability({
+        state: 'html',
+        metaRobots: parsed.metaRobots,
+        xRobots: headersRobots,
+        pageUrl: requestedFinal,
+        canonicalUrl: parsed.canonicalUrl,
+      }),
+      audit,
+      error: analyzerError,
+    }))
+    const pageNofollow = parsed.metaRobots.includes('nofollow')
+      || parsed.metaRobots.includes('none')
+      || headersRobots.includes('nofollow')
+      || headersRobots.includes('none')
+
+    if (parsed.canonicalUrl) {
+      await recordEdge({
+        from: page.finalUrl!,
+        to: parsed.canonicalUrl,
+        type: 'canonical',
+        classification: isAllowed(new URL(parsed.canonicalUrl)) ? 'internal' : 'external',
+      })
+    }
+    for (const link of parsed.links) {
+      const classification: CrawlEdgeClassification = isAllowed(new URL(link.to)) ? 'internal' : 'external'
+      await recordEdge({ from: page.finalUrl!, to: link.to, type: 'anchor', classification, nofollow: link.nofollow || pageNofollow, text: link.text })
+      if (classification === 'internal') {
+        await markDiscovered(link.to, item.depth + 1, { from: page.finalUrl! })
+      }
+    }
   }
 
   const processItem = async (item: FrontierItem): Promise<void> => {
@@ -856,7 +1011,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
 
     let fetched: CrawlFetchResult
     try {
-      fetched = await fetchCrawlUrl(item.url, options, budget, isAllowed)
+      fetched = await fetchCrawlUrl(item.url, options, budget, isAllowed, paceRequest)
     } catch (error) {
       if (isCallerAbort(error, options.signal)) throw error
       if (isBudgetError(error)) return
@@ -904,139 +1059,35 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         audit: null,
         error: null,
       }))
-      if (item.url === rootUrl) finalRootUrl = fetched.finalUrl
+      if (item.url === rootUrl) {
+        const lastHop = fetched.redirectChain.at(-1)!
+        if (!isAllowed(new URL(lastHop.to))) {
+          const from = normalizeCrawlUrl(lastHop.from)
+          const to = normalizeCrawlUrl(lastHop.to)
+          finalRootUrl = to
+          addWarning({
+            code: 'root-host-redirect',
+            message: 'The root redirected outside the exact crawl host; the target was recorded but not followed.',
+            from,
+            to,
+          })
+          budget.stop('root-host-redirect')
+        } else {
+          finalRootUrl = fetched.finalUrl
+        }
+      }
       if (fetched.response.status >= 300 && fetched.response.status < 400) {
         return
       }
     }
 
     const requestedFinal = fetched.finalUrl
-    const terminalAlreadyScheduled = requestedFinal !== item.url
-      && (processed.has(requestedFinal) || queued.has(requestedFinal) || admittedPageUrls.has(requestedFinal))
     if (item.url === rootUrl) finalRootUrl = requestedFinal
-    // Prefer the target's exact frontier item when it already exists. The alias
-    // request necessarily fetched the terminal body to resolve its redirect, but
-    // parsing it again would duplicate every target edge and analyzer result.
-    if (terminalAlreadyScheduled) {
-      mergeProvenance(requestedFinal, provenance)
+    if (requestedFinal !== item.url && deferredRedirectTerminals) {
+      deferredRedirectTerminals.push({ item, fetched, provenance })
       return
     }
-    if (requestedFinal !== item.url && admittedPageUrls.size >= limits.maxPages) {
-      budget.stop('max-pages')
-      return
-    }
-    const finalProvenance = mergeProvenance(requestedFinal, provenance)
-    admittedPageUrls.add(requestedFinal)
-    processed.add(requestedFinal)
-    queued.delete(requestedFinal)
-
-    const headersRobots = normaliseRobotsTokens(fetched.headers['x-robots-tag'] ?? null)
-    if (fetched.response.status >= 400) {
-      await recordPage(createObservation({
-        requestedUrl: requestedFinal,
-        finalUrl: requestedFinal,
-        state: 'fetch-error',
-        depth: item.depth,
-        provenance: finalProvenance,
-        statusCode: fetched.response.status,
-        contentType: fetched.contentType || null,
-        redirectChain: fetched.redirectChain,
-        canonicalUrl: null,
-        metaRobots: [],
-        xRobots: headersRobots,
-        ...pathFields(requestedFinal),
-        indexability: deriveIndexability({ state: 'fetch-error', metaRobots: [], xRobots: headersRobots }),
-        audit: null,
-        error: `HTTP ${fetched.response.status}`,
-      }))
-      return
-    }
-    if (!isHtml(fetched.contentType, fetched.body)) {
-      await recordPage(createObservation({
-        requestedUrl: requestedFinal,
-        finalUrl: requestedFinal,
-        state: 'non-html',
-        depth: item.depth,
-        provenance: finalProvenance,
-        statusCode: fetched.response.status,
-        contentType: fetched.contentType || null,
-        redirectChain: fetched.redirectChain,
-        canonicalUrl: null,
-        metaRobots: [],
-        xRobots: headersRobots,
-        ...pathFields(requestedFinal),
-        indexability: deriveIndexability({ state: 'non-html', metaRobots: [], xRobots: headersRobots }),
-        audit: null,
-        error: null,
-      }))
-      return
-    }
-
-    const parsed = collectLinks(fetched.body, requestedFinal, limits.maxLinksPerPage)
-    if (parsed.truncated) budget.stop('max-links-per-page')
-    let audit = null
-    try {
-      audit = await auditHtmlPage({
-        inputUrl: requestedFinal,
-        finalUrl: requestedFinal,
-        html: fetched.body,
-        headers: fetched.headers,
-        redirectChain: fetched.redirectChain,
-        auxiliary: globalAuxiliary,
-        fetchTimeMs: 0,
-      }, {
-        factors: options.factors,
-        includeGeo: options.includeGeo,
-        includeAgentSkills: options.includeAgentSkills,
-        includeLighthouse: options.includeLighthouse,
-      })
-    } catch (error) {
-      // An analyzer failure must not discard the fetched crawl observation.
-      if (isCallerAbort(error, options.signal)) throw error
-    }
-    const page = await recordPage(createObservation({
-      requestedUrl: requestedFinal,
-      finalUrl: requestedFinal,
-      state: 'html',
-      depth: item.depth,
-      provenance: finalProvenance,
-      statusCode: fetched.response.status,
-      contentType: fetched.contentType || null,
-      redirectChain: fetched.redirectChain,
-      canonicalUrl: parsed.canonicalUrl,
-      metaRobots: parsed.metaRobots,
-      xRobots: headersRobots,
-      ...pathFields(requestedFinal),
-      indexability: deriveIndexability({
-        state: 'html',
-        metaRobots: parsed.metaRobots,
-        xRobots: headersRobots,
-        pageUrl: requestedFinal,
-        canonicalUrl: parsed.canonicalUrl,
-      }),
-      audit,
-      error: null,
-    }))
-    const pageNofollow = parsed.metaRobots.includes('nofollow')
-      || parsed.metaRobots.includes('none')
-      || headersRobots.includes('nofollow')
-      || headersRobots.includes('none')
-
-    if (parsed.canonicalUrl) {
-      await recordEdge({
-        from: page.finalUrl!,
-        to: parsed.canonicalUrl,
-        type: 'canonical',
-        classification: isAllowed(new URL(parsed.canonicalUrl)) ? 'internal' : 'external',
-      })
-    }
-    for (const link of parsed.links) {
-      const classification: CrawlEdgeClassification = isAllowed(new URL(link.to)) ? 'internal' : 'external'
-      await recordEdge({ from: page.finalUrl!, to: link.to, type: 'anchor', classification, nofollow: link.nofollow || pageNofollow, text: link.text })
-      if (classification === 'internal') {
-        await markDiscovered(link.to, item.depth + 1, { from: page.finalUrl! })
-      }
-    }
+    await processTerminal(item, fetched, provenance)
   }
 
   const drainFrontier = async (): Promise<void> => {
@@ -1048,7 +1099,17 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         : frontier.splice(0, limits.concurrency).sort((left, right) => left.url.localeCompare(right.url))
       for (const item of batch) queued.delete(item.url)
       deferredLinkDiscoveries = []
+      deferredRedirectTerminals = []
       await Promise.all(batch.map(processItem))
+      const terminalsInBatch = deferredRedirectTerminals
+      deferredRedirectTerminals = null
+      terminalsInBatch.sort((left, right) => (
+        left.fetched.finalUrl.localeCompare(right.fetched.finalUrl)
+        || left.item.url.localeCompare(right.item.url)
+      ))
+      for (const terminal of terminalsInBatch) {
+        await processTerminal(terminal.item, terminal.fetched, terminal.provenance)
+      }
       const discoveredInBatch = deferredLinkDiscoveries
       deferredLinkDiscoveries = null
       discoveredInBatch.sort((left, right) => (
@@ -1114,6 +1175,14 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     fetchesStarted: budget.fetchesStarted,
     elapsedMs: Date.now() - budget.startedAt,
     limits,
+    warnings: [...warnings].sort((left, right) => (
+      left.code.localeCompare(right.code) || left.from.localeCompare(right.from) || left.to.localeCompare(right.to)
+    )),
+    pacing: {
+      requestedDelayMs: limits.requestDelayMs,
+      robotsCrawlDelayMs,
+      effectiveDelayMs: pacer.delayMs,
+    },
     auditRollup: {
       auditedPages: auditedPages.length,
       aggregateScore: auditedPages.length
@@ -1147,6 +1216,13 @@ function deriveMetrics(pages: CrawlPageObservation[], edges: CrawlEdgeObservatio
     }
   }
   const followable = edges.filter((edge) => edge.type === 'anchor' && edge.classification === 'internal' && edge.followableOccurrences > 0)
+  const followableByFrom = new Map<string, CrawlEdgeObservation[]>()
+  for (const edge of followable) {
+    const outgoing = followableByFrom.get(edge.from)
+    if (outgoing) outgoing.push(edge)
+    else followableByFrom.set(edge.from, [edge])
+  }
+  for (const outgoing of followableByFrom.values()) outgoing.sort(edgeSort)
   for (const edge of edges.filter((entry) => entry.type === 'anchor' && entry.classification === 'internal')) {
     const from = pagesByUrl.get(edge.from)
     const to = pagesByUrl.get(edge.to)
@@ -1162,10 +1238,11 @@ function deriveMetrics(pages: CrawlPageObservation[], edges: CrawlEdgeObservatio
   if (finalRootUrl && pagesByUrl.has(finalRootUrl)) {
     const distances = new Map<string, number>([[finalRootUrl, 0]])
     const queue = [finalRootUrl]
-    while (queue.length) {
-      const from = queue.shift()!
+    let queueIndex = 0
+    while (queueIndex < queue.length) {
+      const from = queue[queueIndex++]!
       const depth = distances.get(from)!
-      for (const edge of followable.filter((entry) => entry.from === from).sort(edgeSort)) {
+      for (const edge of followableByFrom.get(from) ?? []) {
         if (!distances.has(edge.to)) {
           distances.set(edge.to, depth + 1)
           queue.push(edge.to)

@@ -33,6 +33,7 @@ import {
   type SitemapAuditPartialReason,
   type SitemapAuditReport,
   type CrawlEvent,
+  type CrawlWarning,
   type SiteCrawlOptions,
   type SiteCrawlReport,
 } from '@canonry/aeo-audit'
@@ -64,8 +65,15 @@ const crawlOptions: SiteCrawlOptions = {
   ...auditOptions,
   sitemapUrl: 'https://example.com/custom-sitemap.xml',
   maxPages: 100,
+  requestDelayMs: 20,
   checkDeadLinks: false,
   onEvent: (event: CrawlEvent) => { event.sequence satisfies number },
+}
+const warning: CrawlWarning = {
+  code: 'root-host-redirect',
+  message: 'root moved hosts',
+  from: 'https://example.com/',
+  to: 'https://www.example.com/',
 }
 const budget: SitemapAuditBudgetMetadata = {
   maxFetches: 10,
@@ -87,6 +95,7 @@ void runAeoAudit
 void runSitemapAudit
 void runSiteCrawl
 void crawlOptions
+void warning
 void CRAWL_SCHEMA_VERSION
 void engineVersion
 void isAeoAuditError

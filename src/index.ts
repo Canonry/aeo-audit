@@ -59,6 +59,7 @@ export type {
   CrawlProgress,
   CrawlSummary,
   CrawlTerminationReason,
+  CrawlWarning,
   FullSiteCrawlReport,
   SiteCrawlEventHandler,
   SiteCrawlLimits,

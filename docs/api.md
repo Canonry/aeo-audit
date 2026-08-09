@@ -31,7 +31,7 @@ console.log(report.factors)      // Array of factor results with scores, finding
 `runSiteCrawl` starts with the root URL, recursive sitemaps, and sitemap directives from `robots.txt`. It then follows normalized internal HTML links.
 
 The result includes every discoverable URL within the limits. It cannot find a URL that has no link, sitemap entry, or known seed.
-The v1 crawl boundary is the root URL's exact host (including any non-default port). Cross-host links and redirects are recorded but never followed.
+The crawl boundary is the root URL's exact host (including any non-default port). Cross-host links and redirects are recorded but never followed. If the root redirects to another host, the result is explicitly partial with `terminationReason: 'root-host-redirect'`; callers should restart with `finalRootUrl` after confirming that host is intended. An off-host `robots.txt` redirect is not followed and appears in `summary.warnings`.
 
 ```ts
 import { runSiteCrawl } from '@canonry/aeo-audit'
@@ -41,6 +41,7 @@ const report = await runSiteCrawl('https://example.com', {
   maxPages: 5_000,
   maxEdges: 250_000,
   maxDepth: 20,
+  requestDelayMs: 0,        // Minimum spacing between request starts
   checkDeadLinks: false,
   onEvent: async (event) => {
     await saveCheckpoint(event)
@@ -49,6 +50,8 @@ const report = await runSiteCrawl('https://example.com', {
 
 console.log(report.summary.complete)
 console.log(report.summary.terminationReason)
+console.log(report.summary.pacing)
+console.log(report.summary.warnings)
 console.log(report.deadLinks.state) // 'disabled'
 ```
 
@@ -56,7 +59,9 @@ The event handler receives bounded page, edge, progress, metric, and summary bat
 
 `checkDeadLinks` is false by default. If it is true, the engine reports failed internal targets that the crawl already observed.
 
-The engine never fetches an external link for dead-link analysis. A false `summary.complete` value means that a declared crawl limit stopped discovery.
+The engine never fetches an external link for dead-link analysis. Robots rules match the normalized URL that the crawler actually requests. With robots enabled, a valid `Crawl-delay` raises the effective delay above `requestDelayMs`; waits remain abortable and bounded by `maxDurationMs`.
+
+A false `summary.complete` value means that a declared crawl limit or the exact-host root boundary stopped discovery.
 
 Use `mode: 'full'` for a returned `pages` and `edges` graph. Use summary mode when the event handler stores the graph.
 

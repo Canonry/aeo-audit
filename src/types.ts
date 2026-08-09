@@ -611,10 +611,10 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
 /* ── Full site crawl types ── */
 
 /** A report-shape version owned by the crawl engine, independent from `SCHEMA_VERSION`. */
-export const CRAWL_SCHEMA_VERSION = '1.0'
+export const CRAWL_SCHEMA_VERSION = '1.1'
 /** Version identifiers let persisted checkpoints detect changes in crawl semantics. */
-export const CRAWL_ENGINE_VERSION = '1.0.0'
-export const CRAWL_URL_NORMALIZATION_VERSION = '1.0.0'
+export const CRAWL_ENGINE_VERSION = '1.1.0'
+export const CRAWL_URL_NORMALIZATION_VERSION = '1.1.0'
 export const CRAWL_INDEXABILITY_RULESET_VERSION = '1.0.0'
 export const CRAWL_LINK_SCORE_ALGORITHM_VERSION = 'pagerank-1.0.0'
 
@@ -631,6 +631,8 @@ export interface SiteCrawlLimits {
   maxSitemapFanout: number
   maxSitemapUrls: number
   concurrency: number
+  /** Minimum delay between outbound request starts. Robots may raise the effective delay. */
+  requestDelayMs: number
 }
 
 /** Safe defaults for an untrusted public site. Every value may be tightened by callers. */
@@ -647,6 +649,7 @@ export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = {
   maxSitemapFanout: 1_000,
   maxSitemapUrls: 50_000,
   concurrency: 5,
+  requestDelayMs: 0,
 }
 
 export type CrawlTerminationReason =
@@ -661,6 +664,21 @@ export type CrawlTerminationReason =
   | 'max-query-variants'
   | 'max-sitemap-fanout'
   | 'max-sitemap-urls'
+  | 'root-host-redirect'
+
+export type CrawlWarning =
+  | {
+    code: 'root-host-redirect'
+    message: string
+    from: string
+    to: string
+  }
+  | {
+    code: 'robots-host-redirect'
+    message: string
+    from: string
+    to: string
+  }
 
 export type CrawlPageState = 'discovered' | 'robots-blocked' | 'html' | 'redirect' | 'non-html' | 'fetch-error'
 export type CrawlEdgeType = 'anchor' | 'redirect' | 'canonical'
@@ -768,6 +786,12 @@ export interface CrawlSummary {
   fetchesStarted: number
   elapsedMs: number
   limits: SiteCrawlLimits
+  warnings: CrawlWarning[]
+  pacing: {
+    requestedDelayMs: number
+    robotsCrawlDelayMs: number | null
+    effectiveDelayMs: number
+  }
   /** Stream-aggregateable audit results retained even in summary-only mode. */
   auditRollup: {
     auditedPages: number
@@ -825,6 +849,8 @@ export interface SiteCrawlOptions extends RunAeoAuditOptions {
   maxSitemapFanout?: number
   maxSitemapUrls?: number
   concurrency?: number
+  /** Minimum delay between all outbound request starts, including redirect hops. Defaults to 0. */
+  requestDelayMs?: number
   /** Awaited after each checkpoint-safe observed/derived batch. */
   onEvent?: SiteCrawlEventHandler
 }

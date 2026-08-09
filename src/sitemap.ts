@@ -9,6 +9,7 @@ import {
   readResponseBodyAsText,
   throwIfAborted,
 } from './fetch-page.js'
+import { parseSitemapXmlDocument, type SitemapXmlEntry } from './sitemap-xml.js'
 import { runAeoAudit } from './index.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { PAGE_SPECIFIC_FACTOR_IDS, PAGE_SPECIFIC_PRESENT_THRESHOLD } from './scoring.js'
@@ -98,69 +99,11 @@ export function rewriteLocOrigin(loc: string, targetOrigin: string): string {
   }
 }
 
-interface SitemapEntry {
-  loc: string
-  priority?: number
-}
-
-/**
- * Decode the five predefined XML entities plus numeric character references in a
- * `<loc>` value. Per the sitemaps.org spec (#escaping), a `&` inside a URL MUST be
- * written `&amp;`, so a spec-compliant `<loc>` with a multi-param query string
- * (`?type=pages&amp;page=1`) arrives entity-escaped. Without decoding, the fetcher
- * requests the literal `...&amp;...`, which the origin treats as a different
- * request — on a sitemap index every child fetch then fails and the audit returns
- * zero URLs (issue #50). `&amp;` is replaced LAST so `&amp;lt;` decodes to the
- * literal `&lt;`, not `<`. Out-of-range numeric refs are left untouched rather than
- * throwing, so a malformed sitemap never aborts the whole audit.
- */
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (match, dec) => codePointToChar(Number(dec), match))
-    .replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => codePointToChar(parseInt(hex, 16), match))
-    .replace(/&amp;/g, '&')
-}
-
-function codePointToChar(codePoint: number, original: string): string {
-  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
-    ? String.fromCodePoint(codePoint)
-    : original
-}
+type SitemapEntry = SitemapXmlEntry
 
 function parseSitemapXml(xml: string): SitemapEntry[] {
-  const entries: SitemapEntry[] = []
-
-  // Extract <loc> elements and optional <priority> from <url> blocks
-  const urlBlockRe = /<url\b[^>]*>([\s\S]*?)<\/url>/gi
-  let urlMatch
-  while ((urlMatch = urlBlockRe.exec(xml)) !== null) {
-    const block = urlMatch[1]
-    const locMatch = block.match(/<loc\b[^>]*>([\s\S]*?)<\/loc>/i)
-    if (!locMatch) continue
-
-    const loc = decodeXmlEntities(locMatch[1].trim())
-    if (!loc) continue
-
-    const priorityMatch = block.match(/<priority\b[^>]*>([\s\S]*?)<\/priority>/i)
-    const priority = priorityMatch ? parseFloat(priorityMatch[1].trim()) : undefined
-
-    entries.push({ loc, priority: Number.isFinite(priority) ? priority : undefined })
-  }
-
-  // Handle sitemap index files — extract nested sitemap URLs
-  if (entries.length === 0) {
-    const sitemapLocRe = /<sitemap\b[^>]*>[\s\S]*?<loc\b[^>]*>([\s\S]*?)<\/loc>[\s\S]*?<\/sitemap>/gi
-    let sitemapMatch
-    while ((sitemapMatch = sitemapLocRe.exec(xml)) !== null) {
-      entries.push({ loc: decodeXmlEntities(sitemapMatch[1].trim()) })
-    }
-  }
-
-  return entries
+  const document = parseSitemapXmlDocument(xml)
+  return document.pages.length ? document.pages : document.children
 }
 
 interface SitemapFetchResult {
