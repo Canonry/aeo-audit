@@ -21,17 +21,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Check for package identity change
         id: version
         env:
+          BEFORE_SHA: ${{ github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          BASE=$(git log --pretty=format:'%H' -1 HEAD^ 2>/dev/null || echo "")
+          BASE="$BEFORE_SHA"
+          if [ "$EVENT_NAME" != "push" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE=$(git rev-parse HEAD^ 2>/dev/null || echo "")
+          fi
           PREV_ID=$(git show "$BASE":package.json 2>/dev/null | node -p "const p = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); p.name + '@' + p.version" 2>/dev/null || echo "")
           CURR_ID=$(node -p "const p = require('./package.json'); p.name + '@' + p.version")
           CURR_VERSION=$(node -p "require('./package.json').version")
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$PREV_ID" != "$CURR_ID" ]; then
+          WORKFLOW_CHANGED=false
+          if [ -n "$BASE" ] && ! git diff --quiet "$BASE" HEAD -- .github/workflows/publish.yml; then
+            WORKFLOW_CHANGED=true
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$PREV_ID" != "$CURR_ID" ] || [ "$WORKFLOW_CHANGED" = "true" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
           else
@@ -93,7 +101,18 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           LOCAL_INTEGRITY=$(node -e "const { createHash } = require('node:crypto'); const { readFileSync } = require('node:fs'); console.log('sha512-' + createHash('sha512').update(readFileSync('release/package.tgz')).digest('base64'))")
-          REMOTE_INTEGRITY=$(npm view "@ainyc/aeo-audit@$VERSION" dist.integrity --registry=https://registry.npmjs.org 2>/dev/null || true)
+          set +e
+          REGISTRY_RESULT=$(npm view "@ainyc/aeo-audit@$VERSION" dist.integrity --registry=https://registry.npmjs.org 2>&1)
+          REGISTRY_STATUS=$?
+          set -e
+          if [ "$REGISTRY_STATUS" -eq 0 ]; then
+            REMOTE_INTEGRITY="$REGISTRY_RESULT"
+          elif printf '%s\n' "$REGISTRY_RESULT" | grep -q 'E404'; then
+            REMOTE_INTEGRITY=""
+          else
+            printf '%s\n' "$REGISTRY_RESULT" >&2
+            exit "$REGISTRY_STATUS"
+          fi
           if [ -n "$REMOTE_INTEGRITY" ]; then
             if [ "$REMOTE_INTEGRITY" != "$LOCAL_INTEGRITY" ]; then
               echo "Registry artifact does not match release/package.tgz" >&2

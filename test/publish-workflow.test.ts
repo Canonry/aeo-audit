@@ -56,8 +56,23 @@ describe('release workflow', () => {
 
   it('allows an explicit manual retry without changing package identity', () => {
     expect(workflow).toContain('EVENT_NAME: ${{ github.event_name }}')
+    expect(workflow).toContain('"$EVENT_NAME" = "workflow_dispatch"')
+  })
+
+  it('retries after a release-workflow fix without changing package identity', () => {
+    expect(workflow).toContain('fetch-depth: 0')
+    expect(workflow).toContain('BEFORE_SHA: ${{ github.event.before }}')
+    expect(workflow).toContain('BASE="$BEFORE_SHA"')
     expect(workflow).toContain(
-      'if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$PREV_ID" != "$CURR_ID" ]; then',
+      'git diff --quiet "$BASE" HEAD -- .github/workflows/publish.yml',
     )
+    expect(workflow).toContain('"$WORKFLOW_CHANGED" = "true"')
+  })
+
+  it('treats only an explicit registry 404 as an unpublished version', () => {
+    expect(workflow).toContain('REGISTRY_STATUS=$?')
+    expect(workflow).toContain("grep -q 'E404'")
+    expect(workflow).toContain('exit "$REGISTRY_STATUS"')
+    expect(workflow).not.toMatch(/npm view .*\|\| true/)
   })
 })
