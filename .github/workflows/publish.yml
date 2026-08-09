@@ -24,12 +24,14 @@ jobs:
           fetch-depth: 2
       - name: Check for package identity change
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           BASE=$(git log --pretty=format:'%H' -1 HEAD^ 2>/dev/null || echo "")
           PREV_ID=$(git show "$BASE":package.json 2>/dev/null | node -p "const p = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); p.name + '@' + p.version" 2>/dev/null || echo "")
           CURR_ID=$(node -p "const p = require('./package.json'); p.name + '@' + p.version")
           CURR_VERSION=$(node -p "require('./package.json').version")
-          if [ "$PREV_ID" != "$CURR_ID" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$PREV_ID" != "$CURR_ID" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
           else

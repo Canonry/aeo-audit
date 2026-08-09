@@ -51,6 +51,13 @@ describe('release workflow', () => {
 
   it('publishes when either the package name or version changes', () => {
     expect(workflow).toContain("p.name + '@' + p.version")
-    expect(workflow).toContain('if [ "$PREV_ID" != "$CURR_ID" ]; then')
+    expect(workflow).toContain('"$PREV_ID" != "$CURR_ID"')
+  })
+
+  it('allows an explicit manual retry without changing package identity', () => {
+    expect(workflow).toContain('EVENT_NAME: ${{ github.event_name }}')
+    expect(workflow).toContain(
+      'if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$PREV_ID" != "$CURR_ID" ]; then',
+    )
   })
 })
