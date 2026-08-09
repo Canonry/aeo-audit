@@ -1,6 +1,6 @@
 # @canonry/aeo-audit
 
-[![version](https://img.shields.io/badge/version-4.6.0-blue)](./package.json) [![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![version](https://img.shields.io/badge/version-4.6.1-blue)](./package.json) [![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 **The most comprehensive open-source technical AEO (Answer Engine Optimization) audit tool.** Scores any website across 16 ranking factors that decide whether AI answer engines (ChatGPT, Perplexity, Gemini, Claude) will cite your content.
 
@@ -85,7 +85,7 @@ The first run has no baseline, so it passes and tells you to seed one (`npx @can
 | [GitHub Action](https://github.com/Canonry/aeo-audit-action) | The CI regression gate: inputs, baselines, monorepos |
 | [Scoring](docs/scoring.md) | The 16 factors, weights, score bands |
 | [Programmatic API](docs/api.md) | `runAeoAudit`, `runSiteCrawl`, `runSitemapAudit`, `runStaticAudit` |
-| [Private package](docs/private-github-packages.md) | GitHub Packages consumer setup and migration gate |
+| [Package distribution](docs/private-github-packages.md) | Public npm installs and GitHub Packages mirror |
 | [Skill](docs/skill.md) | `/aeo` modes and install |
 | [Changelog](CHANGELOG.md) | Release history |
 | [Roadmap](ROADMAP.md) | What's planned |

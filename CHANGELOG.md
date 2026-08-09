@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.6.1 (2026-08-09)
+
+### Changed
+
+- **Public npm distribution.** Release artifacts now publish to both the public npm registry and GitHub Packages, so public Canonry installs can resolve `@canonry/aeo-audit` without registry credentials.
+- **One validated artifact per release.** The release workflow validates and packs once, then publishes the same tarball independently to both registries before publishing the matching ClawHub skill version.
+
 ## 4.6.0 (2026-08-08)
 
 ### Added

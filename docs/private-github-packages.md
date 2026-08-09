@@ -1,56 +1,50 @@
-# Private GitHub Packages Release
+# Package Distribution
 
-`@canonry/aeo-audit` is the private engine package for hosted Canonry services.
-It is not a drop-in public-registry replacement until each consumer has GitHub
-Packages read access and install-time authentication.
+`@canonry/aeo-audit` is published as the same validated artifact in two places:
 
-## Consumer dependency
+- Public npm (`https://registry.npmjs.org`) for normal CLI and library installs.
+- GitHub Packages (`https://npm.pkg.github.com`) for Canonry infrastructure that
+  intentionally installs from GitHub's registry.
+
+## Public consumers
+
+No registry mapping or package credential is required:
+
+```bash
+npm install @canonry/aeo-audit
+```
 
 ```json
 {
   "dependencies": {
-    "@canonry/aeo-audit": "4.3.0"
+    "@canonry/aeo-audit": "4.6.1"
   }
 }
 ```
 
-Equivalent dependency string:
+## GitHub Packages consumers
 
-```yaml
-@canonry/aeo-audit: 4.3.0
-```
+Consumers that intentionally use the GitHub Packages copy need:
 
-## Required consumer setup
-
-Each consuming private repository needs:
-
-- A committed `.npmrc` with only the registry mapping:
+- A committed scope mapping with no token:
 
   ```ini
   @canonry:registry=https://npm.pkg.github.com
   ```
 
-- GitHub Packages read access granted to that repository on the package.
-- CI permissions that include:
+- GitHub Packages read access granted to the consuming repository.
+- CI permissions that include `contents: read` and `packages: read`.
+- `NODE_AUTH_TOKEN` at install time. A repository with package access can use
+  its workflow `GITHUB_TOKEN`; long-running hosts should use a dedicated
+  read-only package token.
 
-  ```yaml
-  permissions:
-    contents: read
-    packages: read
-  ```
+## Release contract
 
-- `NODE_AUTH_TOKEN` supplied at install time. In GitHub Actions this can be the
-  workflow `GITHUB_TOKEN` after the repository has package read access. On
-  long-running hosts such as agent-node, use a dedicated read-only package token.
+The release workflow validates the package once, creates one tarball, and fans
+that artifact out to both registries. Public npm publishing uses GitHub OIDC
+trusted publishing; GitHub Packages uses the workflow `GITHUB_TOKEN`. ClawHub
+publishes only after both package registries succeed.
 
-## Compatibility gate
-
-Do not make the existing public `@ainyc/aeo-audit` package private or
-unavailable while any production consumer still depends on it. Current consumers
-must either keep installing the public compatibility package or land their own
-dependency/authentication PRs before this private package is published for
-production use.
-
-The publish workflow is manually dispatched for that reason: merge this engine
-change first, wait for consumer access and dependency PRs to be ready, then run
-the publish workflow on `main`.
+The public npm copy is the compatibility boundary for public Canonry releases.
+Do not release a Canonry version that depends on a package version until that
+exact version resolves from `https://registry.npmjs.org` without credentials.
