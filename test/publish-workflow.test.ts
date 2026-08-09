@@ -23,7 +23,7 @@ describe('release workflow', () => {
 
     expect(workflow).toContain('id-token: write')
     expect(workflow).toContain(
-      'npm publish release/package.tgz --registry=https://registry.npmjs.org --access public --provenance',
+      'npm publish ./release/package.tgz --registry=https://registry.npmjs.org --access public --provenance',
     )
     expect(workflow).toContain('npm install --global npm@11.5.1')
     expect(workflow).not.toContain('npm.pkg.github.com')

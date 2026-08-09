@@ -100,7 +100,7 @@ jobs:
             echo "@ainyc/aeo-audit@$VERSION already exists on npm"
             exit 0
           fi
-          npm publish release/package.tgz --registry=https://registry.npmjs.org --access public --provenance
+          npm publish ./release/package.tgz --registry=https://registry.npmjs.org --access public --provenance
 
   publish-clawhub:
     needs: [prepare, publish-npm]
