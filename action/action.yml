@@ -39,7 +39,7 @@ inputs:
     default: "gate"
     required: false
   aeo-audit-version:
-    description: "npm dist-tag or exact version of @ainyc/aeo-audit. Must be >= 4.1 (the compare subcommand). Resolved to a concrete version once and reused for every invocation."
+    description: "npm dist-tag or exact version of @canonry/aeo-audit. Must be >= 4.1 (the compare subcommand). Resolved to a concrete version once and reused for every invocation."
     default: "4"
     required: false
   audit-args:
@@ -139,10 +139,10 @@ runs:
           || { echo "::error::aeo-audit needs Node >= 20 (the consumer workflow must run actions/setup-node)."; exit 1; }
         # `npm view <pkg>@<range> version` prints `pkg@x 'x'` lines when the range matches
         # multiple versions, so use --json and take the highest clean semver (not `tail -n1`).
-        RESOLVED=$(npm view "@ainyc/aeo-audit@${VER}" version --json 2>/dev/null | tr -d '[]" ' | tr ',' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n1 || true)
+        RESOLVED=$(npm view "@canonry/aeo-audit@${VER}" version --json 2>/dev/null | tr -d '[]" ' | tr ',' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n1 || true)
         if [ -z "$RESOLVED" ]; then RESOLVED="$VER"; fi
         echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
-        echo "Using @ainyc/aeo-audit@$RESOLVED"
+        echo "Using @canonry/aeo-audit@$RESOLVED"
 
     # 1. Build + audit the PR HEAD -> current.json. The engine prints JSON before
     #    its own non-zero exit (<70 / --require-meta), so `set +e` captures both.

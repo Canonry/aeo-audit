@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-@ainyc/aeo-audit — an open-source AEO (Answer Engine Optimization) audit engine and single umbrella Claude Code / ClawHub skill. Scores websites across 16 ranking factors that determine AI citation.
+@canonry/aeo-audit — an open-source AEO (Answer Engine Optimization) audit engine and single umbrella Claude Code / ClawHub skill. Scores websites across 16 ranking factors that determine AI citation.
 
-Website: https://ainyc.ai
+Website: https://canonry.ai
 
 ## Tech Stack
 
@@ -121,9 +121,9 @@ clawhub publish skills/aeo --version 1.3.3 --changelog "Fix nested schema detect
 
 ClawHub flags skills as suspicious when they request excessive capabilities. Follow these rules to stay under the threshold:
 
-- **Pin npx versions** — use `@1` (major pin) instead of `@latest`. The `@latest` tag is a supply chain risk because a compromised publish can hijack all users immediately.
+- **Pin npx versions** — use `@4` (major pin) instead of `@latest`. The `@latest` tag is a supply chain risk because a compromised publish can hijack all users immediately.
 - **Minimize Bash patterns** — only declare the single npx command end users need. Do not include local dev commands (`pnpm run build`, `node bin/...`) in the published skill; those are for contributors, not consumers.
-- **Avoid generic Bash patterns** — `Bash(aeo-audit *)` is too broad and could match other binaries. Always use the fully qualified `npx @ainyc/aeo-audit@1 *` form.
+- **Avoid generic Bash patterns** — `Bash(aeo-audit *)` is too broad and could match other binaries. Always use the fully qualified `npx @canonry/aeo-audit@4 *` form.
 - **Scope file permissions narrowly** — only request Edit/Write for file types the skill actually modifies. Use `Write(filename)` for specific files (e.g., `llms.txt`, `robots.txt`) instead of broad `Edit(*.txt)` patterns.
 - **Keep shell injection guards** — the Argument Safety section in SKILL.md is required. Never remove it.
 

@@ -5,6 +5,7 @@ const packageJson = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ) as {
   name: string
+  version: string
   publishConfig?: { access?: string; registry?: string }
 }
 
@@ -12,10 +13,16 @@ const workflow = readFileSync(
   new URL('../.github/workflows/publish.yml', import.meta.url),
   'utf8',
 )
+const changelog = readFileSync(
+  new URL('../CHANGELOG.md', import.meta.url),
+  'utf8',
+)
 
 describe('release workflow', () => {
-  it('publishes the canonical package to public npm only', () => {
-    expect(packageJson.name).toBe('@ainyc/aeo-audit')
+  it('publishes the preferred package and compatibility package to public npm', () => {
+    expect(packageJson.name).toBe('@canonry/aeo-audit')
+    expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(changelog).toContain(`## ${packageJson.version} (`)
     expect(packageJson.publishConfig?.registry).toBe(
       'https://registry.npmjs.org',
     )
@@ -23,17 +30,33 @@ describe('release workflow', () => {
 
     expect(workflow).toContain('id-token: write')
     expect(workflow).toContain(
-      'npm publish ./release/package.tgz --registry=https://registry.npmjs.org --access public --provenance',
+      'publish_package "@canonry/aeo-audit" "release/canonry-package.tgz"',
     )
+    expect(workflow).toContain(
+      'publish_package "@ainyc/aeo-audit" "release/ainyc-package.tgz"',
+    )
+    expect(workflow.match(/npm publish "\.\/\$TARBALL" --registry=https:\/\/registry\.npmjs\.org --access public --provenance/g)).toHaveLength(1)
     expect(workflow).toContain('npm install --global npm@11.5.1')
     expect(workflow).not.toContain('npm.pkg.github.com')
     expect(workflow).not.toContain('secrets.GITHUB_TOKEN')
     expect(workflow).not.toContain('NODE_AUTH_TOKEN')
   })
 
-  it('packs once and publishes only after validation succeeds', () => {
-    expect(workflow).toContain('name: Pack release artifact')
-    expect(workflow).toContain('name: release-package')
+  it('pins npm before packing one build into the exact two package artifacts', () => {
+    const npmPin = 'npm install --global npm@11.5.1'
+    const packStep = 'name: Pack release artifacts'
+
+    expect(workflow).toContain(packStep)
+    expect(workflow.indexOf(npmPin)).toBeLessThan(workflow.indexOf(packStep))
+    expect(workflow).toContain('npm pack --ignore-scripts --pack-destination release')
+    expect(workflow).toContain('mv release/*.tgz release/canonry-package.tgz')
+    expect(workflow).toContain('release/canonry-package.tgz')
+    expect(workflow).toContain('release/ainyc-package.tgz')
+    expect(workflow).toContain("p.name = '@ainyc/aeo-audit'")
+    expect(workflow).toContain('mv release/ainyc-aeo-audit-*.tgz release/ainyc-package.tgz')
+    expect(workflow).toContain('diff -qr --exclude=package.json')
+    expect(workflow).toContain('assert.deepStrictEqual(canonryRest, ainycRest)')
+    expect(workflow).toContain('name: release-packages')
     expect(workflow).toContain('needs: prepare')
     expect(workflow).toContain('needs: [prepare, publish-npm]')
   })
@@ -45,7 +68,7 @@ describe('release workflow', () => {
     expect(workflow.match(/dist\.integrity/g)).toHaveLength(1)
     expect(workflow.match(/createHash\('sha512'\)/g)).toHaveLength(1)
     expect(
-      workflow.match(/Registry artifact does not match release\/package\.tgz/g),
+      workflow.match(/Registry artifact does not match \$TARBALL/g),
     ).toHaveLength(1)
   })
 
@@ -70,9 +93,22 @@ describe('release workflow', () => {
   })
 
   it('treats only an explicit registry 404 as an unpublished version', () => {
+    expect(workflow).toContain('REGISTRY_STDOUT=$(mktemp)')
+    expect(workflow).toContain('REGISTRY_STDERR=$(mktemp)')
     expect(workflow).toContain('REGISTRY_STATUS=$?')
-    expect(workflow).toContain("grep -q 'E404'")
+    expect(workflow).toContain("grep -q 'E404' \"$REGISTRY_STDERR\"")
+    expect(workflow).toContain("grep -Eq '^sha512-[A-Za-z0-9+/]+={0,2}$'")
     expect(workflow).toContain('exit "$REGISTRY_STATUS"')
     expect(workflow).not.toMatch(/npm view .*\|\| true/)
+  })
+
+  it('makes each retry fail closed against the matching artifact and publishes Canonry first', () => {
+    expect(workflow).toContain('ACTUAL_VERSION=$(tar -xOf "$TARBALL" package/package.json')
+    expect(workflow).toContain('expected $PACKAGE_NAME@$VERSION')
+    expect(workflow.indexOf('publish_package "@canonry/aeo-audit"')).toBeLessThan(
+      workflow.indexOf('publish_package "@ainyc/aeo-audit"'),
+    )
+    expect(workflow).toContain('Registry artifact does not match $TARBALL')
+    expect(workflow).toContain('return')
   })
 })

@@ -1,4 +1,4 @@
-# Contributing to @ainyc/aeo-audit
+# Contributing to @canonry/aeo-audit
 
 ## Getting Started
 

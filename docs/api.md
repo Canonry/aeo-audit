@@ -9,7 +9,7 @@ TypeScript declaration files are included automatically.
 ## Single page
 
 ```ts
-import { runAeoAudit } from '@ainyc/aeo-audit'
+import { runAeoAudit } from '@canonry/aeo-audit'
 
 const report = await runAeoAudit('https://example.com/specific-page', {
   includeGeo: false,         // Include geographic signals (default: false)
@@ -34,7 +34,7 @@ The result includes every discoverable URL within the limits. It cannot find a U
 The crawl boundary is the root URL's exact host (including any non-default port). Cross-host links and redirects are recorded but never followed. If the root redirects to another host, the result is explicitly partial with `terminationReason: 'root-host-redirect'`; callers should restart with `finalRootUrl` after confirming that host is intended. An off-host `robots.txt` redirect is not followed and appears in `summary.warnings`.
 
 ```ts
-import { runSiteCrawl } from '@ainyc/aeo-audit'
+import { runSiteCrawl } from '@canonry/aeo-audit'
 
 const report = await runSiteCrawl('https://example.com', {
   mode: 'summary',
@@ -68,7 +68,7 @@ Use `mode: 'full'` for a returned `pages` and `edges` graph. Use summary mode wh
 ## Site-wide (sitemap)
 
 ```ts
-import { runSitemapAudit } from '@ainyc/aeo-audit'
+import { runSitemapAudit } from '@canonry/aeo-audit'
 
 const report = await runSitemapAudit('https://example.com', {
   limit: 200,               // Max pages to audit (default 200, sorted by sitemap priority)
@@ -105,7 +105,7 @@ Each entry in `crossCuttingIssues[].topIssues` carries a `recommendation` plus t
 ## Static output (offline, from disk)
 
 ```ts
-import { runStaticAudit } from '@ainyc/aeo-audit'
+import { runStaticAudit } from '@canonry/aeo-audit'
 
 const result = await runStaticAudit('./out', {
   baseUrl: 'https://example.com', // maps files to page URLs (default https://localhost)
