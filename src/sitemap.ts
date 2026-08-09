@@ -6,8 +6,10 @@ import {
   isCallerAbort,
   isFetchBudgetExceededError,
   normalizeTargetUrl,
+  readResponseBodyAsText,
   throwIfAborted,
 } from './fetch-page.js'
+import { parseSitemapXmlDocument, type SitemapXmlEntry } from './sitemap-xml.js'
 import { runAeoAudit } from './index.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { PAGE_SPECIFIC_FACTOR_IDS, PAGE_SPECIFIC_PRESENT_THRESHOLD } from './scoring.js'
@@ -97,69 +99,11 @@ export function rewriteLocOrigin(loc: string, targetOrigin: string): string {
   }
 }
 
-interface SitemapEntry {
-  loc: string
-  priority?: number
-}
-
-/**
- * Decode the five predefined XML entities plus numeric character references in a
- * `<loc>` value. Per the sitemaps.org spec (#escaping), a `&` inside a URL MUST be
- * written `&amp;`, so a spec-compliant `<loc>` with a multi-param query string
- * (`?type=pages&amp;page=1`) arrives entity-escaped. Without decoding, the fetcher
- * requests the literal `...&amp;...`, which the origin treats as a different
- * request — on a sitemap index every child fetch then fails and the audit returns
- * zero URLs (issue #50). `&amp;` is replaced LAST so `&amp;lt;` decodes to the
- * literal `&lt;`, not `<`. Out-of-range numeric refs are left untouched rather than
- * throwing, so a malformed sitemap never aborts the whole audit.
- */
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (match, dec) => codePointToChar(Number(dec), match))
-    .replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => codePointToChar(parseInt(hex, 16), match))
-    .replace(/&amp;/g, '&')
-}
-
-function codePointToChar(codePoint: number, original: string): string {
-  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
-    ? String.fromCodePoint(codePoint)
-    : original
-}
+type SitemapEntry = SitemapXmlEntry
 
 function parseSitemapXml(xml: string): SitemapEntry[] {
-  const entries: SitemapEntry[] = []
-
-  // Extract <loc> elements and optional <priority> from <url> blocks
-  const urlBlockRe = /<url\b[^>]*>([\s\S]*?)<\/url>/gi
-  let urlMatch
-  while ((urlMatch = urlBlockRe.exec(xml)) !== null) {
-    const block = urlMatch[1]
-    const locMatch = block.match(/<loc\b[^>]*>([\s\S]*?)<\/loc>/i)
-    if (!locMatch) continue
-
-    const loc = decodeXmlEntities(locMatch[1].trim())
-    if (!loc) continue
-
-    const priorityMatch = block.match(/<priority\b[^>]*>([\s\S]*?)<\/priority>/i)
-    const priority = priorityMatch ? parseFloat(priorityMatch[1].trim()) : undefined
-
-    entries.push({ loc, priority: Number.isFinite(priority) ? priority : undefined })
-  }
-
-  // Handle sitemap index files — extract nested sitemap URLs
-  if (entries.length === 0) {
-    const sitemapLocRe = /<sitemap\b[^>]*>[\s\S]*?<loc\b[^>]*>([\s\S]*?)<\/loc>[\s\S]*?<\/sitemap>/gi
-    let sitemapMatch
-    while ((sitemapMatch = sitemapLocRe.exec(xml)) !== null) {
-      entries.push({ loc: decodeXmlEntities(sitemapMatch[1].trim()) })
-    }
-  }
-
-  return entries
+  const document = parseSitemapXmlDocument(xml)
+  return document.pages.length ? document.pages : document.children
 }
 
 interface SitemapFetchResult {
@@ -204,6 +148,7 @@ async function fetchSitemapResponse(url: string, fetchOptions?: string | Sitemap
   throwIfAborted(signal)
 
   let response: Response
+  let responseDeadlineAt: number
   try {
     const result = await fetchWithValidatedRedirects(url, {
       timeoutMs: SITEMAP_TIMEOUT_MS,
@@ -214,6 +159,7 @@ async function fetchSitemapResponse(url: string, fetchOptions?: string | Sitemap
       outboundAttemptKind: kind,
     })
     response = result.response
+    responseDeadlineAt = result.responseDeadlineAt
   } catch (error) {
     if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) throw error
     if (error instanceof AeoAuditError) throw error
@@ -221,40 +167,25 @@ async function fetchSitemapResponse(url: string, fetchOptions?: string | Sitemap
   }
 
   if (!response.ok) {
-    // Drain the body so the socket can be released.
-    try {
-      await response.body?.cancel()
-    } catch {
-      /* ignore */
-    }
+    // Best-effort socket release must not become another blocking surface.
+    if (response.body) void response.body.cancel().catch(() => {})
     return { body: '', status: response.status }
   }
 
-  const reader = response.body?.getReader()
-  if (!reader) return { body: '', status: response.status }
-
-  const chunks: Buffer[] = []
-  let totalBytes = 0
   try {
-    for (;;) {
-      throwIfAborted(signal)
-      const { done, value } = await reader.read()
-      if (done) break
-      const chunk = Buffer.from(value)
-      totalBytes += chunk.length
-      if (totalBytes > SITEMAP_MAX_BYTES) {
-        await reader.cancel()
-        throw new AeoAuditError('BODY_TOO_LARGE', `Sitemap exceeded ${SITEMAP_MAX_BYTES} bytes.`)
-      }
-      chunks.push(chunk)
-    }
+    const body = await readResponseBodyAsText(response, {
+      maxBytes: SITEMAP_MAX_BYTES,
+      signal,
+      deadlineAt: responseDeadlineAt,
+      deadlineError: () => new AeoAuditError('TIMEOUT', `Request timed out after ${SITEMAP_TIMEOUT_MS}ms.`),
+      tooLargeMessage: `Sitemap exceeded ${SITEMAP_MAX_BYTES} bytes.`,
+    })
+    return { body, status: response.status }
   } catch (error) {
     if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) throw error
     if (error instanceof AeoAuditError) throw error
     throw new AeoAuditError('UNREACHABLE', 'Could not read sitemap response.', { cause: error })
   }
-
-  return { body: Buffer.concat(chunks).toString('utf8'), status: response.status }
 }
 
 async function fetchSitemapBody(url: string, options?: string | SitemapFetchOptions): Promise<string> {

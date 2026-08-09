@@ -1,5 +1,30 @@
 # Changelog
 
+## 4.6.0 (2026-08-08)
+
+### Added
+
+- **Bounded full-site crawl.** `runSiteCrawl` discovers URLs from the root, recursive sitemaps, `robots.txt`, and internal HTML links.
+- **Typed page graph.** Results include page state, indexability reasons, canonical and redirect edges, crawl depth, link counts, and link score.
+- **Checkpoint events.** The engine emits bounded page, edge, progress, metric, and summary batches with stable IDs and checksums.
+- **Optional dead-link findings.** `checkDeadLinks` defaults to false. The engine uses observed internal targets and never probes external links.
+- **Request pacing.** `requestDelayMs` spaces every outbound request start, including redirect hops. Valid robots `Crawl-delay` directives raise the effective delay when robots behavior is enabled; pacing remains abortable and bounded by `maxDurationMs`.
+
+### Changed
+
+- **Shared HTML analysis.** Network, static, sitemap, and full-crawl paths now use the same analyzer function without an import cycle.
+- **Redirect boundary.** Host-scoped crawls record external redirects but do not fetch the external target. A root redirect outside the exact host now returns an explicit partial result instead of a misleading complete crawl.
+- **Versioned crawl semantics.** The crawl schema is `1.1`, the engine version is `1.1.0`, and URL normalization is `1.1.0` after narrowing automatic query stripping to unambiguous analytics and click identifiers.
+
+### Fixed
+
+- Redirect-terminal page admission is deterministic at the page-cap boundary, regardless of concurrent response order.
+- HTTP error and explicit non-HTML bodies are cancelled, and ambiguous non-HTML bodies are rejected after the initial sniff instead of being downloaded to the byte cap.
+- Crawl depth uses a prebuilt adjacency index instead of rescanning every edge for every page.
+- Semantic `ref`, `source`, and `campaign` query parameters are preserved.
+- Sitemap page and child locations share numeric and named XML entity decoding.
+- Analyzer failures remain attached to the fetched HTML observation through its `error` field.
+
 ## 4.5.0 (2026-08-05)
 
 ### Added

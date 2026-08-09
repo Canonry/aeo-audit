@@ -38,6 +38,8 @@ interface ReadBodyOptions {
   maxBytes: number
   requireHtmlSniff?: boolean
   signal?: AbortSignal
+  deadlineAt?: number
+  timeoutMs?: number
 }
 
 export interface FetchWithRedirectOptions {
@@ -47,13 +49,36 @@ export interface FetchWithRedirectOptions {
   signal?: AbortSignal
   onOutboundAttempt?: AeoAuditOutboundAttemptObserver
   outboundAttemptKind?: AeoAuditOutboundAttemptKind
-  budget?: FetchBudgetController
+  budget?: FetchBudget
+  /** Awaited after per-hop SSRF validation and immediately before a request starts. */
+  beforeOutboundAttempt?: () => void | Promise<void>
+  /**
+   * Optional caller-owned redirect boundary. Returning false records the redirect
+   * hop but leaves its response unread, so host-scoped callers never fetch a
+   * redirect target outside their own crawl boundary.
+   */
+  shouldFollowRedirect?: (nextUrl: URL) => boolean
 }
 
 export interface RedirectFetchResult {
   response: Response
   finalUrl: string
   redirectChain: RedirectHop[]
+  /** Absolute deadline inherited by response-body consumption. */
+  responseDeadlineAt: number
+}
+
+export interface ReadResponseBodyOptions {
+  maxBytes: number
+  /** Reject an ambiguous response as soon as its first 512 bytes are not HTML. */
+  requireHtmlSniff?: boolean
+  signal?: AbortSignal
+  deadlineAt?: number
+  deadlineError?: () => unknown
+  beforeRead?: () => void
+  onChunk?: (bytes: number) => void
+  onTooLarge?: () => void
+  tooLargeMessage?: string
 }
 
 const USER_AGENT = 'AINYC-AEO-Audit/1.0'
@@ -67,6 +92,7 @@ const DIAGNOSTIC_TIMEOUT_MS = 4_000
 const MAIN_MAX_BYTES = 5 * 1024 * 1024
 const AUX_MAX_BYTES = 1024 * 1024
 const MAX_REDIRECTS = 5
+const HTML_SNIFF_MIN_BYTES = 512
 
 const AUXILIARY_SPECS: AuxiliarySpec[] = [
   { key: 'llmsTxt', path: '/llms.txt', kind: 'text' },
@@ -91,7 +117,12 @@ export interface FetchBudgetSnapshot {
   exhaustedReason?: SitemapAuditPartialReason
 }
 
-export class FetchBudgetController {
+export interface FetchBudget {
+  consumeFetch(): void
+  assertWithinDuration(): void
+}
+
+export class FetchBudgetController implements FetchBudget {
   readonly startedAt: number
   readonly maxFetches?: number
   readonly maxDurationMs?: number
@@ -486,6 +517,8 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     onOutboundAttempt,
     outboundAttemptKind = 'page',
     budget,
+    shouldFollowRedirect,
+    beforeOutboundAttempt,
   } = options
 
   let currentUrl = new URL(startUrl.toString())
@@ -496,6 +529,8 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     budget?.assertWithinDuration()
     await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
     throwIfAborted(signal)
+    await beforeOutboundAttempt?.()
+    throwIfAborted(signal)
     budget?.consumeFetch()
     await onOutboundAttempt?.({
       kind: outboundAttemptKind,
@@ -504,6 +539,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
       redirectDepth: redirectChain.length,
     })
 
+    const responseDeadlineAt = Date.now() + timeoutMs
     const response = await timedFetch(currentUrl, { timeoutMs, redirect: 'manual', allowPrivateHost, signal })
 
     if (!isRedirectStatus(response.status)) {
@@ -511,6 +547,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
         response,
         finalUrl: currentUrl.toString(),
         redirectChain,
+        responseDeadlineAt,
       }
     }
 
@@ -520,6 +557,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
         response,
         finalUrl: currentUrl.toString(),
         redirectChain,
+        responseDeadlineAt,
       }
     }
 
@@ -540,6 +578,16 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
       to: nextUrl.toString(),
     })
 
+    if (shouldFollowRedirect && !shouldFollowRedirect(nextUrl)) {
+      return {
+        response,
+        finalUrl: currentUrl.toString(),
+        redirectChain,
+        responseDeadlineAt,
+      }
+    }
+
+    if (response.body) void response.body.cancel().catch(() => {})
     currentUrl = nextUrl
   }
 }
@@ -566,6 +614,17 @@ function isHtmlContentType(contentType = ''): boolean {
 function isAmbiguousContentType(contentType = ''): boolean {
   const normalized = contentType.toLowerCase()
   return !normalized || AMBIGUOUS_CONTENT_TYPES.some((type) => normalized.includes(type))
+}
+
+/**
+ * Shared acceptance policy for fetched HTML. Crawls preserve the historical
+ * behavior of trusting an explicit HTML content type, while the single-page
+ * audit can additionally require a document marker.
+ */
+export function isHtmlResponse(contentType = '', body = '', requireMarker = false): boolean {
+  const htmlByHeader = isHtmlContentType(contentType)
+  if (requireMarker) return (htmlByHeader || isAmbiguousContentType(contentType)) && looksLikeHtml(body)
+  return htmlByHeader || (isAmbiguousContentType(contentType) && looksLikeHtml(body))
 }
 
 function isLikelyTextContent(contentType = '', body = ''): boolean {
@@ -596,52 +655,114 @@ function hasDisallowedControlChars(value: string): boolean {
   return false
 }
 
-async function readBodyAsText(response: Response, options: ReadBodyOptions): Promise<string> {
-  const { maxBytes, requireHtmlSniff = false, signal } = options
+export async function readResponseBodyAsText(response: Response, options: ReadResponseBodyOptions): Promise<string> {
   const reader = response.body?.getReader()
   if (!reader) {
+    if (options.requireHtmlSniff) {
+      throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+    }
     return ''
   }
 
   const chunks: Buffer[] = []
   let totalBytes = 0
+  let sniffBytes = 0
   let sniffSample = ''
   let sniffed = false
-
-  for (;;) {
-    throwIfAborted(signal)
-    const { done, value } = await reader.read()
-    if (done) {
-      break
+  let completed = false
+  let interrupted = false
+  let rejectInterruption: (reason: unknown) => void = () => {}
+  const interruption = new Promise<never>((_, reject) => { rejectInterruption = reject })
+  // A signal may already be aborted before the first reader race is installed.
+  // Keep that early rejection handled while preserving it for every Promise.race.
+  void interruption.catch(() => {})
+  const interrupt = (reason: unknown): void => {
+    if (interrupted) return
+    interrupted = true
+    rejectInterruption(reason)
+    try {
+      void reader.cancel(reason).catch(() => {})
+    } catch {
+      // A hostile/custom stream may throw synchronously during best-effort cancellation.
     }
-
-    const chunk = Buffer.from(value)
-    totalBytes += chunk.length
-
-    if (totalBytes > maxBytes) {
-      await reader.cancel()
-      throw new AeoAuditError('BODY_TOO_LARGE', `Response exceeded ${maxBytes} bytes.`)
+  }
+  const abortListener = options.signal ? (): void => interrupt(abortReason(options.signal!)) : null
+  if (abortListener) options.signal!.addEventListener('abort', abortListener, { once: true })
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+  const expireDeadline = (): void => {
+    let reason: unknown
+    try {
+      reason = options.deadlineError?.() ?? new AeoAuditError('TIMEOUT', 'Response body timed out.')
+    } catch (error) {
+      reason = error
     }
+    interrupt(reason)
+  }
+  if (options.deadlineAt !== undefined) {
+    const remaining = options.deadlineAt - Date.now()
+    if (remaining <= 0) expireDeadline()
+    else deadlineTimer = setTimeout(expireDeadline, remaining)
+  }
+  if (options.signal?.aborted) abortListener?.()
 
-    if (requireHtmlSniff && !sniffed && sniffSample.length < 2048) {
-      sniffSample += chunk.toString('utf8')
-      if (sniffSample.length >= 512) {
-        sniffed = true
-        if (!looksLikeHtml(sniffSample)) {
-          await reader.cancel()
-          throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+  try {
+    for (;;) {
+      throwIfAborted(options.signal)
+      options.beforeRead?.()
+      const { done, value } = await Promise.race([reader.read(), interruption])
+      if (done) break
+      const chunk = Buffer.from(value)
+      totalBytes += chunk.length
+      if (totalBytes > options.maxBytes) {
+        options.onTooLarge?.()
+        throw new AeoAuditError(
+          'BODY_TOO_LARGE',
+          options.tooLargeMessage ?? `Response exceeded ${options.maxBytes} bytes.`,
+        )
+      }
+      options.onChunk?.(chunk.length)
+      if (options.requireHtmlSniff && !sniffed) {
+        sniffBytes += chunk.length
+        if (sniffSample.length < 4096) sniffSample += chunk.toString('utf8')
+        if (sniffBytes >= HTML_SNIFF_MIN_BYTES) {
+          sniffed = true
+          if (!looksLikeHtml(sniffSample)) {
+            throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+          }
         }
       }
+      chunks.push(chunk)
     }
-
-    chunks.push(chunk)
+    if (options.requireHtmlSniff && !sniffed && !looksLikeHtml(sniffSample)) {
+      throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+    }
+    completed = true
+    return Buffer.concat(chunks).toString('utf8')
+  } finally {
+    if (deadlineTimer) clearTimeout(deadlineTimer)
+    if (abortListener) options.signal!.removeEventListener('abort', abortListener)
+    if (!completed && !interrupted) {
+      try {
+        void reader.cancel().catch(() => {})
+      } catch {
+        // Best effort only; cancellation must not become another blocking surface.
+      }
+    }
   }
+}
 
-  if (requireHtmlSniff && !sniffed && !looksLikeHtml(sniffSample)) {
-    throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
-  }
-
-  return Buffer.concat(chunks).toString('utf8')
+async function readBodyAsText(response: Response, options: ReadBodyOptions): Promise<string> {
+  const { maxBytes, requireHtmlSniff = false, signal, deadlineAt, timeoutMs } = options
+  const text = await readResponseBodyAsText(response, {
+    maxBytes,
+    requireHtmlSniff,
+    signal,
+    deadlineAt,
+    deadlineError: timeoutMs === undefined
+      ? undefined
+      : () => new AeoAuditError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`),
+  })
+  return text
 }
 
 function classifyAuxiliaryState(spec: AuxiliarySpec, response: Response, bodyText: string): AuxiliaryResourceState {
@@ -687,7 +808,7 @@ async function attemptAuxiliaryFetch(
   const { allowPrivateHost, signal, onOutboundAttempt, budget } = options
 
   try {
-    const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(targetUrl, {
+    const { response, finalUrl, redirectChain, responseDeadlineAt } = await fetchWithValidatedRedirects(targetUrl, {
       timeoutMs: AUX_TIMEOUT_MS,
       maxRedirects: MAX_REDIRECTS,
       allowPrivateHost,
@@ -698,7 +819,13 @@ async function attemptAuxiliaryFetch(
     })
 
     const body = response.ok
-      ? await readBodyAsText(response, { maxBytes: AUX_MAX_BYTES, requireHtmlSniff: false, signal })
+      ? await readBodyAsText(response, {
+          maxBytes: AUX_MAX_BYTES,
+          requireHtmlSniff: false,
+          signal,
+          deadlineAt: responseDeadlineAt,
+          timeoutMs: AUX_TIMEOUT_MS,
+        })
       : ''
 
     const state = classifyAuxiliaryState(spec, response, body)
@@ -871,7 +998,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
   const normalizedUrl = normalizeTargetUrl(rawUrl)
   const { allowPrivateHost, signal, onOutboundAttempt, budget } = options
 
-  const { response, finalUrl, redirectChain } = await fetchWithValidatedRedirects(normalizedUrl, {
+  const { response, finalUrl, redirectChain, responseDeadlineAt } = await fetchWithValidatedRedirects(normalizedUrl, {
     timeoutMs: MAIN_TIMEOUT_MS,
     maxRedirects: MAX_REDIRECTS,
     allowPrivateHost,
@@ -886,6 +1013,13 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
   const requireHtmlSniff = !htmlByHeader || isAmbiguousContentType(contentType)
 
   if (!htmlByHeader && !isAmbiguousContentType(contentType)) {
+    if (response.body) {
+      try {
+        void response.body.cancel().catch(() => {})
+      } catch {
+        // Best effort only; preserve the stable NOT_HTML error below.
+      }
+    }
     throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.', {
       details: { contentType },
     })
@@ -895,9 +1029,11 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
     maxBytes: MAIN_MAX_BYTES,
     requireHtmlSniff,
     signal,
+    deadlineAt: responseDeadlineAt,
+    timeoutMs: MAIN_TIMEOUT_MS,
   })
 
-  if (!looksLikeHtml(html)) {
+  if (!isHtmlResponse(contentType, html, true)) {
     throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.', {
       details: { contentType },
     })

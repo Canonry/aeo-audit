@@ -608,6 +608,273 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
   onPlan?: (plan: SitemapAuditPlan) => void
 }
 
+/* ── Full site crawl types ── */
+
+/** A report-shape version owned by the crawl engine, independent from `SCHEMA_VERSION`. */
+export const CRAWL_SCHEMA_VERSION = '1.1'
+/** Version identifiers let persisted checkpoints detect changes in crawl semantics. */
+export const CRAWL_ENGINE_VERSION = '1.1.0'
+export const CRAWL_URL_NORMALIZATION_VERSION = '1.1.0'
+export const CRAWL_INDEXABILITY_RULESET_VERSION = '1.0.0'
+export const CRAWL_LINK_SCORE_ALGORITHM_VERSION = 'pagerank-1.0.0'
+
+export interface SiteCrawlLimits {
+  maxPages: number
+  maxEdges: number
+  maxFetches: number
+  maxDurationMs: number
+  maxBytes: number
+  maxPageBytes: number
+  maxDepth: number
+  maxLinksPerPage: number
+  maxQueryVariants: number
+  maxSitemapFanout: number
+  maxSitemapUrls: number
+  concurrency: number
+  /** Minimum delay between outbound request starts. Robots may raise the effective delay. */
+  requestDelayMs: number
+}
+
+/** Safe defaults for an untrusted public site. Every value may be tightened by callers. */
+export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = {
+  maxPages: 1_000,
+  maxEdges: 100_000,
+  maxFetches: 5_000,
+  maxDurationMs: 120_000,
+  maxBytes: 100 * 1024 * 1024,
+  maxPageBytes: 5 * 1024 * 1024,
+  maxDepth: 10,
+  maxLinksPerPage: 1_000,
+  maxQueryVariants: 10,
+  maxSitemapFanout: 1_000,
+  maxSitemapUrls: 50_000,
+  concurrency: 5,
+  requestDelayMs: 0,
+}
+
+export type CrawlTerminationReason =
+  | 'max-pages'
+  | 'max-edges'
+  | 'max-fetches'
+  | 'max-duration'
+  | 'max-bytes'
+  | 'max-page-bytes'
+  | 'max-depth'
+  | 'max-links-per-page'
+  | 'max-query-variants'
+  | 'max-sitemap-fanout'
+  | 'max-sitemap-urls'
+  | 'root-host-redirect'
+
+export type CrawlWarning =
+  | {
+    code: 'root-host-redirect'
+    message: string
+    from: string
+    to: string
+  }
+  | {
+    code: 'robots-host-redirect'
+    message: string
+    from: string
+    to: string
+  }
+
+export type CrawlPageState = 'discovered' | 'robots-blocked' | 'html' | 'redirect' | 'non-html' | 'fetch-error'
+export type CrawlEdgeType = 'anchor' | 'redirect' | 'canonical'
+export type CrawlEdgeClassification = 'internal' | 'external'
+export type CrawlIndexabilityState = 'indexable' | 'noindex' | 'blocked' | 'unknown'
+
+export interface CrawlDiscoveryProvenance {
+  /** Canonical crawl URLs that linked to or redirected to this page. */
+  discoveredFrom: string[]
+  /** Sitemap documents that named this page. */
+  sitemapSources: string[]
+  /** True for the single URL explicitly passed to `runSiteCrawl`. */
+  root: boolean
+}
+
+export interface CrawlPageMetrics {
+  inbound: { totalOccurrences: number; uniqueEdges: number }
+  outbound: { totalOccurrences: number; uniqueEdges: number }
+  /** Link distance from the final root across followable internal anchors. */
+  shortestFollowableAnchorDepth: number | null
+  /** Stationary probability over unique followable internal anchor edges. */
+  linkScoreRaw: number
+  /** Link score relative to the crawl maximum, normalized to 0–100. */
+  linkScore: number
+}
+
+export interface CrawlPageObservation {
+  /** Stable, URL-derived key suitable for idempotent checkpoint upserts. */
+  key: string
+  requestedUrl: string
+  finalUrl: string | null
+  state: CrawlPageState
+  depth: number | null
+  provenance: CrawlDiscoveryProvenance
+  statusCode: number | null
+  contentType: string | null
+  redirectChain: RedirectHop[]
+  canonicalUrl: string | null
+  metaRobots: string[]
+  xRobots: string[]
+  path: string | null
+  directory: string | null
+  indexability: {
+    state: CrawlIndexabilityState
+    reasons: string[]
+    rulesetVersion: string
+  }
+  audit: AuditReport | null
+  error: string | null
+  metrics: CrawlPageMetrics
+}
+
+export interface CrawlAnchorSummary {
+  text: string
+  occurrences: number
+}
+
+export interface CrawlEdgeObservation {
+  /** Stable, endpoint-and-type-derived key suitable for idempotent checkpoint upserts. */
+  key: string
+  from: string
+  to: string
+  type: CrawlEdgeType
+  classification: CrawlEdgeClassification
+  totalOccurrences: number
+  followableOccurrences: number
+  nofollowOccurrences: number
+  /** At most five normalized anchor texts, ordered deterministically. */
+  anchorSummaries: CrawlAnchorSummary[]
+}
+
+export interface CrawlDeadLinkFinding {
+  key: string
+  from: string
+  to: string
+  statusCode: number | null
+  reason: 'http-error' | 'fetch-error'
+}
+
+export type CrawlDeadLinkResult =
+  | { state: 'disabled'; findings: [] }
+  | { state: 'complete'; findings: CrawlDeadLinkFinding[] }
+  | { state: 'partial'; findings: CrawlDeadLinkFinding[] }
+
+export interface CrawlSummary {
+  crawlSchemaVersion: string
+  /** npm package version that produced the report (`engineVersion()`). */
+  engineVersion: string
+  /** Crawl traversal implementation version, separate from package version. */
+  crawlEngineVersion: string
+  urlNormalizationVersion: string
+  indexabilityRulesetVersion: string
+  linkScoreAlgorithmVersion: string
+  rootUrl: string
+  finalRootUrl: string | null
+  startedAt: string
+  completedAt: string
+  complete: boolean
+  terminationReason: CrawlTerminationReason | null
+  pagesDiscovered: number
+  pagesFetched: number
+  pagesObserved: number
+  edgesObserved: number
+  bytesRead: number
+  fetchesStarted: number
+  elapsedMs: number
+  limits: SiteCrawlLimits
+  warnings: CrawlWarning[]
+  pacing: {
+    requestedDelayMs: number
+    robotsCrawlDelayMs: number | null
+    effectiveDelayMs: number
+  }
+  /** Stream-aggregateable audit results retained even in summary-only mode. */
+  auditRollup: {
+    auditedPages: number
+    aggregateScore: number | null
+    factors: Array<{ id: string; name: string; count: number; averageScore: number }>
+  }
+}
+
+export interface CrawlProgress {
+  pagesDiscovered: number
+  pagesFetched: number
+  pagesObserved: number
+  edgesObserved: number
+  fetchesStarted: number
+  bytesRead: number
+}
+
+export interface CrawlEventBase {
+  sequence: number
+  /** Content-addressed and stable across retries for the same logical batch. */
+  batchId: string
+  checksum: string
+}
+
+export type CrawlEvent =
+  | (CrawlEventBase & { type: 'pages'; rows: CrawlPageObservation[] })
+  | (CrawlEventBase & { type: 'edges'; rows: CrawlEdgeObservation[] })
+  | (CrawlEventBase & { type: 'progress'; progress: CrawlProgress })
+  | (CrawlEventBase & { type: 'metrics'; rows: Array<{ key: string; metrics: CrawlPageMetrics }> })
+  | (CrawlEventBase & { type: 'summary'; summary: CrawlSummary })
+
+export type SiteCrawlEventHandler = (event: CrawlEvent) => void | Promise<void>
+
+export interface SiteCrawlOptions extends RunAeoAuditOptions {
+  /** Full reports retain page and edge rows. Summary mode streams rows but does not return the graph. */
+  mode?: 'full' | 'summary'
+  /** Alias for `mode: 'summary'`, useful for config-driven callers. */
+  summaryOnly?: boolean
+  /** One explicit sitemap seed. When set, the default /sitemap.xml probes are skipped. */
+  sitemapUrl?: string
+  /** Additional explicit sitemap seeds, useful for split sitemap families. */
+  sitemapUrls?: string[]
+  respectRobots?: boolean
+  /** Derive internal dead-link findings from crawl observations. Defaults to false; external links are never probed. */
+  checkDeadLinks?: boolean
+  maxPages?: number
+  maxEdges?: number
+  maxFetches?: number
+  maxDurationMs?: number
+  maxBytes?: number
+  maxPageBytes?: number
+  maxDepth?: number
+  maxLinksPerPage?: number
+  maxQueryVariants?: number
+  maxSitemapFanout?: number
+  maxSitemapUrls?: number
+  concurrency?: number
+  /** Minimum delay between all outbound request starts, including redirect hops. Defaults to 0. */
+  requestDelayMs?: number
+  /** Awaited after each checkpoint-safe observed/derived batch. */
+  onEvent?: SiteCrawlEventHandler
+}
+
+interface SiteCrawlReportBase {
+  mode: 'full' | 'summary'
+  summary: CrawlSummary
+  deadLinks: CrawlDeadLinkResult
+}
+
+export interface FullSiteCrawlReport extends SiteCrawlReportBase {
+  mode: 'full'
+  pages: CrawlPageObservation[]
+  edges: CrawlEdgeObservation[]
+}
+
+export interface SummarySiteCrawlReport extends SiteCrawlReportBase {
+  mode: 'summary'
+  pages?: never
+  edges?: never
+}
+
+export type SiteCrawlReport = FullSiteCrawlReport | SummarySiteCrawlReport
+
 /* ── Platform detection types ── */
 
 export type PlatformCategory = 'cms' | 'site-builder' | 'ecommerce' | 'framework' | 'ssg' | 'hosting'

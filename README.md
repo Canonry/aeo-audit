@@ -1,11 +1,12 @@
 # @canonry/aeo-audit
 
-[![version](https://img.shields.io/badge/version-4.3.0-blue)](./package.json) [![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![version](https://img.shields.io/badge/version-4.6.0-blue)](./package.json) [![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 **The most comprehensive open-source technical AEO (Answer Engine Optimization) audit tool.** Scores any website across 16 ranking factors that decide whether AI answer engines (ChatGPT, Perplexity, Gemini, Claude) will cite your content.
 
 - Score any URL across **16 AEO factors**: structured data, `llms.txt`, E-E-A-T, extractability, snippet eligibility, and more. [Scoring](docs/scoring.md)
 - Audit a **whole site** from its sitemap; per-page findings roll up into ranked fixes. [Sitemap mode](docs/cli.md#sitemap-mode)
+- Crawl all discoverable site pages from the root, recursive sitemaps, and internal links. [Full crawl API](docs/api.md#full-site-crawl)
 - Audit **built HTML offline** in CI: a `next export` / `dist` / `out` directory, no network. [Static output](docs/cli.md#static-output-mode)
 - Detect the **platform / CMS / framework**: WordPress, Webflow, Shopify, Next.js, Vercel. [Platform detection](docs/cli.md#platform-detection)
 - Opt in to **Lighthouse, geographic, and agent-skill** factors. [Optional factors](docs/scoring.md#optional-factors)
@@ -83,7 +84,7 @@ The first run has no baseline, so it passes and tells you to seed one (`npx @can
 | [CLI reference](docs/cli.md) | Every flag, mode, and exit code |
 | [GitHub Action](https://github.com/Canonry/aeo-audit-action) | The CI regression gate: inputs, baselines, monorepos |
 | [Scoring](docs/scoring.md) | The 16 factors, weights, score bands |
-| [Programmatic API](docs/api.md) | `runAeoAudit`, `runSitemapAudit`, `runStaticAudit` |
+| [Programmatic API](docs/api.md) | `runAeoAudit`, `runSiteCrawl`, `runSitemapAudit`, `runStaticAudit` |
 | [Private package](docs/private-github-packages.md) | GitHub Packages consumer setup and migration gate |
 | [Skill](docs/skill.md) | `/aeo` modes and install |
 | [Changelog](CHANGELOG.md) | Release history |
