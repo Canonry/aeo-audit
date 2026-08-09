@@ -56,8 +56,13 @@ describe('release workflow', () => {
 
   it('allows an explicit manual retry without changing package identity', () => {
     expect(workflow).toContain('EVENT_NAME: ${{ github.event_name }}')
+    expect(workflow).toContain('"$EVENT_NAME" = "workflow_dispatch"')
+  })
+
+  it('retries after a release-workflow fix without changing package identity', () => {
     expect(workflow).toContain(
-      'if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$PREV_ID" != "$CURR_ID" ]; then',
+      'git diff --quiet "$BASE" HEAD -- .github/workflows/publish.yml',
     )
+    expect(workflow).toContain('"$WORKFLOW_CHANGED" = "true"')
   })
 })

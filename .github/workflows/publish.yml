@@ -31,7 +31,11 @@ jobs:
           PREV_ID=$(git show "$BASE":package.json 2>/dev/null | node -p "const p = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); p.name + '@' + p.version" 2>/dev/null || echo "")
           CURR_ID=$(node -p "const p = require('./package.json'); p.name + '@' + p.version")
           CURR_VERSION=$(node -p "require('./package.json').version")
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$PREV_ID" != "$CURR_ID" ]; then
+          WORKFLOW_CHANGED=false
+          if [ -n "$BASE" ] && ! git diff --quiet "$BASE" HEAD -- .github/workflows/publish.yml; then
+            WORKFLOW_CHANGED=true
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$PREV_ID" != "$CURR_ID" ] || [ "$WORKFLOW_CHANGED" = "true" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
           else
