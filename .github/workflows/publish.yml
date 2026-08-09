@@ -5,25 +5,33 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: package-release
+  cancel-in-progress: false
+
 jobs:
-  publish:
+  prepare:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Check for version change
+      - name: Check for package identity change
         id: version
         run: |
           BASE=$(git log --pretty=format:'%H' -1 HEAD^ 2>/dev/null || echo "")
-          PREV=$(git show "$BASE":package.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).version" 2>/dev/null || echo "")
-          CURR=$(node -p "require('./package.json').version")
-          if [ "$PREV" != "$CURR" ]; then
+          PREV_ID=$(git show "$BASE":package.json 2>/dev/null | node -p "const p = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); p.name + '@' + p.version" 2>/dev/null || echo "")
+          CURR_ID=$(node -p "const p = require('./package.json'); p.name + '@' + p.version")
+          CURR_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PREV_ID" != "$CURR_ID" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$CURR" >> "$GITHUB_OUTPUT"
+            echo "version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
@@ -34,9 +42,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.version.outputs.changed == 'true'
         with:
-          node-version: 22
-          registry-url: https://npm.pkg.github.com
-          scope: '@canonry'
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
         if: steps.version.outputs.changed == 'true'
@@ -50,15 +56,64 @@ jobs:
         if: steps.version.outputs.changed == 'true'
       - run: pnpm run test:e2e
         if: steps.version.outputs.changed == 'true'
-      - run: npm publish
+      - name: Pack release artifact
         if: steps.version.outputs.changed == 'true'
+        run: |
+          mkdir release
+          npm pack --ignore-scripts --pack-destination release
+          mv release/*.tgz release/package.tgz
+      - uses: actions/upload-artifact@v4
+        if: steps.version.outputs.changed == 'true'
+        with:
+          name: release-package
+          path: release/package.tgz
+          if-no-files-found: error
+
+  publish-npm:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.5.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: release
+      - name: Publish publicly to npm
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          LOCAL_INTEGRITY=$(node -e "const { createHash } = require('node:crypto'); const { readFileSync } = require('node:fs'); console.log('sha512-' + createHash('sha512').update(readFileSync('release/package.tgz')).digest('base64'))")
+          REMOTE_INTEGRITY=$(npm view "@ainyc/aeo-audit@$VERSION" dist.integrity --registry=https://registry.npmjs.org 2>/dev/null || true)
+          if [ -n "$REMOTE_INTEGRITY" ]; then
+            if [ "$REMOTE_INTEGRITY" != "$LOCAL_INTEGRITY" ]; then
+              echo "Registry artifact does not match release/package.tgz" >&2
+              exit 1
+            fi
+            echo "@ainyc/aeo-audit@$VERSION already exists on npm"
+            exit 0
+          fi
+          npm publish release/package.tgz --registry=https://registry.npmjs.org --access public --provenance
+
+  publish-clawhub:
+    needs: [prepare, publish-npm]
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
       - name: Publish to ClawHub
-        if: steps.version.outputs.changed == 'true'
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           npx -y clawhub@0 login --token "$CLAWHUB_TOKEN" --no-browser
           CHANGELOG="$(git log -1 --pretty=%s)"

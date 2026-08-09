@@ -2,7 +2,7 @@ import { buildCriticalDefects } from './critical-defects.js'
 import { buildCrossCuttingIssues, buildPrioritizedFixes } from './sitemap.js'
 import type { AgentSummary, AuditReport, SitemapAuditReport } from './types.js'
 
-const TOOL = '@canonry/aeo-audit'
+const TOOL = '@ainyc/aeo-audit'
 
 // The score >= 70 gate, mirrored from the CLI's exit-code rule. Kept as a named
 // constant so the agent surface and the exit code can't drift apart.

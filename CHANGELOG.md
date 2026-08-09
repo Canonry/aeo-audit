@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.6.1 (2026-08-09)
+
+### Changed
+
+- **Canonical public package restored.** The engine again publishes as `@ainyc/aeo-audit`, preserving the existing public install path while adding the 4.3–4.6 hosted-engine and crawl capabilities.
+- **One validated artifact per release.** The release workflow validates and packs once, then publishes that tarball to npm before publishing the matching ClawHub skill version.
+
 ## 4.6.0 (2026-08-08)
 
 ### Added

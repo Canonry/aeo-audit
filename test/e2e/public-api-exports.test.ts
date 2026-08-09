@@ -36,7 +36,7 @@ import {
   type CrawlWarning,
   type SiteCrawlOptions,
   type SiteCrawlReport,
-} from '@canonry/aeo-audit'
+} from '@ainyc/aeo-audit'
 
 const code: AeoAuditErrorCode = 'BUDGET_EXCEEDED'
 const error = new AeoAuditError(code, 'budget spent')
