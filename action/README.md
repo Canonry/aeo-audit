@@ -50,7 +50,7 @@ jobs:
 On the **first run** there is no committed baseline, so the gate passes and the comment tells you to seed one. Generate it and commit it:
 
 ```bash
-npx @ainyc/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json
+npx @canonry/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json
 git add .aeo/baseline.default.json && git commit -m "chore: seed AEO baseline"
 ```
 
@@ -77,7 +77,7 @@ Score, page, and factor deltas only gate when the two runs are **comparable** (s
 When you *meant* to change content and the score legitimately moved, refresh the committed baseline in the **same PR** — the reviewer approves the score change as a normal file diff:
 
 ```bash
-npx @ainyc/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json
+npx @canonry/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json
 ```
 
 The PR comment always prints this exact command. Avoid loosening a global tolerance for a one-off drop — that permanently weakens the gate for every future PR.
@@ -156,7 +156,7 @@ In `static` mode `base-url` maps files to real page URLs (`out/about/index.html 
 - **Use `pull_request`, never `pull_request_target`.** On *fork* PRs the token is read-only with no secrets, so building the PR's code is safe-ish (the comment can't post and falls back to the job summary). On *same-repo branch* PRs the token and secrets ARE available while this action runs your `build-command` — keep the gate job's `permissions` minimal (`contents: read` + `pull-requests: write`) and put **no deploy/npm/cloud secrets in that job**.
 - `build-command`, `target`, `base-url`, and `audit-args` are **trusted maintainer config** — never wire PR-author-controlled values into them. The `with:` block is part of the PR diff, so protect `.github/workflows` with branch/required-workflow rules.
 - `audit-args` rejects the SSRF-relaxing flags (`--allow-local`, `--allow-private`, `--rewrite-sitemap-origin`) and `--lighthouse` in static mode. Default `static` mode does no network I/O at all.
-- The engine is pinned to `@ainyc/aeo-audit@4` (never `@latest`). Pin this action and the third-party actions above to commit SHAs for full supply-chain protection.
+- The engine is pinned to `@canonry/aeo-audit@4` (never `@latest`). Pin this action and the third-party actions above to commit SHAs for full supply-chain protection.
 
 ## Required checks & events
 

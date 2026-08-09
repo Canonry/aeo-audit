@@ -257,6 +257,8 @@ function deriveIndexability(input: {
   return { state: 'unknown', reasons: ['not-html-or-unavailable'], rulesetVersion: CRAWL_INDEXABILITY_RULESET_VERSION }
 }
 
+// Match the stable network identity used by fetch-page.ts. Package branding is
+// intentionally separate so existing robots.txt policies keep applying.
 function parseRobots(body: string, userAgent = 'ainyc-aeo-audit'): RobotsRules {
   const groups: Array<{ agents: string[]; rules: Array<{ allow: boolean; value: string }>; crawlDelaysMs: number[] }> = []
   let current: { agents: string[]; rules: Array<{ allow: boolean; value: string }>; crawlDelaysMs: number[] } | null = null

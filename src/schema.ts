@@ -13,7 +13,7 @@ export const SCHEMA_VERSION = '3.4'
 let cachedEngineVersion: string | null = null
 
 /**
- * The npm package version of `@ainyc/aeo-audit` at runtime, read once from the
+ * The npm package version of `@canonry/aeo-audit` at runtime, read once from the
  * package's own `package.json`. Embedded into report `compareMeta` so a stored
  * baseline records which engine produced it — scoring changes can ship under a
  * package version bump without changing `SCHEMA_VERSION`, so `compare` needs the

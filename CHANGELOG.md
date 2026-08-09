@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.6.2 (2026-08-09)
+
+### Changed
+
+- **Preferred Canonry package with Ainyc compatibility.** `@canonry/aeo-audit` is now the documented and runtime-facing package. The release workflow publishes `@ainyc/aeo-audit` at the same version as a normal compatibility package, so existing consumers keep their install path.
+- **One build, two verified package identities.** The release workflow pins npm 11.5.1 before packaging, creates the Canonry artifact once, derives the Ainyc artifact by changing only its package name, verifies matching versions and semantic package parity, then publishes Canonry first.
+- **Trusted-publisher bootstrap posture.** The release sequence establishes `@canonry/aeo-audit@0.0.0-bootstrap.0` to configure npm Trusted Publishing before the first stable Canonry release; `4.6.2` replaces npm's temporary initial `latest` tag. Each public scope trusts this repository workflow, and retry checks fail closed unless npm returns a valid matching SHA-512 integrity value.
+
 ## 4.6.1 (2026-08-09)
 
 ### Changed

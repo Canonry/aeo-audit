@@ -54,6 +54,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - run: npm install --global npm@11.5.1
+        if: steps.version.outputs.changed == 'true'
       - run: pnpm install --frozen-lockfile
         if: steps.version.outputs.changed == 'true'
       - run: pnpm run typecheck
@@ -66,17 +68,29 @@ jobs:
         if: steps.version.outputs.changed == 'true'
       - run: pnpm run test:e2e
         if: steps.version.outputs.changed == 'true'
-      - name: Pack release artifact
+      - name: Pack release artifacts
         if: steps.version.outputs.changed == 'true'
         run: |
-          mkdir release
+          rm -rf release
+          mkdir -p release/compat
           npm pack --ignore-scripts --pack-destination release
-          mv release/*.tgz release/package.tgz
+          mv release/*.tgz release/canonry-package.tgz
+          tar -xzf release/canonry-package.tgz -C release/compat
+          node -e "const fs = require('node:fs'); const path = 'release/compat/package/package.json'; const p = JSON.parse(fs.readFileSync(path, 'utf8')); p.name = '@ainyc/aeo-audit'; fs.writeFileSync(path, JSON.stringify(p, null, 2) + '\\n')"
+          (cd release/compat/package && npm pack --ignore-scripts --pack-destination ../..)
+          mv release/ainyc-aeo-audit-*.tgz release/ainyc-package.tgz
+          mkdir -p release/canonry-unpacked release/ainyc-unpacked
+          tar -xzf release/canonry-package.tgz -C release/canonry-unpacked
+          tar -xzf release/ainyc-package.tgz -C release/ainyc-unpacked
+          diff -qr --exclude=package.json release/canonry-unpacked/package release/ainyc-unpacked/package
+          node -e "const assert = require('node:assert/strict'); const fs = require('node:fs'); const canonry = JSON.parse(fs.readFileSync('release/canonry-unpacked/package/package.json', 'utf8')); const ainyc = JSON.parse(fs.readFileSync('release/ainyc-unpacked/package/package.json', 'utf8')); const { name: canonryName, ...canonryRest } = canonry; const { name: ainycName, ...ainycRest } = ainyc; assert.equal(canonryName, '@canonry/aeo-audit'); assert.equal(ainycName, '@ainyc/aeo-audit'); assert.deepStrictEqual(canonryRest, ainycRest)"
       - uses: actions/upload-artifact@v4
         if: steps.version.outputs.changed == 'true'
         with:
-          name: release-package
-          path: release/package.tgz
+          name: release-packages
+          path: |
+            release/canonry-package.tgz
+            release/ainyc-package.tgz
           if-no-files-found: error
 
   publish-npm:
@@ -94,34 +108,58 @@ jobs:
       - run: npm install --global npm@11.5.1
       - uses: actions/download-artifact@v4
         with:
-          name: release-package
+          name: release-packages
           path: release
       - name: Publish publicly to npm
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          LOCAL_INTEGRITY=$(node -e "const { createHash } = require('node:crypto'); const { readFileSync } = require('node:fs'); console.log('sha512-' + createHash('sha512').update(readFileSync('release/package.tgz')).digest('base64'))")
-          set +e
-          REGISTRY_RESULT=$(npm view "@ainyc/aeo-audit@$VERSION" dist.integrity --registry=https://registry.npmjs.org 2>&1)
-          REGISTRY_STATUS=$?
-          set -e
-          if [ "$REGISTRY_STATUS" -eq 0 ]; then
-            REMOTE_INTEGRITY="$REGISTRY_RESULT"
-          elif printf '%s\n' "$REGISTRY_RESULT" | grep -q 'E404'; then
-            REMOTE_INTEGRITY=""
-          else
-            printf '%s\n' "$REGISTRY_RESULT" >&2
-            exit "$REGISTRY_STATUS"
-          fi
-          if [ -n "$REMOTE_INTEGRITY" ]; then
-            if [ "$REMOTE_INTEGRITY" != "$LOCAL_INTEGRITY" ]; then
-              echo "Registry artifact does not match release/package.tgz" >&2
+          publish_package() {
+            PACKAGE_NAME="$1"
+            TARBALL="$2"
+            ACTUAL_NAME=$(tar -xOf "$TARBALL" package/package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8')).name")
+            ACTUAL_VERSION=$(tar -xOf "$TARBALL" package/package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8')).version")
+            if [ "$ACTUAL_NAME" != "$PACKAGE_NAME" ] || [ "$ACTUAL_VERSION" != "$VERSION" ]; then
+              echo "Release artifact $TARBALL declares $ACTUAL_NAME@$ACTUAL_VERSION, expected $PACKAGE_NAME@$VERSION" >&2
               exit 1
             fi
-            echo "@ainyc/aeo-audit@$VERSION already exists on npm"
-            exit 0
-          fi
-          npm publish ./release/package.tgz --registry=https://registry.npmjs.org --access public --provenance
+            LOCAL_INTEGRITY=$(node -e "const { createHash } = require('node:crypto'); const { readFileSync } = require('node:fs'); console.log('sha512-' + createHash('sha512').update(readFileSync('$TARBALL')).digest('base64'))")
+            REGISTRY_STDOUT=$(mktemp)
+            REGISTRY_STDERR=$(mktemp)
+            set +e
+            npm view "$PACKAGE_NAME@$VERSION" dist.integrity --registry=https://registry.npmjs.org >"$REGISTRY_STDOUT" 2>"$REGISTRY_STDERR"
+            REGISTRY_STATUS=$?
+            set -e
+            if [ "$REGISTRY_STATUS" -eq 0 ]; then
+              REMOTE_INTEGRITY=$(cat "$REGISTRY_STDOUT")
+              if ! printf '%s\n' "$REMOTE_INTEGRITY" | grep -Eq '^sha512-[A-Za-z0-9+/]+={0,2}$'; then
+                cat "$REGISTRY_STDERR" >&2
+                echo "Registry returned no valid sha512 integrity for $PACKAGE_NAME@$VERSION" >&2
+                rm -f "$REGISTRY_STDOUT" "$REGISTRY_STDERR"
+                exit 1
+              fi
+            elif grep -q 'E404' "$REGISTRY_STDERR"; then
+              REMOTE_INTEGRITY=""
+            else
+              cat "$REGISTRY_STDERR" >&2
+              rm -f "$REGISTRY_STDOUT" "$REGISTRY_STDERR"
+              exit "$REGISTRY_STATUS"
+            fi
+            if [ -n "$REMOTE_INTEGRITY" ]; then
+              if [ "$REMOTE_INTEGRITY" != "$LOCAL_INTEGRITY" ]; then
+                echo "Registry artifact does not match $TARBALL" >&2
+                rm -f "$REGISTRY_STDOUT" "$REGISTRY_STDERR"
+                exit 1
+              fi
+              echo "$PACKAGE_NAME@$VERSION already exists on npm"
+              rm -f "$REGISTRY_STDOUT" "$REGISTRY_STDERR"
+              return
+            fi
+            rm -f "$REGISTRY_STDOUT" "$REGISTRY_STDERR"
+            npm publish "./$TARBALL" --registry=https://registry.npmjs.org --access public --provenance
+          }
+          publish_package "@canonry/aeo-audit" "release/canonry-package.tgz"
+          publish_package "@ainyc/aeo-audit" "release/ainyc-package.tgz"
 
   publish-clawhub:
     needs: [prepare, publish-npm]

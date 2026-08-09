@@ -81,6 +81,8 @@ export interface ReadResponseBodyOptions {
   tooLargeMessage?: string
 }
 
+// Stable network identity retained across the @ainyc and @canonry package names.
+// Changing it would silently bypass existing site-specific robots rules.
 const USER_AGENT = 'AINYC-AEO-Audit/1.0'
 // Accept header used to probe for content-negotiation redirects (some sites
 // 307 .txt → non-existent .md when this header is present).

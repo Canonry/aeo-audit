@@ -1,7 +1,7 @@
 # AEO Audit Roadmap (v1.1 -> v1.3)
 
 ## Goal
-Build `@ainyc/aeo-audit` into the most reliable open-source technical AEO auditor for CI and engineering teams, while laying the groundwork for competitive monitoring features.
+Build `@canonry/aeo-audit` into the most reliable open-source technical AEO auditor for CI and engineering teams, while laying the groundwork for competitive monitoring features.
 
 ## Positioning
 - Primary market fit: engineering-first technical AEO audits (single page and site-level)
@@ -33,7 +33,7 @@ Build `@ainyc/aeo-audit` into the most reliable open-source technical AEO audito
 ### Deliverables
 | Area | Deliverable | Target Files | Acceptance Criteria |
 |---|---|---|---|
-| Publish | npm release + release checklist | `package.json`, `.github/workflows/publish.yml`, `README.md` | `npx @ainyc/aeo-audit` works from public registry |
+| Publish | npm release + release checklist | `package.json`, `.github/workflows/publish.yml`, `README.md` | `npx @canonry/aeo-audit` works from public registry |
 | CI Integration | Official GitHub Action wrapper | `.github/actions/aeo-audit/*`, `README.md` | Action runs with URL input and uploads JSON artifact |
 | Report Contract | `reportVersion` + JSON schema file | `src/index.js`, `src/formatters/json.js`, `schemas/report.schema.json` | Reports validate against schema in CI |
 | Factor Validation | strict factor flag handling in CLI and API docs | `src/cli.js`, `src/index.js`, `README.md` | Unknown factors fail fast with clear error |

@@ -13,7 +13,7 @@ aeo_engine() {
     # shellcheck disable=SC2086
     $AEO_ENGINE_CMD "$@"
   else
-    npx -y "@ainyc/aeo-audit@${VER}" "$@"
+    npx -y "@canonry/aeo-audit@${VER}" "$@"
   fi
 }
 
