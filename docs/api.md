@@ -1,6 +1,8 @@
 # Programmatic API
 
-The library exposes three audit entry points. **Use `runSitemapAudit` for site-wide checks.** `runAeoAudit` only fetches the URL you pass it, so per-page issues like duplicate `FAQPage` blocks, JSON parse errors, or missing schema on individual templates are invisible if you call it on the homepage of a multi-page site.
+The library exposes four audit entry points. Use `runSiteCrawl` when you need a page graph, crawl depth, or internal-link metrics.
+
+Use `runSitemapAudit` when you need only a sitemap score rollup. `runAeoAudit` fetches only the URL that you pass.
 
 TypeScript declaration files are included automatically.
 
@@ -23,6 +25,40 @@ const report = await runAeoAudit('https://example.com/specific-page', {
 console.log(report.overallScore) // 98
 console.log(report.factors)      // Array of factor results with scores, findings, recommendations
 ```
+
+## Full site crawl
+
+`runSiteCrawl` starts with the root URL, recursive sitemaps, and sitemap directives from `robots.txt`. It then follows normalized internal HTML links.
+
+The result includes every discoverable URL within the limits. It cannot find a URL that has no link, sitemap entry, or known seed.
+The v1 crawl boundary is the root URL's exact host (including any non-default port). Cross-host links and redirects are recorded but never followed.
+
+```ts
+import { runSiteCrawl } from '@canonry/aeo-audit'
+
+const report = await runSiteCrawl('https://example.com', {
+  mode: 'summary',
+  maxPages: 5_000,
+  maxEdges: 250_000,
+  maxDepth: 20,
+  checkDeadLinks: false,
+  onEvent: async (event) => {
+    await saveCheckpoint(event)
+  },
+})
+
+console.log(report.summary.complete)
+console.log(report.summary.terminationReason)
+console.log(report.deadLinks.state) // 'disabled'
+```
+
+The event handler receives bounded page, edge, progress, metric, and summary batches. Each batch has a stable ID and checksum.
+
+`checkDeadLinks` is false by default. If it is true, the engine reports failed internal targets that the crawl already observed.
+
+The engine never fetches an external link for dead-link analysis. A false `summary.complete` value means that a declared crawl limit stopped discovery.
+
+Use `mode: 'full'` for a returned `pages` and `edges` graph. Use summary mode when the event handler stores the graph.
 
 ## Site-wide (sitemap)
 

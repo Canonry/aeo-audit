@@ -18,7 +18,9 @@ import {
   isAeoAuditError,
   isAeoAuditErrorCode,
   runAeoAudit,
+  runSiteCrawl,
   runSitemapAudit,
+  CRAWL_SCHEMA_VERSION,
   type AeoAuditErrorCode,
   type AeoAuditOutboundAttempt,
   type AeoAuditOutboundAttemptKind,
@@ -30,6 +32,9 @@ import {
   type SitemapAuditOptions,
   type SitemapAuditPartialReason,
   type SitemapAuditReport,
+  type CrawlEvent,
+  type SiteCrawlOptions,
+  type SiteCrawlReport,
 } from '@canonry/aeo-audit'
 
 const code: AeoAuditErrorCode = 'BUDGET_EXCEEDED'
@@ -55,6 +60,13 @@ const sitemapOptions: SitemapAuditOptions = {
   maxFetches: 10,
   maxDurationMs: 1_000,
 }
+const crawlOptions: SiteCrawlOptions = {
+  ...auditOptions,
+  sitemapUrl: 'https://example.com/custom-sitemap.xml',
+  maxPages: 100,
+  checkDeadLinks: false,
+  onEvent: (event: CrawlEvent) => { event.sequence satisfies number },
+}
 const budget: SitemapAuditBudgetMetadata = {
   maxFetches: 10,
   fetchesStarted: 10,
@@ -73,6 +85,9 @@ const partialReason: SitemapAuditPartialReason = 'duration-budget-exceeded'
 
 void runAeoAudit
 void runSitemapAudit
+void runSiteCrawl
+void crawlOptions
+void CRAWL_SCHEMA_VERSION
 void engineVersion
 void isAeoAuditError
 void isAeoAuditErrorCode
@@ -83,6 +98,7 @@ void metadata
 void partialReason
 void (undefined as unknown as AuditReport)
 void (undefined as unknown as SitemapAuditReport)
+void (undefined as unknown as SiteCrawlReport)
 `, 'utf8')
 
   const result = spawnSync(process.execPath, [

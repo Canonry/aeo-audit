@@ -6,6 +6,7 @@ import {
   isCallerAbort,
   isFetchBudgetExceededError,
   normalizeTargetUrl,
+  readResponseBodyAsText,
   throwIfAborted,
 } from './fetch-page.js'
 import { runAeoAudit } from './index.js'
@@ -204,6 +205,7 @@ async function fetchSitemapResponse(url: string, fetchOptions?: string | Sitemap
   throwIfAborted(signal)
 
   let response: Response
+  let responseDeadlineAt: number
   try {
     const result = await fetchWithValidatedRedirects(url, {
       timeoutMs: SITEMAP_TIMEOUT_MS,
@@ -214,6 +216,7 @@ async function fetchSitemapResponse(url: string, fetchOptions?: string | Sitemap
       outboundAttemptKind: kind,
     })
     response = result.response
+    responseDeadlineAt = result.responseDeadlineAt
   } catch (error) {
     if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) throw error
     if (error instanceof AeoAuditError) throw error
@@ -221,40 +224,25 @@ async function fetchSitemapResponse(url: string, fetchOptions?: string | Sitemap
   }
 
   if (!response.ok) {
-    // Drain the body so the socket can be released.
-    try {
-      await response.body?.cancel()
-    } catch {
-      /* ignore */
-    }
+    // Best-effort socket release must not become another blocking surface.
+    if (response.body) void response.body.cancel().catch(() => {})
     return { body: '', status: response.status }
   }
 
-  const reader = response.body?.getReader()
-  if (!reader) return { body: '', status: response.status }
-
-  const chunks: Buffer[] = []
-  let totalBytes = 0
   try {
-    for (;;) {
-      throwIfAborted(signal)
-      const { done, value } = await reader.read()
-      if (done) break
-      const chunk = Buffer.from(value)
-      totalBytes += chunk.length
-      if (totalBytes > SITEMAP_MAX_BYTES) {
-        await reader.cancel()
-        throw new AeoAuditError('BODY_TOO_LARGE', `Sitemap exceeded ${SITEMAP_MAX_BYTES} bytes.`)
-      }
-      chunks.push(chunk)
-    }
+    const body = await readResponseBodyAsText(response, {
+      maxBytes: SITEMAP_MAX_BYTES,
+      signal,
+      deadlineAt: responseDeadlineAt,
+      deadlineError: () => new AeoAuditError('TIMEOUT', `Request timed out after ${SITEMAP_TIMEOUT_MS}ms.`),
+      tooLargeMessage: `Sitemap exceeded ${SITEMAP_MAX_BYTES} bytes.`,
+    })
+    return { body, status: response.status }
   } catch (error) {
     if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) throw error
     if (error instanceof AeoAuditError) throw error
     throw new AeoAuditError('UNREACHABLE', 'Could not read sitemap response.', { cause: error })
   }
-
-  return { body: Buffer.concat(chunks).toString('utf8'), status: response.status }
 }
 
 async function fetchSitemapBody(url: string, options?: string | SitemapFetchOptions): Promise<string> {
