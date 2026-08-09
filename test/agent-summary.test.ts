@@ -148,7 +148,7 @@ describe('formatAgent / formatSitemapAgent', () => {
     // The point of agent mode: no 27 pages of factor/page detail.
     expect(parsed.factors).toBeUndefined()
     expect(parsed.pages).toBeUndefined()
-    expect(parsed.tool).toBe('@canonry/aeo-audit')
+    expect(parsed.tool).toBe('@ainyc/aeo-audit')
   })
 
   it('formatSitemapAgent emits valid JSON', () => {

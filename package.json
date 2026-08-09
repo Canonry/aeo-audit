@@ -1,5 +1,5 @@
 {
-  "name": "@canonry/aeo-audit",
+  "name": "@ainyc/aeo-audit",
   "version": "4.6.1",
   "description": "The most comprehensive open-source Answer Engine Optimization (AEO) audit tool. Scores websites across 16 ranking factors that determine AI citation.",
   "type": "module",
@@ -31,7 +31,8 @@
     }
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "dist/",

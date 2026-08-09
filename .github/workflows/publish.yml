@@ -22,15 +22,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Check for version change
+      - name: Check for package identity change
         id: version
         run: |
           BASE=$(git log --pretty=format:'%H' -1 HEAD^ 2>/dev/null || echo "")
-          PREV=$(git show "$BASE":package.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).version" 2>/dev/null || echo "")
-          CURR=$(node -p "require('./package.json').version")
-          if [ "$PREV" != "$CURR" ]; then
+          PREV_ID=$(git show "$BASE":package.json 2>/dev/null | node -p "const p = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); p.name + '@' + p.version" 2>/dev/null || echo "")
+          CURR_ID=$(node -p "const p = require('./package.json'); p.name + '@' + p.version")
+          CURR_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PREV_ID" != "$CURR_ID" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$CURR" >> "$GITHUB_OUTPUT"
+            echo "version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
@@ -68,40 +69,6 @@ jobs:
           path: release/package.tgz
           if-no-files-found: error
 
-  publish-github:
-    needs: prepare
-    if: needs.prepare.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: https://npm.pkg.github.com
-          scope: '@canonry'
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-package
-          path: release
-      - name: Publish to GitHub Packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          LOCAL_INTEGRITY=$(node -e "const { createHash } = require('node:crypto'); const { readFileSync } = require('node:fs'); console.log('sha512-' + createHash('sha512').update(readFileSync('release/package.tgz')).digest('base64'))")
-          REMOTE_INTEGRITY=$(npm view "@canonry/aeo-audit@$VERSION" dist.integrity --registry=https://npm.pkg.github.com 2>/dev/null || true)
-          if [ -n "$REMOTE_INTEGRITY" ]; then
-            if [ "$REMOTE_INTEGRITY" != "$LOCAL_INTEGRITY" ]; then
-              echo "Registry artifact does not match release/package.tgz" >&2
-              exit 1
-            fi
-            echo "@canonry/aeo-audit@$VERSION already exists on GitHub Packages"
-            exit 0
-          fi
-          npm publish release/package.tgz --registry=https://npm.pkg.github.com
-
   publish-npm:
     needs: prepare
     if: needs.prepare.outputs.changed == 'true'
@@ -124,19 +91,19 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           LOCAL_INTEGRITY=$(node -e "const { createHash } = require('node:crypto'); const { readFileSync } = require('node:fs'); console.log('sha512-' + createHash('sha512').update(readFileSync('release/package.tgz')).digest('base64'))")
-          REMOTE_INTEGRITY=$(npm view "@canonry/aeo-audit@$VERSION" dist.integrity --registry=https://registry.npmjs.org 2>/dev/null || true)
+          REMOTE_INTEGRITY=$(npm view "@ainyc/aeo-audit@$VERSION" dist.integrity --registry=https://registry.npmjs.org 2>/dev/null || true)
           if [ -n "$REMOTE_INTEGRITY" ]; then
             if [ "$REMOTE_INTEGRITY" != "$LOCAL_INTEGRITY" ]; then
               echo "Registry artifact does not match release/package.tgz" >&2
               exit 1
             fi
-            echo "@canonry/aeo-audit@$VERSION already exists on npm"
+            echo "@ainyc/aeo-audit@$VERSION already exists on npm"
             exit 0
           fi
-          npm publish release/package.tgz --registry=https://registry.npmjs.org --access public
+          npm publish release/package.tgz --registry=https://registry.npmjs.org --access public --provenance
 
   publish-clawhub:
-    needs: [prepare, publish-github, publish-npm]
+    needs: [prepare, publish-npm]
     if: needs.prepare.outputs.changed == 'true'
     runs-on: ubuntu-latest
     permissions:

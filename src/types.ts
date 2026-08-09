@@ -936,7 +936,7 @@ export interface BatchPlatformDetectionReport {
  * comparable. Embedded at audit time; absent on reports from older engines.
  */
 export interface CompareMeta {
-  /** npm package version (`@canonry/aeo-audit`) that produced the report. */
+  /** npm package version (`@ainyc/aeo-audit`) that produced the report. */
   engineVersion: string
   /** Active factor-id set for the audit, sorted. A mismatch means the weighted
    * basis differs (`--factors`/`--include-*`), so score deltas are apples-to-oranges. */

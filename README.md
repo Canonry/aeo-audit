@@ -1,4 +1,4 @@
-# @canonry/aeo-audit
+# @ainyc/aeo-audit
 
 [![version](https://img.shields.io/badge/version-4.6.1-blue)](./package.json) [![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
@@ -19,20 +19,20 @@ Website: [canonry.ai](https://canonry.ai)
 ## Audit your site
 
 ```bash
-npx @canonry/aeo-audit https://example.com
+npx @ainyc/aeo-audit https://example.com
 ```
 
 Prints a scored report. Common variations:
 
 ```bash
 # Every page in the sitemap, site-wide issues only
-npx @canonry/aeo-audit https://example.com --sitemap --top-issues
+npx @ainyc/aeo-audit https://example.com --sitemap --top-issues
 
 # JSON for CI/CD (exit 1 when score < 70)
-npx @canonry/aeo-audit https://example.com --format json
+npx @ainyc/aeo-audit https://example.com --format json
 
 # A built directory, offline
-npx @canonry/aeo-audit ./out --base-url https://example.com
+npx @ainyc/aeo-audit ./out --base-url https://example.com
 ```
 
 Full flag and mode reference: [docs/cli.md](docs/cli.md).
@@ -75,7 +75,7 @@ jobs:
           baseline-path: ".aeo/baseline.default.json"
 ```
 
-The first run has no baseline, so it passes and tells you to seed one (`npx @canonry/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json`, then commit it). See the [aeo-audit-action README](https://github.com/Canonry/aeo-audit-action#readme) for `url`/`sitemap` modes, baseline strategies, monorepos, tolerances, and every input.
+The first run has no baseline, so it passes and tells you to seed one (`npx @ainyc/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json`, then commit it). See the [aeo-audit-action README](https://github.com/Canonry/aeo-audit-action#readme) for `url`/`sitemap` modes, baseline strategies, monorepos, tolerances, and every input.
 
 ## Documentation
 
@@ -85,7 +85,7 @@ The first run has no baseline, so it passes and tells you to seed one (`npx @can
 | [GitHub Action](https://github.com/Canonry/aeo-audit-action) | The CI regression gate: inputs, baselines, monorepos |
 | [Scoring](docs/scoring.md) | The 16 factors, weights, score bands |
 | [Programmatic API](docs/api.md) | `runAeoAudit`, `runSiteCrawl`, `runSitemapAudit`, `runStaticAudit` |
-| [Package distribution](docs/private-github-packages.md) | Public npm installs and GitHub Packages mirror |
+| [npm package](https://www.npmjs.com/package/@ainyc/aeo-audit) | Public CLI and library distribution |
 | [Skill](docs/skill.md) | `/aeo` modes and install |
 | [Changelog](CHANGELOG.md) | Release history |
 | [Roadmap](ROADMAP.md) | What's planned |

@@ -16,7 +16,7 @@ import type {
   SitemapPageResult,
 } from './types.js'
 
-const TOOL = '@canonry/aeo-audit'
+const TOOL = '@ainyc/aeo-audit'
 
 /**
  * Conservative, noise-aware defaults. Tolerances are deliberately non-zero:

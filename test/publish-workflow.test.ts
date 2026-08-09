@@ -5,7 +5,7 @@ const packageJson = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ) as {
   name: string
-  publishConfig?: { registry?: string }
+  publishConfig?: { access?: string; registry?: string }
 }
 
 const workflow = readFileSync(
@@ -14,38 +14,43 @@ const workflow = readFileSync(
 )
 
 describe('release workflow', () => {
-  it('publishes the same package to GitHub Packages and public npm', () => {
-    expect(packageJson.name).toBe('@canonry/aeo-audit')
+  it('publishes the canonical package to public npm only', () => {
+    expect(packageJson.name).toBe('@ainyc/aeo-audit')
     expect(packageJson.publishConfig?.registry).toBe(
-      'https://npm.pkg.github.com',
+      'https://registry.npmjs.org',
     )
+    expect(packageJson.publishConfig?.access).toBe('public')
 
     expect(workflow).toContain('id-token: write')
     expect(workflow).toContain(
-      'npm publish release/package.tgz --registry=https://npm.pkg.github.com',
+      'npm publish release/package.tgz --registry=https://registry.npmjs.org --access public --provenance',
     )
-    expect(workflow).toContain(
-      'npm publish release/package.tgz --registry=https://registry.npmjs.org --access public',
-    )
-    expect(workflow).toContain('NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}')
     expect(workflow).toContain('npm install --global npm@11.5.1')
+    expect(workflow).not.toContain('npm.pkg.github.com')
+    expect(workflow).not.toContain('secrets.GITHUB_TOKEN')
+    expect(workflow).not.toContain('NODE_AUTH_TOKEN')
   })
 
-  it('packs once and fans out only after validation succeeds', () => {
+  it('packs once and publishes only after validation succeeds', () => {
     expect(workflow).toContain('name: Pack release artifact')
     expect(workflow).toContain('name: release-package')
     expect(workflow).toContain('needs: prepare')
-    expect(workflow).toContain('needs: [prepare, publish-github, publish-npm]')
+    expect(workflow).toContain('needs: [prepare, publish-npm]')
   })
 
   it('serializes main-only releases and verifies registry integrity on retries', () => {
     expect(workflow).toContain('group: package-release')
     expect(workflow).toContain('cancel-in-progress: false')
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'")
-    expect(workflow.match(/dist\.integrity/g)).toHaveLength(2)
-    expect(workflow.match(/createHash\('sha512'\)/g)).toHaveLength(2)
+    expect(workflow.match(/dist\.integrity/g)).toHaveLength(1)
+    expect(workflow.match(/createHash\('sha512'\)/g)).toHaveLength(1)
     expect(
       workflow.match(/Registry artifact does not match release\/package\.tgz/g),
-    ).toHaveLength(2)
+    ).toHaveLength(1)
+  })
+
+  it('publishes when either the package name or version changes', () => {
+    expect(workflow).toContain("p.name + '@' + p.version")
+    expect(workflow).toContain('if [ "$PREV_ID" != "$CURR_ID" ]; then')
   })
 })
