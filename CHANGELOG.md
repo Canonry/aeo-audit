@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.7.0 (2026-08-11)
+
+### Added
+
+- **Every link records where it sits in the page.** Consumers had no ground truth for telling a nav or footer link from an in-prose editorial one, so they inferred it from ubiquity: key on (target URL, anchor text) and call the link chrome when the pair repeats across most of the site. That inference cannot see the case it most needs to. On canonry.ai, an editorial in-prose link `/blog/how-to-rank-on-chatgpt -> /chatgpt-seo-agency` with the anchor "ChatGPT SEO Agency" is byte-identical to the primary nav's link to the same page, because good anchor text reuses the destination's canonical name — which is the name the nav already uses. The pair repeated on nearly every page, the editorial link was classified as chrome and hidden from the site map, and 53 newly added editorial links moved the measured content-link count by zero. Each `<a href>` occurrence is now classified from HTML landmarks as `navigation` (inside `nav`, `header`, `footer`, `aside`, or `role="navigation" | "banner" | "contentinfo" | "complementary"`), `content` (inside `main`, `article`, or `role="main"`), or `unknown`, resolved on the NEAREST landmark ancestor so nesting reads correctly: a `nav` inside `main` is navigation. Placement never looks at class names or ids — a `<div class="footer">` with no landmark yields `unknown`, a deliberate absence of evidence rather than the same unreliable guess in a new place, and the consumer owns the policy for it. Detection is one memoized upward walk per link, so a page costs a single visit per node on any link's ancestor path.
+- **`placementOccurrences` on every edge.** One edge aggregates every occurrence of the same `(from, to)` pair, and those occurrences can sit in different parts of a page — collapsing them to a single verdict is the bug this exists to fix — so placement is recorded as counts: `{ navigation, content, unknown }`. The motivating page now yields `{ navigation: 1, content: 1, unknown: 0 }` for one edge. The counts sum to `totalOccurrences` on an `anchor` edge; `redirect` and `canonical` edges carry zeros because a non-anchor edge has no position in a page, the same rule `anchorSummaries` already follows.
+- **`CrawlLinkPlacement` and `CrawlPlacementOccurrences`** are exported from the package root, along with `CRAWL_LINK_PLACEMENT_RULESET_VERSION` (`LINK_PLACEMENT_RULESET_VERSION` from the crawl module), so a consumer can pin to the landmark rules and detect a change in them independently of the schema. `CrawlSummary` carries the same value as `linkPlacementRulesetVersion`.
+
+### Changed
+
+- **Crawl schema `1.1` → `1.2` and crawl engine `1.1.0` → `1.2.0`** for the added edge field and the new thing the traversal records. Purely additive: no existing field changed shape or meaning, and a consumer reading the 1.1 contract keeps working untouched.
+
 ## 4.6.2 (2026-08-09)
 
 ### Changed

@@ -21,6 +21,7 @@ import {
   runSiteCrawl,
   runSitemapAudit,
   CRAWL_SCHEMA_VERSION,
+  CRAWL_LINK_PLACEMENT_RULESET_VERSION,
   type AeoAuditErrorCode,
   type AeoAuditOutboundAttempt,
   type AeoAuditOutboundAttemptKind,
@@ -32,7 +33,10 @@ import {
   type SitemapAuditOptions,
   type SitemapAuditPartialReason,
   type SitemapAuditReport,
+  type CrawlEdgeObservation,
   type CrawlEvent,
+  type CrawlLinkPlacement,
+  type CrawlPlacementOccurrences,
   type CrawlWarning,
   type SiteCrawlOptions,
   type SiteCrawlReport,
@@ -90,8 +94,25 @@ const metadata: SitemapAuditMetadata = {
   budget,
 }
 const partialReason: SitemapAuditPartialReason = 'duration-budget-exceeded'
+const placement: CrawlLinkPlacement = 'content'
+const placementOccurrences: CrawlPlacementOccurrences = { navigation: 1, content: 1, unknown: 0 }
+const edge: CrawlEdgeObservation = {
+  key: 'edge:0000',
+  from: 'https://example.com/blog/post',
+  to: 'https://example.com/service',
+  type: 'anchor',
+  classification: 'internal',
+  totalOccurrences: 2,
+  followableOccurrences: 2,
+  nofollowOccurrences: 0,
+  anchorSummaries: [{ text: 'Service', occurrences: 2 }],
+  placementOccurrences,
+}
+const inContent: number = edge.placementOccurrences[placement]
 
 void runAeoAudit
+void inContent
+void CRAWL_LINK_PLACEMENT_RULESET_VERSION
 void runSitemapAudit
 void runSiteCrawl
 void crawlOptions

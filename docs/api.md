@@ -65,6 +65,24 @@ A false `summary.complete` value means that a declared crawl limit or the exact-
 
 Use `mode: 'full'` for a returned `pages` and `edges` graph. Use summary mode when the event handler stores the graph.
 
+### Link placement
+
+Every anchor edge carries `placementOccurrences: { navigation, content, unknown }`, which is where the occurrences of that link sat in the page. Placement is read from HTML landmarks, so a nav link and an in-prose link to the same URL with the same anchor text are distinguishable without inferring anything from how often the link repeats across the site.
+
+| Placement | Resolved from |
+|---|---|
+| `navigation` | `nav`, `header`, `footer`, `aside`, or `role="navigation" \| "banner" \| "contentinfo" \| "complementary"` |
+| `content` | `main`, `article`, or `role="main"` |
+| `unknown` | The page declares no landmark that answers the question |
+
+Placement resolves on the **nearest** landmark ancestor, so a `nav` inside `main` is `navigation` and an `article` inside an `aside` is `content`. Within one element an explicit landmark `role` beats the tag name; a role the engine does not know falls through to the tag name.
+
+`unknown` is a deliberate absence of evidence, never a guess. Class names and ids are never consulted, so a `<div class="footer">` on a page with no landmarks reports `unknown` and the caller decides the policy for it.
+
+Counts rather than a single value, because one edge aggregates every occurrence of the same `(from, to)` pair and those occurrences can differ: a page that links a target once from its nav and once from its prose yields `{ navigation: 1, content: 1, unknown: 0 }`. The counts sum to `totalOccurrences` on an `anchor` edge. `redirect` and `canonical` edges carry zeros, because a non-anchor edge has no position in a page.
+
+`summary.linkPlacementRulesetVersion` (`CRAWL_LINK_PLACEMENT_RULESET_VERSION`) versions the landmark rules independently of `crawlSchemaVersion`, so a stored graph can tell a rules change from a shape change.
+
 ## Site-wide (sitemap)
 
 ```ts

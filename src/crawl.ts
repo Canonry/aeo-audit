@@ -17,8 +17,10 @@ import type {
   CrawlEdgeType,
   CrawlEvent,
   CrawlIndexabilityState,
+  CrawlLinkPlacement,
   CrawlPageMetrics,
   CrawlPageObservation,
+  CrawlPlacementOccurrences,
   CrawlProgress,
   CrawlSummary,
   CrawlTerminationReason,
@@ -34,6 +36,7 @@ import type {
 import {
   CRAWL_ENGINE_VERSION,
   CRAWL_INDEXABILITY_RULESET_VERSION,
+  CRAWL_LINK_PLACEMENT_RULESET_VERSION,
   CRAWL_LINK_SCORE_ALGORITHM_VERSION,
   CRAWL_SCHEMA_VERSION,
   CRAWL_URL_NORMALIZATION_VERSION,
@@ -321,14 +324,95 @@ function robotsAllows(url: string, robots: RobotsRules): boolean {
   return best?.allow ?? true
 }
 
+/** Landmarks that are page chrome by definition, by tag name and by ARIA role. */
+const CHROME_LANDMARK_TAGS = new Set(['nav', 'header', 'footer', 'aside'])
+const CHROME_LANDMARK_ROLES = new Set(['navigation', 'banner', 'contentinfo', 'complementary'])
+/** Landmarks that hold a page's own body content. */
+const CONTENT_LANDMARK_TAGS = new Set(['main', 'article'])
+const CONTENT_LANDMARK_ROLES = new Set(['main'])
+
+/** The subset of a parsed DOM node that placement reads. */
+interface PlacementNode {
+  type: string
+  name?: string
+  attribs?: Record<string, string>
+  parent: PlacementNode | null
+}
+
+/**
+ * Landmark contribution of a single element, or null when it is not a landmark.
+ *
+ * Precedence within one element: an explicit `role` naming a landmark we know
+ * beats the tag name, so `<div role="navigation">` is chrome and
+ * `<div role="main">` is content. A role we do not know falls through to the tag
+ * name rather than suppressing it, which keeps `<nav role="tablist">` chrome.
+ * Class names and ids are never consulted: `<div class="footer">` is exactly the
+ * unreliable signal this function exists to replace, so it stays unresolved.
+ */
+function landmarkOf(node: PlacementNode): CrawlLinkPlacement | null {
+  if (node.type !== 'tag') return null
+  for (const token of (node.attribs?.role ?? '').toLowerCase().trim().split(/\s+/)) {
+    if (CHROME_LANDMARK_ROLES.has(token)) return 'navigation'
+    if (CONTENT_LANDMARK_ROLES.has(token)) return 'content'
+  }
+  const name = (node.name ?? '').toLowerCase()
+  if (CHROME_LANDMARK_TAGS.has(name)) return 'navigation'
+  if (CONTENT_LANDMARK_TAGS.has(name)) return 'content'
+  return null
+}
+
+/**
+ * Resolve where link occurrences sit, from the NEAREST landmark ancestor.
+ *
+ * Nearest wins in both directions, because nesting is how real templates are
+ * built: a `nav` inside `main` is `navigation`, and an `article` inside an
+ * `aside` is `content`. A link with no landmark ancestor at all is `unknown` —
+ * an absence of evidence the consumer decides what to do with, never a guess.
+ *
+ * One upward walk per link, memoized per ancestor node, so a page costs a single
+ * visit per node on any link's ancestor path however many links share a
+ * container. Returns a resolver bound to one parsed document.
+ */
+function placementResolver(): (start: PlacementNode) => CrawlLinkPlacement {
+  const memo = new Map<PlacementNode, CrawlLinkPlacement>()
+  return (start) => {
+    const pending: PlacementNode[] = []
+    let node = start.parent
+    let resolved: CrawlLinkPlacement | null = null
+    while (node) {
+      const cached = memo.get(node)
+      if (cached) {
+        resolved = cached
+        break
+      }
+      const own = landmarkOf(node)
+      if (own) {
+        memo.set(node, own)
+        resolved = own
+        break
+      }
+      pending.push(node)
+      node = node.parent
+    }
+    const placement = resolved ?? 'unknown'
+    for (const visited of pending) memo.set(visited, placement)
+    return placement
+  }
+}
+
+function emptyPlacementOccurrences(): CrawlPlacementOccurrences {
+  return { navigation: 0, content: 0, unknown: 0 }
+}
+
 function collectLinks(html: string, from: string, limit: number): {
-  links: Array<{ to: string; text: string; nofollow: boolean }>
+  links: Array<{ to: string; text: string; nofollow: boolean; placement: CrawlLinkPlacement }>
   canonicalUrl: string | null
   metaRobots: string[]
   truncated: boolean
 } {
   const $ = load(html)
-  const links: Array<{ to: string; text: string; nofollow: boolean }> = []
+  const links: Array<{ to: string; text: string; nofollow: boolean; placement: CrawlLinkPlacement }> = []
+  const placementOf = placementResolver()
   let total = 0
   $('a[href]').each((_, element) => {
     total += 1
@@ -340,6 +424,7 @@ function collectLinks(html: string, from: string, limit: number): {
         to: normalizeCrawlUrl(href, from),
         text: $(element).text().replace(/\s+/g, ' ').trim().slice(0, 200),
         nofollow: (($(element).attr('rel') ?? '').toLowerCase().split(/\s+/)).includes('nofollow'),
+        placement: placementOf(element),
       })
     } catch {
       // A malformed href has no usable crawl identity.
@@ -545,14 +630,25 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     }
     if (rows.length > 0) await emit('progress', { progress: progress() })
   }
-  const recordEdge = async (input: {
-    from: string
-    to: string
-    type: CrawlEdgeType
-    classification: CrawlEdgeClassification
-    nofollow?: boolean
-    text?: string
-  }): Promise<void> => {
+  // Anchor-only detail is carried on the anchor variant so a call site cannot
+  // omit the text, nofollow, or placement of an occurrence it just observed.
+  const recordEdge = async (input:
+    | {
+      from: string
+      to: string
+      type: 'anchor'
+      classification: CrawlEdgeClassification
+      nofollow: boolean
+      text: string
+      placement: CrawlLinkPlacement
+    }
+    | {
+      from: string
+      to: string
+      type: Exclude<CrawlEdgeType, 'anchor'>
+      classification: CrawlEdgeClassification
+    },
+  ): Promise<void> => {
     const key = anchorKey(input.from, input.to, input.type)
     const current = edges.get(key)
     if (current) {
@@ -560,9 +656,10 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       if (input.type === 'anchor') {
         if (input.nofollow) current.nofollowOccurrences += 1
         else current.followableOccurrences += 1
-        const existing = current.anchorSummaries.find((summary) => summary.text === (input.text ?? ''))
+        current.placementOccurrences[input.placement] += 1
+        const existing = current.anchorSummaries.find((summary) => summary.text === input.text)
         if (existing) existing.occurrences += 1
-        else if (current.anchorSummaries.length < MAX_ANCHOR_SUMMARIES) current.anchorSummaries.push({ text: input.text ?? '', occurrences: 1 })
+        else if (current.anchorSummaries.length < MAX_ANCHOR_SUMMARIES) current.anchorSummaries.push({ text: input.text, occurrences: 1 })
         current.anchorSummaries.sort((left, right) => left.text.localeCompare(right.text))
       }
       pendingEdges.set(key, current)
@@ -572,6 +669,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       budget.stop('max-edges')
       return
     }
+    const placementOccurrences = emptyPlacementOccurrences()
+    if (input.type === 'anchor') placementOccurrences[input.placement] = 1
     const edge: CrawlEdgeObservation = {
       key,
       from: input.from,
@@ -581,7 +680,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       totalOccurrences: 1,
       followableOccurrences: input.type === 'anchor' && !input.nofollow ? 1 : 0,
       nofollowOccurrences: input.type === 'anchor' && input.nofollow ? 1 : 0,
-      anchorSummaries: input.type === 'anchor' ? [{ text: input.text ?? '', occurrences: 1 }] : [],
+      anchorSummaries: input.type === 'anchor' ? [{ text: input.text, occurrences: 1 }] : [],
+      placementOccurrences,
     }
     edges.set(key, edge)
     pendingEdges.set(key, edge)
@@ -978,7 +1078,15 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     }
     for (const link of parsed.links) {
       const classification: CrawlEdgeClassification = isAllowed(new URL(link.to)) ? 'internal' : 'external'
-      await recordEdge({ from: page.finalUrl!, to: link.to, type: 'anchor', classification, nofollow: link.nofollow || pageNofollow, text: link.text })
+      await recordEdge({
+        from: page.finalUrl!,
+        to: link.to,
+        type: 'anchor',
+        classification,
+        nofollow: link.nofollow || pageNofollow,
+        text: link.text,
+        placement: link.placement,
+      })
       if (classification === 'internal') {
         await markDiscovered(link.to, item.depth + 1, { from: page.finalUrl! })
       }
@@ -1163,6 +1271,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     urlNormalizationVersion: CRAWL_URL_NORMALIZATION_VERSION,
     indexabilityRulesetVersion: CRAWL_INDEXABILITY_RULESET_VERSION,
     linkScoreAlgorithmVersion: CRAWL_LINK_SCORE_ALGORITHM_VERSION,
+    linkPlacementRulesetVersion: CRAWL_LINK_PLACEMENT_RULESET_VERSION,
     rootUrl,
     finalRootUrl,
     startedAt,
@@ -1333,3 +1442,4 @@ export const SITE_CRAWL_ENGINE_VERSION = CRAWL_ENGINE_VERSION
 export const URL_NORMALIZATION_VERSION = CRAWL_URL_NORMALIZATION_VERSION
 export const INDEXABILITY_RULESET_VERSION = CRAWL_INDEXABILITY_RULESET_VERSION
 export const LINK_SCORE_ALGORITHM_VERSION = CRAWL_LINK_SCORE_ALGORITHM_VERSION
+export const LINK_PLACEMENT_RULESET_VERSION = CRAWL_LINK_PLACEMENT_RULESET_VERSION
