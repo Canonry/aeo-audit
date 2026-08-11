@@ -779,8 +779,12 @@ export interface CrawlEdgeObservation {
    * `anchor` edges only. The three counts sum to `totalOccurrences` on an anchor
    * edge; `redirect` and `canonical` edges carry zeros, because a non-anchor
    * edge has no position in a page. Same rule as `anchorSummaries`.
+   *
+   * Optional, and the crawl engine always populates it. A graph captured before
+   * the placement ruleset genuinely has no placement data, so absence is a real
+   * state a consumer must handle rather than a field it can assume.
    */
-  placementOccurrences: CrawlPlacementOccurrences
+  placementOccurrences?: CrawlPlacementOccurrences
 }
 
 export interface CrawlDeadLinkFinding {
@@ -805,8 +809,12 @@ export interface CrawlSummary {
   urlNormalizationVersion: string
   indexabilityRulesetVersion: string
   linkScoreAlgorithmVersion: string
-  /** Landmark ruleset that produced every edge's `placementOccurrences`. */
-  linkPlacementRulesetVersion: string
+  /**
+   * Landmark ruleset that produced every edge's `placementOccurrences`. Optional
+   * for the same reason: a summary from before the ruleset existed has no value
+   * to report, and its absence tells a consumer the edges carry no placement.
+   */
+  linkPlacementRulesetVersion?: string
   rootUrl: string
   finalRootUrl: string | null
   startedAt: string

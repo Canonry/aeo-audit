@@ -49,18 +49,26 @@ export const placementSitePages: Readonly<Record<string, string>> = {
   <p>Our older write-up still lives on the <a href="/legacy-page">legacy page</a>.</p>
 </main>`),
 
-  // The motivating page. Its nav link and its prose link share a target AND an
-  // anchor text, and differ only by where they sit.
+  // The motivating page, and a realistic blog post: the article carries its own
+  // header (title, byline) and footer (tags), which are NOT site chrome because
+  // they are scoped inside the article. Its nav link and its prose link share a
+  // target AND an anchor text, and differ only by where they sit.
   '/blog/how-to-rank-on-chatgpt': page('How to rank on ChatGPT', `
 <main>
   <nav aria-label="On this page">
     <a href="/blog/citations">Citations</a>
   </nav>
   <article>
-    <h1>How to rank on ChatGPT</h1>
+    <header>
+      <h1>How to rank on ChatGPT</h1>
+      <p>By <a href="/authors/dana">Dana Okonkwo</a></p>
+    </header>
     <p>Answer engines cite pages that answer a question directly. If you would rather not run the
     program in-house, a <a href="/chatgpt-seo-agency">ChatGPT SEO Agency</a> can own the measurement
     loop for you.</p>
+    <footer>
+      <p>Filed under <a href="/tags/answer-engines">answer engines</a>.</p>
+    </footer>
   </article>
   <aside>
     <h2>Related</h2>

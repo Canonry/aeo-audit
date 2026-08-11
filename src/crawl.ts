@@ -324,12 +324,38 @@ function robotsAllows(url: string, robots: RobotsRules): boolean {
   return best?.allow ?? true
 }
 
-/** Landmarks that are page chrome by definition, by tag name and by ARIA role. */
-const CHROME_LANDMARK_TAGS = new Set(['nav', 'header', 'footer', 'aside'])
+/**
+ * The concrete (non-abstract) ARIA role enumeration.
+ *
+ * Role resolution needs the whole list, not just the landmarks: `role` is an
+ * ordered fallback list and the FIRST RECOGNIZED role wins whether or not it is
+ * a landmark, so `role="button navigation"` is a button and the element is not a
+ * landmark at all. Abstract roles are excluded because authors must not use them
+ * and user agents ignore them when computing the role.
+ */
+export const RECOGNIZED_ARIA_ROLES: ReadonlySet<string> = new Set([
+  'alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption',
+  'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'comment', 'complementary', 'contentinfo',
+  'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form',
+  'generic', 'grid', 'gridcell', 'group', 'heading', 'image', 'img', 'insertion', 'link', 'list',
+  'listbox', 'listitem', 'log', 'main', 'mark', 'marquee', 'math', 'menu', 'menubar', 'menuitem',
+  'menuitemcheckbox', 'menuitemradio', 'meter', 'navigation', 'none', 'note', 'option', 'paragraph',
+  'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader',
+  'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong',
+  'subscript', 'suggestion', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term',
+  'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem',
+])
+
+/** Landmark roles that mean page chrome. */
 const CHROME_LANDMARK_ROLES = new Set(['navigation', 'banner', 'contentinfo', 'complementary'])
-/** Landmarks that hold a page's own body content. */
-const CONTENT_LANDMARK_TAGS = new Set(['main', 'article'])
+/** Landmark roles that mean a page's own body content. */
 const CONTENT_LANDMARK_ROLES = new Set(['main'])
+/**
+ * Sectioning elements that scope a `header` or `footer`. Inside any of these, a
+ * `header` is not a banner and a `footer` is not contentinfo. The list is
+ * element names, not roles, exactly as HTML-AAM writes it.
+ */
+const SCOPED_CHROME_ANCESTOR_TAGS = new Set(['article', 'aside', 'main', 'nav', 'section'])
 
 /** The subset of a parsed DOM node that placement reads. */
 interface PlacementNode {
@@ -339,25 +365,84 @@ interface PlacementNode {
   parent: PlacementNode | null
 }
 
+function tagNameOf(node: PlacementNode): string {
+  return node.type === 'tag' ? (node.name ?? '').toLowerCase() : ''
+}
+
+/**
+ * First recognized ARIA role on an element, or null when it declares none.
+ *
+ * `role` is an ordered list of fallbacks. A user agent takes the first token it
+ * recognizes and ignores the rest, so `role="doc-chapter article"` is an article
+ * and `role="button navigation"` is a button.
+ */
+function firstRecognizedRole(node: PlacementNode): string | null {
+  for (const token of (node.attribs?.role ?? '').toLowerCase().trim().split(/\s+/)) {
+    if (RECOGNIZED_ARIA_ROLES.has(token)) return token
+  }
+  return null
+}
+
+/**
+ * Whether a `header` or `footer` element is site chrome.
+ *
+ * Per HTML-AAM a `header` maps to `banner` and a `footer` to `contentinfo` ONLY
+ * when the element is not a descendant of `article`, `aside`, `main`, `nav`, or
+ * `section`. A blog post's own `header` (title, byline) and `footer` (author
+ * bio, tags) are therefore NOT page chrome, and treating them as chrome would
+ * hide exactly the editorial links this feature exists to surface.
+ *
+ * Memoized per element, and headers and footers are few, so the extra upward
+ * scan does not change the per-page cost in practice.
+ */
+function isUnscopedChrome(node: PlacementNode, scopeMemo: Map<PlacementNode, boolean>): boolean {
+  const cached = scopeMemo.get(node)
+  if (cached !== undefined) return cached
+  let ancestor = node.parent
+  let unscoped = true
+  while (ancestor) {
+    if (SCOPED_CHROME_ANCESTOR_TAGS.has(tagNameOf(ancestor))) {
+      unscoped = false
+      break
+    }
+    ancestor = ancestor.parent
+  }
+  scopeMemo.set(node, unscoped)
+  return unscoped
+}
+
 /**
  * Landmark contribution of a single element, or null when it is not a landmark.
  *
- * Precedence within one element: an explicit `role` naming a landmark we know
- * beats the tag name, so `<div role="navigation">` is chrome and
- * `<div role="main">` is content. A role we do not know falls through to the tag
- * name rather than suppressing it, which keeps `<nav role="tablist">` chrome.
+ * Precedence within one element:
+ *  1. An explicit `role` decides, if any token is a recognized ARIA role. A
+ *     landmark role gives the placement; a recognized non-landmark role means
+ *     the element is NOT a landmark and its tag name is NOT consulted, because
+ *     an author role overrides native semantics.
+ *  2. Otherwise the tag name decides. `nav` and `aside` are chrome at any depth.
+ *     `header` and `footer` are chrome only when unscoped (see
+ *     `isUnscopedChrome`). `main` and `article` are content.
+ *
+ * `aside` is deliberately chrome at every depth. HTML-AAM makes a scoped aside's
+ * `complementary` mapping conditional on the author having given it an
+ * accessible name; placement does not follow that, because whether a pull-quote
+ * is furniture should not depend on whether someone wrote an `aria-label`.
+ *
  * Class names and ids are never consulted: `<div class="footer">` is exactly the
  * unreliable signal this function exists to replace, so it stays unresolved.
  */
-function landmarkOf(node: PlacementNode): CrawlLinkPlacement | null {
+function landmarkOf(node: PlacementNode, scopeMemo: Map<PlacementNode, boolean>): CrawlLinkPlacement | null {
   if (node.type !== 'tag') return null
-  for (const token of (node.attribs?.role ?? '').toLowerCase().trim().split(/\s+/)) {
-    if (CHROME_LANDMARK_ROLES.has(token)) return 'navigation'
-    if (CONTENT_LANDMARK_ROLES.has(token)) return 'content'
+  const role = firstRecognizedRole(node)
+  if (role !== null) {
+    if (CHROME_LANDMARK_ROLES.has(role)) return 'navigation'
+    if (CONTENT_LANDMARK_ROLES.has(role)) return 'content'
+    return null
   }
-  const name = (node.name ?? '').toLowerCase()
-  if (CHROME_LANDMARK_TAGS.has(name)) return 'navigation'
-  if (CONTENT_LANDMARK_TAGS.has(name)) return 'content'
+  const name = tagNameOf(node)
+  if (name === 'nav' || name === 'aside') return 'navigation'
+  if (name === 'header' || name === 'footer') return isUnscopedChrome(node, scopeMemo) ? 'navigation' : null
+  if (name === 'main' || name === 'article') return 'content'
   return null
 }
 
@@ -375,6 +460,7 @@ function landmarkOf(node: PlacementNode): CrawlLinkPlacement | null {
  */
 function placementResolver(): (start: PlacementNode) => CrawlLinkPlacement {
   const memo = new Map<PlacementNode, CrawlLinkPlacement>()
+  const scopeMemo = new Map<PlacementNode, boolean>()
   return (start) => {
     const pending: PlacementNode[] = []
     let node = start.parent
@@ -385,7 +471,7 @@ function placementResolver(): (start: PlacementNode) => CrawlLinkPlacement {
         resolved = cached
         break
       }
-      const own = landmarkOf(node)
+      const own = landmarkOf(node, scopeMemo)
       if (own) {
         memo.set(node, own)
         resolved = own
@@ -656,7 +742,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       if (input.type === 'anchor') {
         if (input.nofollow) current.nofollowOccurrences += 1
         else current.followableOccurrences += 1
-        current.placementOccurrences[input.placement] += 1
+        const counts = current.placementOccurrences ?? (current.placementOccurrences = emptyPlacementOccurrences())
+        counts[input.placement] += 1
         const existing = current.anchorSummaries.find((summary) => summary.text === input.text)
         if (existing) existing.occurrences += 1
         else if (current.anchorSummaries.length < MAX_ANCHOR_SUMMARIES) current.anchorSummaries.push({ text: input.text, occurrences: 1 })

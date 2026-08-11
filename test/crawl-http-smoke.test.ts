@@ -106,17 +106,23 @@ describe('runSiteCrawl local HTTP smoke', () => {
 
     const report = await runSiteCrawl(`${origin}/`, { allowPrivateHost: '127.0.0.1', concurrency: 3 })
     if (report.mode !== 'full') throw new Error('expected full report')
-    const anchor = (from: string, to: string) => report.edges
+    const placement = (from: string, to: string) => report.edges
       .find((edge) => edge.type === 'anchor' && edge.from === `${origin}${from}` && edge.to === `${origin}${to}`)
+      ?.placementOccurrences
+    const post = '/blog/how-to-rank-on-chatgpt'
 
     expect(report.pages.filter((page) => page.state === 'html')).toHaveLength(Object.keys(placementSitePages).length)
     // Nav and prose link the same target with the same anchor text on one page.
-    expect(anchor('/blog/how-to-rank-on-chatgpt', '/chatgpt-seo-agency')?.placementOccurrences)
-      .toEqual({ navigation: 1, content: 1, unknown: 0 })
-    expect(anchor('/', '/chatgpt-seo-agency')?.placementOccurrences).toEqual({ navigation: 1, content: 0, unknown: 0 })
-    expect(anchor('/', '/terms')?.placementOccurrences).toEqual({ navigation: 1, content: 0, unknown: 0 })
-    expect(anchor('/', '/blog/how-to-rank-on-chatgpt')?.placementOccurrences).toEqual({ navigation: 0, content: 1, unknown: 0 })
-    expect(anchor('/legacy-page', '/chatgpt-seo-agency')?.placementOccurrences).toEqual({ navigation: 0, content: 0, unknown: 1 })
+    expect(placement(post, '/chatgpt-seo-agency')).toEqual({ navigation: 1, content: 1, unknown: 0 })
+    // The post's own header and footer are scoped by the article, so they are
+    // the post's content, while the site header and footer stay chrome.
+    expect(placement(post, '/authors/dana')).toEqual({ navigation: 0, content: 1, unknown: 0 })
+    expect(placement(post, '/tags/answer-engines')).toEqual({ navigation: 0, content: 1, unknown: 0 })
+    expect(placement(post, '/terms')).toEqual({ navigation: 1, content: 0, unknown: 0 })
+    expect(placement('/', '/chatgpt-seo-agency')).toEqual({ navigation: 1, content: 0, unknown: 0 })
+    expect(placement('/', '/terms')).toEqual({ navigation: 1, content: 0, unknown: 0 })
+    expect(placement('/', post)).toEqual({ navigation: 0, content: 1, unknown: 0 })
+    expect(placement('/legacy-page', '/chatgpt-seo-agency')).toEqual({ navigation: 0, content: 0, unknown: 1 })
     expect(report.summary.crawlSchemaVersion).toBe('1.2')
     expect(report.summary.linkPlacementRulesetVersion).toBe('1.0.0')
   })

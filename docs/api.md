@@ -67,19 +67,25 @@ Use `mode: 'full'` for a returned `pages` and `edges` graph. Use summary mode wh
 
 ### Link placement
 
-Every anchor edge carries `placementOccurrences: { navigation, content, unknown }`, which is where the occurrences of that link sat in the page. Placement is read from HTML landmarks, so a nav link and an in-prose link to the same URL with the same anchor text are distinguishable without inferring anything from how often the link repeats across the site.
+Every anchor edge carries `placementOccurrences?: { navigation, content, unknown }`, which is where the occurrences of that link sat in the page. Placement is read from HTML landmarks, so a nav link and an in-prose link to the same URL with the same anchor text are distinguishable without inferring anything from how often the link repeats across the site.
 
 | Placement | Resolved from |
 |---|---|
-| `navigation` | `nav`, `header`, `footer`, `aside`, or `role="navigation" \| "banner" \| "contentinfo" \| "complementary"` |
+| `navigation` | `nav` or `aside` at any depth, an unscoped `header` or `footer`, or `role="navigation" \| "banner" \| "contentinfo" \| "complementary"` |
 | `content` | `main`, `article`, or `role="main"` |
 | `unknown` | The page declares no landmark that answers the question |
 
-Placement resolves on the **nearest** landmark ancestor, so a `nav` inside `main` is `navigation` and an `article` inside an `aside` is `content`. Within one element an explicit landmark `role` beats the tag name; a role the engine does not know falls through to the tag name.
+**Nearest ancestor wins.** A `nav` inside `main` is `navigation`, and an `article` inside an `aside` is `content`.
+
+**`header` and `footer` are scoped.** Per HTML-AAM a `header` maps to `banner` and a `footer` to `contentinfo` only when the element is not a descendant of `article`, `aside`, `main`, `nav`, or `section`. A blog post's own `<header>` (title, byline) and `<footer>` (author bio, tags) are therefore the post's `content`, not site chrome. A `header` scoped by a bare `section` resolves to `unknown`, since neither element is a placement landmark. `nav` and `aside` are chrome at any depth; the accessible-name condition HTML-AAM puts on a scoped `aside` is deliberately not applied, because whether a pull-quote is furniture should not depend on whether an author wrote an `aria-label`.
+
+**The first recognized ARIA role wins.** `role` is an ordered fallback list, so the engine takes the first token that is a recognized ARIA role and ignores the rest. If that role is a landmark it gives the placement. If it is recognized but not a landmark, the element is **not** a landmark and its tag name is not consulted, because an author role overrides native semantics: `<nav role="button navigation">` is a button, and `<nav role="tablist">` is not navigation. Only when no token is a recognized role does the tag name decide, so `<nav role="totally-made-up">` stays navigation. Abstract roles are not recognized, since authors must not use them.
 
 `unknown` is a deliberate absence of evidence, never a guess. Class names and ids are never consulted, so a `<div class="footer">` on a page with no landmarks reports `unknown` and the caller decides the policy for it.
 
 Counts rather than a single value, because one edge aggregates every occurrence of the same `(from, to)` pair and those occurrences can differ: a page that links a target once from its nav and once from its prose yields `{ navigation: 1, content: 1, unknown: 0 }`. The counts sum to `totalOccurrences` on an `anchor` edge. `redirect` and `canonical` edges carry zeros, because a non-anchor edge has no position in a page.
+
+The field is **optional**, as is `summary.linkPlacementRulesetVersion`. The engine always populates both; a graph captured before this ruleset has neither, so absence is a real state to handle rather than a field to assume.
 
 `summary.linkPlacementRulesetVersion` (`CRAWL_LINK_PLACEMENT_RULESET_VERSION`) versions the landmark rules independently of `crawlSchemaVersion`, so a stored graph can tell a rules change from a shape change.
 
