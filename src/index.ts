@@ -23,6 +23,7 @@ export {
   INDEXABILITY_RULESET_VERSION,
   LINK_SCORE_ALGORITHM_VERSION,
   LINK_PLACEMENT_RULESET_VERSION,
+  RECOGNIZED_ARIA_ROLES,
 } from './crawl.js'
 export { detectCriticalDefects, buildCriticalDefects } from './critical-defects.js'
 export { agentSummaryFromAudit, agentSummaryFromSitemap } from './agent-summary.js'

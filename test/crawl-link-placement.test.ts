@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import { runSiteCrawl } from '../src/index.js'
-import { RECOGNIZED_ARIA_ROLES } from '../src/crawl.js'
-import type { CrawlEdgeObservation, CrawlPlacementOccurrences, CrawlSummary, FullSiteCrawlReport } from '../src/types.js'
+import { RECOGNIZED_ARIA_ROLES, runSiteCrawl } from '../src/index.js'
+import type { CrawlEdgeObservation, CrawlLinkPlacement, CrawlPlacementOccurrences, CrawlSummary, FullSiteCrawlReport } from '../src/types.js'
 import { placementSitePages } from './fixtures/placement-site.js'
 
 const ORIGIN = 'https://example.test'
@@ -23,14 +22,6 @@ async function crawl(pages: Readonly<Record<string, string>>): Promise<FullSiteC
   return report
 }
 
-/** A single page whose links all start at the root, keyed by target path. */
-async function placementsOf(html: string): Promise<Record<string, CrawlPlacementOccurrences>> {
-  const report = await crawl({ '/': html })
-  return Object.fromEntries(report.edges
-    .filter((edge) => edge.type === 'anchor')
-    .map((edge) => [new URL(edge.to).pathname, placement(edge)]))
-}
-
 function placement(edge: CrawlEdgeObservation): CrawlPlacementOccurrences {
   if (!edge.placementOccurrences) throw new Error(`edge ${edge.from} -> ${edge.to} carries no placement`)
   return edge.placementOccurrences
@@ -48,74 +39,227 @@ const UNKNOWN = { navigation: 0, content: 0, unknown: 1 }
 
 const doc = (body: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Placement</title></head><body>${body}</body></html>`
 
+/**
+ * One page of probe links, resolved in a single crawl.
+ *
+ * Targets are off-host so the crawler records the edge and never fetches them,
+ * which keeps a 400-cell sweep to five page loads.
+ */
+const PROBE_HOST = 'https://probes.invalid'
+
+async function probePlacements(links: Array<[id: string, html: (anchor: string) => string]>): Promise<Record<string, CrawlLinkPlacement>> {
+  const body = links.map(([id, wrap]) => wrap(`<a href="${PROBE_HOST}/${id}">${id}</a>`)).join('\n')
+  const report = await crawl({ '/': doc(body) })
+  const resolved: Record<string, CrawlLinkPlacement> = {}
+  for (const edge of report.edges) {
+    if (edge.type !== 'anchor' || !edge.to.startsWith(PROBE_HOST)) continue
+    const counts = placement(edge)
+    const hit = (['navigation', 'content', 'unknown'] as const).filter((key) => counts[key] > 0)
+    if (hit.length !== 1) throw new Error(`probe ${edge.to} resolved to ${hit.length} placements`)
+    resolved[edge.to.slice(`${PROBE_HOST}/`.length)] = hit[0]
+  }
+  return resolved
+}
+
 afterEach(() => vi.unstubAllGlobals())
 
+/* ── The interaction matrix ──
+ *
+ * Two rounds of spec findings were all the same shape: a rule applied on the tag
+ * path but not the role path, or on the placement path but not the scoping path.
+ * This enumerates that interaction space directly. Every element under test is
+ * the link's parent; every context is its grandparent.
+ *
+ * Columns are the ancestor contexts below. A context that is itself a landmark
+ * both scopes a `header` / `footer` and answers the walk when the element under
+ * test is not a landmark.
+ */
+const N: CrawlLinkPlacement = 'navigation'
+const C: CrawlLinkPlacement = 'content'
+const U: CrawlLinkPlacement = 'unknown'
+
+const CONTEXTS: Array<[name: string, wrap: (inner: string) => string]> = [
+  ['root', (inner) => inner],
+  ['inArticle', (inner) => `<article>${inner}</article>`],
+  ['inRoleMain', (inner) => `<div role="main">${inner}</div>`],
+  ['inSection', (inner) => `<section>${inner}</section>`],
+  ['inNav', (inner) => `<nav>${inner}</nav>`],
+]
+
+/** [tag, role, root, inArticle, inRoleMain, inSection, inNav] */
+const MATRIX: Array<[string, string | null, CrawlLinkPlacement, CrawlLinkPlacement, CrawlLinkPlacement, CrawlLinkPlacement, CrawlLinkPlacement]> = [
+  ['nav', null, N, N, N, N, N],
+  ['nav', 'navigation', N, N, N, N, N],
+  ['nav', 'main', C, C, C, C, C],
+  ['nav', 'article', C, C, C, C, C],
+  ['nav', 'banner', N, N, N, N, N],
+  ['nav', 'region', U, C, C, U, N],
+  ['nav', 'button', U, C, C, U, N],
+  ['nav', 'doc-chapter', U, C, C, U, N],
+  ['nav', 'made-up', N, N, N, N, N],
+  ['nav', 'button navigation', U, C, C, U, N],
+  ['nav', 'made-up main', C, C, C, C, C],
+
+  ['aside', null, N, N, N, N, N],
+  ['aside', 'navigation', N, N, N, N, N],
+  ['aside', 'main', C, C, C, C, C],
+  ['aside', 'article', C, C, C, C, C],
+  ['aside', 'banner', N, N, N, N, N],
+  ['aside', 'region', U, C, C, U, N],
+  ['aside', 'button', U, C, C, U, N],
+  ['aside', 'doc-chapter', U, C, C, U, N],
+  ['aside', 'made-up', N, N, N, N, N],
+  ['aside', 'button navigation', U, C, C, U, N],
+  ['aside', 'made-up main', C, C, C, C, C],
+
+  ['header', null, N, C, C, U, N],
+  ['header', 'navigation', N, N, N, N, N],
+  ['header', 'main', C, C, C, C, C],
+  ['header', 'article', C, C, C, C, C],
+  ['header', 'banner', N, N, N, N, N],
+  ['header', 'region', U, C, C, U, N],
+  ['header', 'button', U, C, C, U, N],
+  ['header', 'doc-chapter', U, C, C, U, N],
+  ['header', 'made-up', N, C, C, U, N],
+  ['header', 'button navigation', U, C, C, U, N],
+  ['header', 'made-up main', C, C, C, C, C],
+
+  ['footer', null, N, C, C, U, N],
+  ['footer', 'navigation', N, N, N, N, N],
+  ['footer', 'main', C, C, C, C, C],
+  ['footer', 'article', C, C, C, C, C],
+  ['footer', 'banner', N, N, N, N, N],
+  ['footer', 'region', U, C, C, U, N],
+  ['footer', 'button', U, C, C, U, N],
+  ['footer', 'doc-chapter', U, C, C, U, N],
+  ['footer', 'made-up', N, C, C, U, N],
+  ['footer', 'button navigation', U, C, C, U, N],
+  ['footer', 'made-up main', C, C, C, C, C],
+
+  ['main', null, C, C, C, C, C],
+  ['main', 'navigation', N, N, N, N, N],
+  ['main', 'main', C, C, C, C, C],
+  ['main', 'article', C, C, C, C, C],
+  ['main', 'banner', N, N, N, N, N],
+  ['main', 'region', U, C, C, U, N],
+  ['main', 'button', U, C, C, U, N],
+  ['main', 'doc-chapter', U, C, C, U, N],
+  ['main', 'made-up', C, C, C, C, C],
+  ['main', 'button navigation', U, C, C, U, N],
+  ['main', 'made-up main', C, C, C, C, C],
+
+  ['article', null, C, C, C, C, C],
+  ['article', 'navigation', N, N, N, N, N],
+  ['article', 'main', C, C, C, C, C],
+  ['article', 'article', C, C, C, C, C],
+  ['article', 'banner', N, N, N, N, N],
+  ['article', 'region', U, C, C, U, N],
+  ['article', 'button', U, C, C, U, N],
+  ['article', 'doc-chapter', U, C, C, U, N],
+  ['article', 'made-up', C, C, C, C, C],
+  ['article', 'button navigation', U, C, C, U, N],
+  ['article', 'made-up main', C, C, C, C, C],
+
+  ['section', null, U, C, C, U, N],
+  ['section', 'navigation', N, N, N, N, N],
+  ['section', 'main', C, C, C, C, C],
+  ['section', 'article', C, C, C, C, C],
+  ['section', 'banner', N, N, N, N, N],
+  ['section', 'region', U, C, C, U, N],
+  ['section', 'button', U, C, C, U, N],
+  ['section', 'doc-chapter', U, C, C, U, N],
+  ['section', 'made-up', U, C, C, U, N],
+  ['section', 'button navigation', U, C, C, U, N],
+  ['section', 'made-up main', C, C, C, C, C],
+
+  ['div', null, U, C, C, U, N],
+  ['div', 'navigation', N, N, N, N, N],
+  ['div', 'main', C, C, C, C, C],
+  ['div', 'article', C, C, C, C, C],
+  ['div', 'banner', N, N, N, N, N],
+  ['div', 'region', U, C, C, U, N],
+  ['div', 'button', U, C, C, U, N],
+  ['div', 'doc-chapter', U, C, C, U, N],
+  ['div', 'made-up', U, C, C, U, N],
+  ['div', 'button navigation', U, C, C, U, N],
+  ['div', 'made-up main', C, C, C, C, C],
+]
+
+const cellId = (tag: string, role: string | null) => `${tag}.${(role ?? 'norole').replace(/\s+/g, '_')}`
+
+describe('crawl link placement matrix', () => {
+  test.each(CONTEXTS.map(([name], index) => [name, index] as const))('resolves every tag and role inside %s', async (_name, contextIndex) => {
+    const wrap = CONTEXTS[contextIndex][1]
+    const resolved = await probePlacements(MATRIX.map(([tag, role]) => [
+      cellId(tag, role),
+      (anchor: string) => wrap(`<${tag}${role === null ? '' : ` role="${role}"`}>${anchor}</${tag}>`),
+    ]))
+
+    const actual = MATRIX.map(([tag, role]) => [cellId(tag, role), resolved[cellId(tag, role)]])
+    const expected = MATRIX.map((row) => [cellId(row[0], row[1]), row[2 + contextIndex]])
+    expect(actual).toEqual(expected)
+  })
+
+  test('a native element and the author role that mirrors it always agree', async () => {
+    // The landmark table is one row per landmark, so these two paths cannot
+    // drift apart. `section`/`region` agree by both carrying no placement.
+    const pairs: Array<[tag: string, role: string]> = [
+      ['nav', 'navigation'],
+      ['aside', 'complementary'],
+      ['main', 'main'],
+      ['article', 'article'],
+      ['section', 'region'],
+      ['header', 'banner'],
+      ['footer', 'contentinfo'],
+    ]
+    for (const [, wrap] of CONTEXTS) {
+      const resolved = await probePlacements(pairs.flatMap(([tag, role]) => ([
+        [`tag.${tag}`, (anchor: string) => wrap(`<${tag}>${anchor}</${tag}>`)],
+        [`role.${tag}`, (anchor: string) => wrap(`<div role="${role}">${anchor}</div>`)],
+      ] as Array<[string, (anchor: string) => string]>)))
+      for (const [tag] of pairs) {
+        // header/footer are the one asymmetry, and it is the spec's: the native
+        // element's mapping is conditional on scope, while an explicit
+        // role="banner" is unconditional. Compare them only where scope agrees.
+        if ((tag === 'header' || tag === 'footer') && wrap('x') !== 'x') continue
+        expect([tag, resolved[`tag.${tag}`]]).toEqual([tag, resolved[`role.${tag}`]])
+      }
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
 describe('crawl link placement', () => {
-  test('classifies each link occurrence by the landmark it sits in', async () => {
-    const placements = await placementsOf(doc(`
-<nav><a href="/from-nav">Nav</a></nav>
-<header><a href="/from-header">Header</a></header>
-<footer><a href="/from-footer">Footer</a></footer>
-<aside><a href="/from-aside">Aside</a></aside>
-<main>
-  <p><a href="/from-main">Main</a></p>
-  <nav><a href="/from-nav-in-main">Nav nested in main</a></nav>
-</main>
-<article><p><a href="/from-article">Article</a></p></article>`))
+  test('recognizes DPUB roles, so a doc role overrides its native tag', async () => {
+    for (const role of ['doc-chapter', 'doc-footnote', 'doc-toc', 'doc-biblioref', 'doc-pagebreak']) {
+      expect(RECOGNIZED_ARIA_ROLES.has(role)).toBe(true)
+    }
+    const resolved = await probePlacements([
+      ['footnote', (a) => `<footer role="doc-footnote">${a}</footer>`],
+      ['toc', (a) => `<nav role="doc-toc">${a}</nav>`],
+      ['chapter-in-aside', (a) => `<aside role="doc-chapter">${a}</aside>`],
+      ['scoped-footnote', (a) => `<article><footer role="doc-footnote">${a}</footer></article>`],
+    ])
 
-    expect(placements['/from-nav']).toEqual(NAVIGATION)
-    expect(placements['/from-header']).toEqual(NAVIGATION)
-    expect(placements['/from-footer']).toEqual(NAVIGATION)
-    expect(placements['/from-aside']).toEqual(NAVIGATION)
-    expect(placements['/from-main']).toEqual(CONTENT)
-    expect(placements['/from-article']).toEqual(CONTENT)
-    // Nearest matching ancestor wins: an inner nav inside main is still chrome.
-    expect(placements['/from-nav-in-main']).toEqual(NAVIGATION)
+    // No doc-* role carries a placement, so the element is not a landmark and
+    // its tag is not consulted. The walk continues to whatever encloses it.
+    expect(resolved.footnote).toBe(U)
+    expect(resolved.toc).toBe(U)
+    expect(resolved['chapter-in-aside']).toBe(U)
+    expect(resolved['scoped-footnote']).toBe(C)
   })
 
-  test('a scoped header or footer is content, not site chrome', async () => {
-    // HTML-AAM: header maps to banner and footer to contentinfo only when the
-    // element is not inside article, aside, main, nav, or section. A blog post's
-    // own byline and tag links are the post's content.
-    const placements = await placementsOf(doc(`
-<header><a href="/site-header">Site header</a></header>
-<footer><a href="/site-footer">Site footer</a></footer>
-<article>
-  <header><a href="/post-byline">Byline</a></header>
-  <p><a href="/post-prose">Prose</a></p>
-  <nav><a href="/post-nav">Post nav</a></nav>
-  <footer><a href="/post-tags">Tags</a></footer>
-</article>
-<main><header><a href="/main-header">Main header</a></header></main>`))
-
-    expect(placements['/site-header']).toEqual(NAVIGATION)
-    expect(placements['/site-footer']).toEqual(NAVIGATION)
-    expect(placements['/post-byline']).toEqual(CONTENT)
-    expect(placements['/post-prose']).toEqual(CONTENT)
-    expect(placements['/post-tags']).toEqual(CONTENT)
-    // nav is navigation regardless of nesting.
-    expect(placements['/post-nav']).toEqual(NAVIGATION)
-    expect(placements['/main-header']).toEqual(CONTENT)
-  })
-
-  test('a header scoped by section resolves no landmark rather than guessing', async () => {
-    // section scopes the header out of banner, but section is not itself a
-    // placement landmark, so nothing on the ancestor path answers the question.
-    const placements = await placementsOf(doc(`
-<section><header><a href="/section-header">Section header</a></header></section>
-<section><footer><a href="/section-footer">Section footer</a></footer></section>`))
-
-    expect(placements['/section-header']).toEqual(UNKNOWN)
-    expect(placements['/section-footer']).toEqual(UNKNOWN)
-  })
-
-  test('an aside is chrome at every nesting depth', async () => {
-    const placements = await placementsOf(doc(`
-<aside><a href="/top-aside">Top aside</a></aside>
-<article><aside><a href="/nested-aside">Nested aside</a></aside></article>`))
-
-    expect(placements['/top-aside']).toEqual(NAVIGATION)
-    expect(placements['/nested-aside']).toEqual(NAVIGATION)
+  test('the recognized role list excludes abstract roles', async () => {
+    for (const role of ['navigation', 'main', 'button', 'tablist', 'generic', 'none', 'region', 'search', 'form']) {
+      expect(RECOGNIZED_ARIA_ROLES.has(role)).toBe(true)
+    }
+    // Authors must not use abstract roles and user agents ignore them, so they
+    // must not suppress a tag's native landmark semantics.
+    for (const role of ['landmark', 'widget', 'structure', 'roletype', 'section', 'sectionhead', 'window']) {
+      expect(RECOGNIZED_ARIA_ROLES.has(role)).toBe(false)
+    }
+    const resolved = await probePlacements([['abstract', (a) => `<nav role="landmark">${a}</nav>`]])
+    expect(resolved.abstract).toBe(N)
   })
 
   test('reports unknown rather than guessing when a page declares no landmarks', async () => {
@@ -129,42 +273,6 @@ describe('crawl link placement', () => {
 
     expect(anchors).toHaveLength(3)
     for (const edge of anchors) expect(placement(edge)).toEqual(UNKNOWN)
-  })
-
-  test('role resolution takes the first recognized role, landmark or not', async () => {
-    const placements = await placementsOf(doc(`
-<div role="navigation"><a href="/landmark-role">Landmark role</a></div>
-<div role="main"><a href="/content-role">Content role</a></div>
-<nav role="button navigation"><a href="/recognized-non-landmark">Recognized non-landmark</a></nav>
-<nav role="tablist"><a href="/tablist">Tablist</a></nav>
-<nav role="totally-made-up"><a href="/unrecognized-role">Unrecognized role</a></nav>
-<div role="doc-chapter main"><a href="/skips-unrecognized">Skips unrecognized</a></div>`))
-
-    // 1. First recognized token is a landmark role.
-    expect(placements['/landmark-role']).toEqual(NAVIGATION)
-    expect(placements['/content-role']).toEqual(CONTENT)
-    // 2. First recognized token is a recognized non-landmark role: it overrides
-    //    the native tag semantics, so the element is not a landmark and `nav` is
-    //    NOT consulted. The later `navigation` token is never reached.
-    expect(placements['/recognized-non-landmark']).toEqual(UNKNOWN)
-    expect(placements['/tablist']).toEqual(UNKNOWN)
-    // 3. No token is a recognized role, so the tag name decides.
-    expect(placements['/unrecognized-role']).toEqual(NAVIGATION)
-    // 4. Unrecognized tokens are skipped until the first recognized one.
-    expect(placements['/skips-unrecognized']).toEqual(CONTENT)
-  })
-
-  test('the recognized role list excludes abstract roles', async () => {
-    for (const role of ['navigation', 'main', 'button', 'tablist', 'generic', 'none']) {
-      expect(RECOGNIZED_ARIA_ROLES.has(role)).toBe(true)
-    }
-    // Authors must not use abstract roles and user agents ignore them, so they
-    // must not suppress a tag's native landmark semantics.
-    for (const role of ['landmark', 'widget', 'structure', 'roletype', 'section', 'sectionhead', 'window']) {
-      expect(RECOGNIZED_ARIA_ROLES.has(role)).toBe(false)
-    }
-    expect(await placementsOf(doc('<nav role="landmark"><a href="/abstract">Abstract</a></nav>')))
-      .toEqual({ '/abstract': NAVIGATION })
   })
 
   test('one edge carries both placements when a page links a target from nav and from prose', async () => {

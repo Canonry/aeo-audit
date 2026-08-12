@@ -325,15 +325,15 @@ function robotsAllows(url: string, robots: RobotsRules): boolean {
 }
 
 /**
- * The concrete (non-abstract) ARIA role enumeration.
+ * The concrete (non-abstract) roles from ARIA 1.2.
  *
- * Role resolution needs the whole list, not just the landmarks: `role` is an
- * ordered fallback list and the FIRST RECOGNIZED role wins whether or not it is
- * a landmark, so `role="button navigation"` is a button and the element is not a
- * landmark at all. Abstract roles are excluded because authors must not use them
- * and user agents ignore them when computing the role.
+ * Role resolution needs the whole enumeration, not just the landmarks: `role` is
+ * an ordered fallback list and the FIRST RECOGNIZED role wins whether or not it
+ * is a landmark, so `role="button navigation"` is a button and the element is
+ * not a landmark at all. Abstract roles are excluded because authors must not
+ * use them and user agents ignore them when computing the role.
  */
-export const RECOGNIZED_ARIA_ROLES: ReadonlySet<string> = new Set([
+const CORE_ARIA_ROLES = [
   'alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption',
   'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'comment', 'complementary', 'contentinfo',
   'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form',
@@ -344,18 +344,81 @@ export const RECOGNIZED_ARIA_ROLES: ReadonlySet<string> = new Set([
   'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong',
   'subscript', 'suggestion', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term',
   'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem',
-])
+] as const
 
-/** Landmark roles that mean page chrome. */
-const CHROME_LANDMARK_ROLES = new Set(['navigation', 'banner', 'contentinfo', 'complementary'])
-/** Landmark roles that mean a page's own body content. */
-const CONTENT_LANDMARK_ROLES = new Set(['main'])
 /**
- * Sectioning elements that scope a `header` or `footer`. Inside any of these, a
- * `header` is not a banner and a `footer` is not contentinfo. The list is
- * element names, not roles, exactly as HTML-AAM writes it.
+ * DPUB-ARIA 1.1 roles. They are recognized roles, so `<footer role="doc-footnote">`
+ * is a footnote and NOT contentinfo: the author role overrides the native tag
+ * even though no `doc-*` role carries a placement of its own.
  */
-const SCOPED_CHROME_ANCESTOR_TAGS = new Set(['article', 'aside', 'main', 'nav', 'section'])
+const DPUB_ARIA_ROLES = [
+  'doc-abstract', 'doc-acknowledgments', 'doc-afterword', 'doc-appendix', 'doc-backlink',
+  'doc-biblioentry', 'doc-bibliography', 'doc-biblioref', 'doc-chapter', 'doc-colophon',
+  'doc-conclusion', 'doc-cover', 'doc-credit', 'doc-credits', 'doc-dedication', 'doc-endnote',
+  'doc-endnotes', 'doc-epigraph', 'doc-epilogue', 'doc-errata', 'doc-example', 'doc-footnote',
+  'doc-foreword', 'doc-glossary', 'doc-glossref', 'doc-index', 'doc-introduction', 'doc-noteref',
+  'doc-notice', 'doc-pagebreak', 'doc-pagefooter', 'doc-pageheader', 'doc-pagelist', 'doc-part',
+  'doc-preface', 'doc-prologue', 'doc-pullquote', 'doc-qna', 'doc-subtitle', 'doc-tip', 'doc-toc',
+] as const
+
+/** Every role an author may write that a user agent will recognize. */
+export const RECOGNIZED_ARIA_ROLES: ReadonlySet<string> = new Set<string>([...CORE_ARIA_ROLES, ...DPUB_ARIA_ROLES])
+
+/**
+ * A landmark and everything placement needs to know about it, in ONE row.
+ *
+ * Two earlier rounds of spec bugs were all the same shape: a rule added to the
+ * tag path and forgotten on the role path, or to the placement path and
+ * forgotten on the scoping path. Every derived lookup below is generated from
+ * this table, so those paths cannot disagree.
+ */
+interface LandmarkRule {
+  /** The HTML element that carries this landmark natively. */
+  tag: string
+  /** The ARIA role an author writes to mean the same thing. */
+  role: string
+  /**
+   * Placement it contributes, or null when it is a landmark that says nothing
+   * about chrome versus content and the walk should continue past it.
+   */
+  placement: CrawlLinkPlacement | null
+  /**
+   * Whether it scopes a descendant `header` / `footer` out of its
+   * banner / contentinfo mapping. HTML-AAM scopes on both the element and the
+   * matching role, which is exactly the tag and role of this same row.
+   */
+  scopesChrome: boolean
+  /** Whether its OWN landmark status is conditional on not being scoped. */
+  scopedByAncestors: boolean
+}
+
+/**
+ * Placement's landmark table. Sourced from HTML-AAM element mappings.
+ *
+ * `section` / `region` is a landmark that carries no placement: a generic
+ * sectioning container says nothing about chrome versus content, so the walk
+ * continues past it to whatever encloses it. It still scopes a `header`.
+ *
+ * Landmarks NOT in this table (`form`, `search`) are recognized roles but carry
+ * no placement and no scope, so the walk passes through them. HTML-AAM does not
+ * list them as scoping either.
+ */
+const LANDMARK_RULES: readonly LandmarkRule[] = [
+  { tag: 'nav', role: 'navigation', placement: 'navigation', scopesChrome: true, scopedByAncestors: false },
+  { tag: 'aside', role: 'complementary', placement: 'navigation', scopesChrome: true, scopedByAncestors: false },
+  { tag: 'main', role: 'main', placement: 'content', scopesChrome: true, scopedByAncestors: false },
+  { tag: 'article', role: 'article', placement: 'content', scopesChrome: true, scopedByAncestors: false },
+  { tag: 'section', role: 'region', placement: null, scopesChrome: true, scopedByAncestors: false },
+  { tag: 'header', role: 'banner', placement: 'navigation', scopesChrome: false, scopedByAncestors: true },
+  { tag: 'footer', role: 'contentinfo', placement: 'navigation', scopesChrome: false, scopedByAncestors: true },
+]
+
+const placedRules = LANDMARK_RULES.filter((rule): rule is LandmarkRule & { placement: CrawlLinkPlacement } => rule.placement !== null)
+const TAG_PLACEMENT = new Map(placedRules.map((rule) => [rule.tag, rule.placement]))
+const ROLE_PLACEMENT = new Map(placedRules.map((rule) => [rule.role, rule.placement]))
+const SCOPING_TAGS = new Set(LANDMARK_RULES.filter((rule) => rule.scopesChrome).map((rule) => rule.tag))
+const SCOPING_ROLES = new Set(LANDMARK_RULES.filter((rule) => rule.scopesChrome).map((rule) => rule.role))
+const SCOPED_BY_ANCESTORS_TAGS = new Set(LANDMARK_RULES.filter((rule) => rule.scopedByAncestors).map((rule) => rule.tag))
 
 /** The subset of a parsed DOM node that placement reads. */
 interface PlacementNode {
@@ -370,11 +433,11 @@ function tagNameOf(node: PlacementNode): string {
 }
 
 /**
- * First recognized ARIA role on an element, or null when it declares none.
+ * First recognized role on an element, or null when it declares none.
  *
  * `role` is an ordered list of fallbacks. A user agent takes the first token it
- * recognizes and ignores the rest, so `role="doc-chapter article"` is an article
- * and `role="button navigation"` is a button.
+ * recognizes and ignores the rest, so `role="doc-chapter main"` is a chapter,
+ * not a main landmark, and `role="button navigation"` is a button.
  */
 function firstRecognizedRole(node: PlacementNode): string | null {
   for (const token of (node.attribs?.role ?? '').toLowerCase().trim().split(/\s+/)) {
@@ -383,14 +446,25 @@ function firstRecognizedRole(node: PlacementNode): string | null {
   return null
 }
 
+/** Whether an ancestor scopes a descendant `header` / `footer`, by role then tag. */
+function scopesChrome(node: PlacementNode): boolean {
+  if (node.type !== 'tag') return false
+  const role = firstRecognizedRole(node)
+  if (role !== null) return SCOPING_ROLES.has(role)
+  return SCOPING_TAGS.has(tagNameOf(node))
+}
+
 /**
  * Whether a `header` or `footer` element is site chrome.
  *
  * Per HTML-AAM a `header` maps to `banner` and a `footer` to `contentinfo` ONLY
  * when the element is not a descendant of `article`, `aside`, `main`, `nav`, or
- * `section`. A blog post's own `header` (title, byline) and `footer` (author
- * bio, tags) are therefore NOT page chrome, and treating them as chrome would
- * hide exactly the editorial links this feature exists to surface.
+ * `section`, OR of an element whose role is `article`, `complementary`, `main`,
+ * `navigation`, or `region`. A role-based ancestor scopes exactly as the native
+ * element does, so `<div role="main"><header>` is content. A blog post's own
+ * `header` (title, byline) and `footer` (author bio, tags) are therefore NOT
+ * page chrome, and treating them as chrome would hide exactly the editorial
+ * links this feature exists to surface.
  *
  * Memoized per element, and headers and footers are few, so the extra upward
  * scan does not change the per-page cost in practice.
@@ -401,7 +475,7 @@ function isUnscopedChrome(node: PlacementNode, scopeMemo: Map<PlacementNode, boo
   let ancestor = node.parent
   let unscoped = true
   while (ancestor) {
-    if (SCOPED_CHROME_ANCESTOR_TAGS.has(tagNameOf(ancestor))) {
+    if (scopesChrome(ancestor)) {
       unscoped = false
       break
     }
@@ -415,13 +489,16 @@ function isUnscopedChrome(node: PlacementNode, scopeMemo: Map<PlacementNode, boo
  * Landmark contribution of a single element, or null when it is not a landmark.
  *
  * Precedence within one element:
- *  1. An explicit `role` decides, if any token is a recognized ARIA role. A
- *     landmark role gives the placement; a recognized non-landmark role means
+ *  1. An explicit `role` decides, if any token is a recognized role. A role in
+ *     the landmark table gives its placement; any other recognized role means
  *     the element is NOT a landmark and its tag name is NOT consulted, because
  *     an author role overrides native semantics.
- *  2. Otherwise the tag name decides. `nav` and `aside` are chrome at any depth.
- *     `header` and `footer` are chrome only when unscoped (see
- *     `isUnscopedChrome`). `main` and `article` are content.
+ *  2. Otherwise the tag name decides, through the same table. `header` and
+ *     `footer` are chrome only when unscoped (see `isUnscopedChrome`).
+ *
+ * Because both branches read one table, an author role always produces the same
+ * placement as the native element it mirrors: `<div role="article">` is content
+ * exactly as `<article>` is.
  *
  * `aside` is deliberately chrome at every depth. HTML-AAM makes a scoped aside's
  * `complementary` mapping conditional on the author having given it an
@@ -434,16 +511,12 @@ function isUnscopedChrome(node: PlacementNode, scopeMemo: Map<PlacementNode, boo
 function landmarkOf(node: PlacementNode, scopeMemo: Map<PlacementNode, boolean>): CrawlLinkPlacement | null {
   if (node.type !== 'tag') return null
   const role = firstRecognizedRole(node)
-  if (role !== null) {
-    if (CHROME_LANDMARK_ROLES.has(role)) return 'navigation'
-    if (CONTENT_LANDMARK_ROLES.has(role)) return 'content'
-    return null
-  }
+  if (role !== null) return ROLE_PLACEMENT.get(role) ?? null
   const name = tagNameOf(node)
-  if (name === 'nav' || name === 'aside') return 'navigation'
-  if (name === 'header' || name === 'footer') return isUnscopedChrome(node, scopeMemo) ? 'navigation' : null
-  if (name === 'main' || name === 'article') return 'content'
-  return null
+  const placement = TAG_PLACEMENT.get(name)
+  if (placement === undefined) return null
+  if (SCOPED_BY_ANCESTORS_TAGS.has(name) && !isUnscopedChrome(node, scopeMemo)) return null
+  return placement
 }
 
 /**

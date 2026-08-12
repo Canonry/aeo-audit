@@ -22,6 +22,7 @@ import {
   runSitemapAudit,
   CRAWL_SCHEMA_VERSION,
   CRAWL_LINK_PLACEMENT_RULESET_VERSION,
+  RECOGNIZED_ARIA_ROLES,
   type AeoAuditErrorCode,
   type AeoAuditOutboundAttempt,
   type AeoAuditOutboundAttemptKind,
@@ -117,10 +118,14 @@ const inContent: number = placedEdge.placementOccurrences?.[placement] ?? 0
 // Same check for the summary field, without restating every required field.
 const legacySummary: CrawlSummary = undefined as unknown as Omit<CrawlSummary, 'linkPlacementRulesetVersion'>
 
+// The role set is part of the documented ruleset, so a consumer can pin to it.
+const recognizesDpub: boolean = RECOGNIZED_ARIA_ROLES.has('doc-chapter')
+
 void runAeoAudit
 void legacyEdge
 void inContent
 void legacySummary
+void recognizesDpub
 void CRAWL_LINK_PLACEMENT_RULESET_VERSION
 void runSitemapAudit
 void runSiteCrawl
