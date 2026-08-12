@@ -23,6 +23,7 @@ import {
   CRAWL_SCHEMA_VERSION,
   CRAWL_LINK_PLACEMENT_RULESET_VERSION,
   RECOGNIZED_ARIA_ROLES,
+  isRecognizedAriaRole,
   type AeoAuditErrorCode,
   type AeoAuditOutboundAttempt,
   type AeoAuditOutboundAttemptKind,
@@ -118,14 +119,19 @@ const inContent: number = placedEdge.placementOccurrences?.[placement] ?? 0
 // Same check for the summary field, without restating every required field.
 const legacySummary: CrawlSummary = undefined as unknown as Omit<CrawlSummary, 'linkPlacementRulesetVersion'>
 
-// The role set is part of the documented ruleset, so a consumer can pin to it.
-const recognizesDpub: boolean = RECOGNIZED_ARIA_ROLES.has('doc-chapter')
+// The role registry is part of the documented ruleset, so a consumer can pin to
+// it: a predicate for membership and a frozen array for enumeration. There is
+// no exported Set, because a Set cannot be frozen and would let a consumer widen
+// what the crawler accepts.
+const recognizesDpub: boolean = isRecognizedAriaRole('doc-chapter')
+const roleCount: number = RECOGNIZED_ARIA_ROLES.length
 
 void runAeoAudit
 void legacyEdge
 void inContent
 void legacySummary
 void recognizesDpub
+void roleCount
 void CRAWL_LINK_PLACEMENT_RULESET_VERSION
 void runSitemapAudit
 void runSiteCrawl

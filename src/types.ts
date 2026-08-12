@@ -1,4 +1,5 @@
 import type { CheerioAPI } from 'cheerio'
+import { deepFreeze } from './immutable.js'
 
 export type FindingType = 'found' | 'missing' | 'info' | 'timeout' | 'unreachable'
 
@@ -638,7 +639,7 @@ export interface SiteCrawlLimits {
 }
 
 /** Safe defaults for an untrusted public site. Every value may be tightened by callers. */
-export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = {
+export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = deepFreeze({
   maxPages: 1_000,
   maxEdges: 100_000,
   maxFetches: 5_000,
@@ -652,7 +653,7 @@ export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = {
   maxSitemapUrls: 50_000,
   concurrency: 5,
   requestDelayMs: 0,
-}
+})
 
 export type CrawlTerminationReason =
   | 'max-pages'

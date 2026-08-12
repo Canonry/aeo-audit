@@ -7,6 +7,8 @@
 //
 // Titles and statuses were verified against the published spec in 2026-05.
 
+import { deepFreeze } from './immutable.js'
+
 export type SpecStatus = 'required' | 'recommended' | 'optional' | 'avoid'
 
 export interface SpecRule {
@@ -33,7 +35,7 @@ function agentReadinessRule(slug: string, title: string, status: SpecStatus): Sp
  * onto. Keys are the spec slugs; `satisfies` preserves the literal keys so
  * `SpecRuleId` is the exact union of valid slugs.
  */
-export const SPEC_RULES = {
+export const SPEC_RULES = deepFreeze({
   'llms-txt': agentReadinessRule('llms-txt', '/llms.txt', 'recommended'),
   'llms-full-txt': agentReadinessRule('llms-full-txt', '/llms-full.txt', 'optional'),
   'markdown-source-endpoints': agentReadinessRule('markdown-source-endpoints', 'Per-page Markdown source endpoints', 'recommended'),
@@ -45,7 +47,7 @@ export const SPEC_RULES = {
   'agent-skills-discovery': agentReadinessRule('agent-skills-discovery', 'Agent Skills discovery', 'recommended'),
   'a2a-agent-cards': agentReadinessRule('a2a-agent-cards', 'A2A agent cards', 'optional'),
   'web-bot-auth': agentReadinessRule('web-bot-auth', 'Web Bot Auth — verifiable bot identity', 'optional'),
-} satisfies Record<string, SpecRule>
+}) satisfies Record<string, SpecRule>
 
 export type SpecRuleId = keyof typeof SPEC_RULES
 
@@ -55,12 +57,12 @@ export type SpecRuleId = keyof typeof SPEC_RULES
  * spec's agent-readiness category. The explicit type narrows each slug to a valid
  * `SpecRuleId`, so a typo'd slug fails the build.
  */
-export const FACTOR_SPEC_RULES: Record<string, SpecRuleId[]> = {
+export const FACTOR_SPEC_RULES: Readonly<Record<string, readonly SpecRuleId[]>> = deepFreeze({
   'structured-data': ['structured-data-for-agents'],
   'ai-access-files': ['llms-txt', 'llms-full-txt', 'markdown-source-endpoints', 'link-headers'],
   'ai-crawler-access': ['robots-for-ai-crawlers', 'content-signals'],
   'agent-skill-exposure': ['mcp-and-tool-discovery', 'agent-skills-discovery', 'a2a-agent-cards', 'web-bot-auth'],
-}
+})
 
 /**
  * Citation suffix appended to a recommendation, e.g.

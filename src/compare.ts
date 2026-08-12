@@ -1,5 +1,6 @@
 import { AeoAuditError } from './errors.js'
 import { DEFECT_TITLES } from './critical-defects.js'
+import { deepFreeze } from './immutable.js'
 import type {
   AuditReport,
   CompareReport,
@@ -23,7 +24,7 @@ const TOOL = '@canonry/aeo-audit'
  * scores are clamped/rounded integers and time-dependent factors (content
  * freshness) drift a point or two between runs, so a 0 tolerance false-fails.
  */
-export const DEFAULT_COMPARE_POLICY: ComparePolicy = {
+export const DEFAULT_COMPARE_POLICY: Readonly<ComparePolicy> = deepFreeze({
   overallTolerance: 2,
   pageTolerance: 5,
   factorTolerance: 8,
@@ -32,7 +33,7 @@ export const DEFAULT_COMPARE_POLICY: ComparePolicy = {
   onMissingBaseline: 'warn',
   reportOnly: false,
   strictComparability: false,
-}
+})
 
 type AnyReport = AuditReport | SitemapAuditReport
 

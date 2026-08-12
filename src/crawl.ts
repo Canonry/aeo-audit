@@ -5,6 +5,7 @@ import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, normalizeTa
 import { assertValidFactorIds, auditHtmlPage } from './audit-html.js'
 import { RequestPacer } from './request-pacer.js'
 import { engineVersion } from './schema.js'
+import { deepFreeze } from './immutable.js'
 import { parseSitemapXmlDocument } from './sitemap-xml.js'
 import type { FetchBudget } from './fetch-page.js'
 import type {
@@ -325,13 +326,23 @@ function robotsAllows(url: string, robots: RobotsRules): boolean {
 }
 
 /**
- * The concrete (non-abstract) roles from ARIA 1.2.
+ * Every role an author may write that a user agent will recognize, across all
+ * three W3C role modules. The enumeration is COMPLETE, not merely large:
+ *
+ *  - ARIA 1.2 concrete roles      https://www.w3.org/TR/wai-aria-1.2/
+ *  - DPUB-ARIA 1.1 (`doc-*`)      https://www.w3.org/TR/dpub-aria-1.1/
+ *  - Graphics-ARIA 1.0 (`graphics-*`)  https://www.w3.org/TR/graphics-aria-1.0/
+ *
+ * A new W3C role module is the only thing that can extend it, and it goes here.
  *
  * Role resolution needs the whole enumeration, not just the landmarks: `role` is
  * an ordered fallback list and the FIRST RECOGNIZED role wins whether or not it
- * is a landmark, so `role="button navigation"` is a button and the element is
- * not a landmark at all. Abstract roles are excluded because authors must not
- * use them and user agents ignore them when computing the role.
+ * carries a placement, so `role="button navigation"` is a button and the element
+ * is not a landmark at all. An omitted module silently breaks that ordering by
+ * making a valid role look unrecognized.
+ *
+ * Abstract roles are excluded because authors must not use them and user agents
+ * ignore them when computing the role.
  */
 const CORE_ARIA_ROLES = [
   'alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption',
@@ -347,7 +358,7 @@ const CORE_ARIA_ROLES = [
 ] as const
 
 /**
- * DPUB-ARIA 1.1 roles. They are recognized roles, so `<footer role="doc-footnote">`
+ * DPUB-ARIA 1.1 roles. They are recognized, so `<footer role="doc-footnote">`
  * is a footnote and NOT contentinfo: the author role overrides the native tag
  * even though no `doc-*` role carries a placement of its own.
  */
@@ -361,8 +372,32 @@ const DPUB_ARIA_ROLES = [
   'doc-preface', 'doc-prologue', 'doc-pullquote', 'doc-qna', 'doc-subtitle', 'doc-tip', 'doc-toc',
 ] as const
 
-/** Every role an author may write that a user agent will recognize. */
-export const RECOGNIZED_ARIA_ROLES: ReadonlySet<string> = new Set<string>([...CORE_ARIA_ROLES, ...DPUB_ARIA_ROLES])
+/** Graphics-ARIA 1.0 roles. Recognized, and none carries a placement. */
+const GRAPHICS_ARIA_ROLES = ['graphics-document', 'graphics-object', 'graphics-symbol'] as const
+
+/**
+ * The lookup the resolver uses. Private on purpose: a `Set` cannot be made
+ * immutable by freezing it, and an exported live instance would let a consumer
+ * `.add()` a role and silently change every later placement while
+ * `linkPlacementRulesetVersion` still reported the published ruleset.
+ */
+const RECOGNIZED_ROLE_LOOKUP: ReadonlySet<string> = new Set<string>([
+  ...CORE_ARIA_ROLES,
+  ...DPUB_ARIA_ROLES,
+  ...GRAPHICS_ARIA_ROLES,
+])
+
+/** Whether a single role token is one a user agent recognizes. Case-insensitive. */
+export function isRecognizedAriaRole(token: string): boolean {
+  return RECOGNIZED_ROLE_LOOKUP.has(token.trim().toLowerCase())
+}
+
+/**
+ * The recognized roles, sorted, as a frozen array so a consumer can enumerate
+ * or pin the published set without being able to widen what the crawler
+ * accepts. Use `isRecognizedAriaRole` for membership tests.
+ */
+export const RECOGNIZED_ARIA_ROLES: readonly string[] = deepFreeze([...RECOGNIZED_ROLE_LOOKUP].sort())
 
 /**
  * A landmark and everything placement needs to know about it, in ONE row.
@@ -441,17 +476,32 @@ function tagNameOf(node: PlacementNode): string {
  */
 function firstRecognizedRole(node: PlacementNode): string | null {
   for (const token of (node.attribs?.role ?? '').toLowerCase().trim().split(/\s+/)) {
-    if (RECOGNIZED_ARIA_ROLES.has(token)) return token
+    if (RECOGNIZED_ROLE_LOOKUP.has(token)) return token
   }
   return null
 }
 
-/** Whether an ancestor scopes a descendant `header` / `footer`, by role then tag. */
+/**
+ * Whether an ancestor scopes a descendant `header` / `footer`.
+ *
+ * The condition is the UNION of tag and role. HTML-ARIA words it as "not a
+ * descendant of an `article`, `aside`, `main`, `nav` or `section` ELEMENT, or an
+ * element WITH `role=article | complementary | main | navigation | region`", so
+ * either alone is enough. A `<section>` is a sectioning element whatever role an
+ * author puts on it, and `<section role="doc-chapter"><header>` still scopes.
+ *
+ * NOTE the deliberate asymmetry with `landmarkOf`, where an author role
+ * OVERRIDES the tag instead of adding to it. The two answer different questions.
+ * Placement asks what this element IS, and a role is exactly how an author
+ * answers that, so it wins. Scoping asks whether a sectioning container encloses
+ * the header, and an element's sectioning nature does not disappear because the
+ * author labelled it something else. One table, two rules, both intentional.
+ */
 function scopesChrome(node: PlacementNode): boolean {
   if (node.type !== 'tag') return false
+  if (SCOPING_TAGS.has(tagNameOf(node))) return true
   const role = firstRecognizedRole(node)
-  if (role !== null) return SCOPING_ROLES.has(role)
-  return SCOPING_TAGS.has(tagNameOf(node))
+  return role !== null && SCOPING_ROLES.has(role)
 }
 
 /**

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import { RECOGNIZED_ARIA_ROLES, runSiteCrawl } from '../src/index.js'
+import { RECOGNIZED_ARIA_ROLES, isRecognizedAriaRole, runSiteCrawl } from '../src/index.js'
 import type { CrawlEdgeObservation, CrawlLinkPlacement, CrawlPlacementOccurrences, CrawlSummary, FullSiteCrawlReport } from '../src/types.js'
 import { placementSitePages } from './fixtures/placement-site.js'
 
@@ -83,106 +83,130 @@ const CONTEXTS: Array<[name: string, wrap: (inner: string) => string]> = [
   ['inArticle', (inner) => `<article>${inner}</article>`],
   ['inRoleMain', (inner) => `<div role="main">${inner}</div>`],
   ['inSection', (inner) => `<section>${inner}</section>`],
+  // Scoping is the UNION of tag and role, so a sectioning ELEMENT still scopes a
+  // descendant header even when an author role on it carries no placement.
+  ['inSectionRoleDoc', (inner) => `<section role="doc-chapter">${inner}</section>`],
+  ['inArticleRoleButton', (inner) => `<article role="button">${inner}</article>`],
   ['inNav', (inner) => `<nav>${inner}</nav>`],
 ]
 
-/** [tag, role, root, inArticle, inRoleMain, inSection, inNav] */
-const MATRIX: Array<[string, string | null, CrawlLinkPlacement, CrawlLinkPlacement, CrawlLinkPlacement, CrawlLinkPlacement, CrawlLinkPlacement]> = [
-  ['nav', null, N, N, N, N, N],
-  ['nav', 'navigation', N, N, N, N, N],
-  ['nav', 'main', C, C, C, C, C],
-  ['nav', 'article', C, C, C, C, C],
-  ['nav', 'banner', N, N, N, N, N],
-  ['nav', 'region', U, C, C, U, N],
-  ['nav', 'button', U, C, C, U, N],
-  ['nav', 'doc-chapter', U, C, C, U, N],
-  ['nav', 'made-up', N, N, N, N, N],
-  ['nav', 'button navigation', U, C, C, U, N],
-  ['nav', 'made-up main', C, C, C, C, C],
+/** [tag, role, root, inArticle, inRoleMain, inSection, inSectionRoleDoc, inArticleRoleButton, inNav] */
+type MatrixRow = [
+  tag: string,
+  role: string | null,
+  root: CrawlLinkPlacement,
+  inArticle: CrawlLinkPlacement,
+  inRoleMain: CrawlLinkPlacement,
+  inSection: CrawlLinkPlacement,
+  inSectionRoleDoc: CrawlLinkPlacement,
+  inArticleRoleButton: CrawlLinkPlacement,
+  inNav: CrawlLinkPlacement,
+]
 
-  ['aside', null, N, N, N, N, N],
-  ['aside', 'navigation', N, N, N, N, N],
-  ['aside', 'main', C, C, C, C, C],
-  ['aside', 'article', C, C, C, C, C],
-  ['aside', 'banner', N, N, N, N, N],
-  ['aside', 'region', U, C, C, U, N],
-  ['aside', 'button', U, C, C, U, N],
-  ['aside', 'doc-chapter', U, C, C, U, N],
-  ['aside', 'made-up', N, N, N, N, N],
-  ['aside', 'button navigation', U, C, C, U, N],
-  ['aside', 'made-up main', C, C, C, C, C],
+const MATRIX: MatrixRow[] = [
+  ['nav', null, N, N, N, N, N, N, N],
+  ['nav', 'navigation', N, N, N, N, N, N, N],
+  ['nav', 'main', C, C, C, C, C, C, C],
+  ['nav', 'article', C, C, C, C, C, C, C],
+  ['nav', 'banner', N, N, N, N, N, N, N],
+  ['nav', 'region', U, C, C, U, U, U, N],
+  ['nav', 'button', U, C, C, U, U, U, N],
+  ['nav', 'doc-chapter', U, C, C, U, U, U, N],
+  ['nav', 'graphics-document', U, C, C, U, U, U, N],
+  ['nav', 'made-up', N, N, N, N, N, N, N],
+  ['nav', 'button navigation', U, C, C, U, U, U, N],
+  ['nav', 'made-up main', C, C, C, C, C, C, C],
 
-  ['header', null, N, C, C, U, N],
-  ['header', 'navigation', N, N, N, N, N],
-  ['header', 'main', C, C, C, C, C],
-  ['header', 'article', C, C, C, C, C],
-  ['header', 'banner', N, N, N, N, N],
-  ['header', 'region', U, C, C, U, N],
-  ['header', 'button', U, C, C, U, N],
-  ['header', 'doc-chapter', U, C, C, U, N],
-  ['header', 'made-up', N, C, C, U, N],
-  ['header', 'button navigation', U, C, C, U, N],
-  ['header', 'made-up main', C, C, C, C, C],
+  ['aside', null, N, N, N, N, N, N, N],
+  ['aside', 'navigation', N, N, N, N, N, N, N],
+  ['aside', 'main', C, C, C, C, C, C, C],
+  ['aside', 'article', C, C, C, C, C, C, C],
+  ['aside', 'banner', N, N, N, N, N, N, N],
+  ['aside', 'region', U, C, C, U, U, U, N],
+  ['aside', 'button', U, C, C, U, U, U, N],
+  ['aside', 'doc-chapter', U, C, C, U, U, U, N],
+  ['aside', 'graphics-document', U, C, C, U, U, U, N],
+  ['aside', 'made-up', N, N, N, N, N, N, N],
+  ['aside', 'button navigation', U, C, C, U, U, U, N],
+  ['aside', 'made-up main', C, C, C, C, C, C, C],
 
-  ['footer', null, N, C, C, U, N],
-  ['footer', 'navigation', N, N, N, N, N],
-  ['footer', 'main', C, C, C, C, C],
-  ['footer', 'article', C, C, C, C, C],
-  ['footer', 'banner', N, N, N, N, N],
-  ['footer', 'region', U, C, C, U, N],
-  ['footer', 'button', U, C, C, U, N],
-  ['footer', 'doc-chapter', U, C, C, U, N],
-  ['footer', 'made-up', N, C, C, U, N],
-  ['footer', 'button navigation', U, C, C, U, N],
-  ['footer', 'made-up main', C, C, C, C, C],
+  ['header', null, N, C, C, U, U, U, N],
+  ['header', 'navigation', N, N, N, N, N, N, N],
+  ['header', 'main', C, C, C, C, C, C, C],
+  ['header', 'article', C, C, C, C, C, C, C],
+  ['header', 'banner', N, N, N, N, N, N, N],
+  ['header', 'region', U, C, C, U, U, U, N],
+  ['header', 'button', U, C, C, U, U, U, N],
+  ['header', 'doc-chapter', U, C, C, U, U, U, N],
+  ['header', 'graphics-document', U, C, C, U, U, U, N],
+  ['header', 'made-up', N, C, C, U, U, U, N],
+  ['header', 'button navigation', U, C, C, U, U, U, N],
+  ['header', 'made-up main', C, C, C, C, C, C, C],
 
-  ['main', null, C, C, C, C, C],
-  ['main', 'navigation', N, N, N, N, N],
-  ['main', 'main', C, C, C, C, C],
-  ['main', 'article', C, C, C, C, C],
-  ['main', 'banner', N, N, N, N, N],
-  ['main', 'region', U, C, C, U, N],
-  ['main', 'button', U, C, C, U, N],
-  ['main', 'doc-chapter', U, C, C, U, N],
-  ['main', 'made-up', C, C, C, C, C],
-  ['main', 'button navigation', U, C, C, U, N],
-  ['main', 'made-up main', C, C, C, C, C],
+  ['footer', null, N, C, C, U, U, U, N],
+  ['footer', 'navigation', N, N, N, N, N, N, N],
+  ['footer', 'main', C, C, C, C, C, C, C],
+  ['footer', 'article', C, C, C, C, C, C, C],
+  ['footer', 'banner', N, N, N, N, N, N, N],
+  ['footer', 'region', U, C, C, U, U, U, N],
+  ['footer', 'button', U, C, C, U, U, U, N],
+  ['footer', 'doc-chapter', U, C, C, U, U, U, N],
+  ['footer', 'graphics-document', U, C, C, U, U, U, N],
+  ['footer', 'made-up', N, C, C, U, U, U, N],
+  ['footer', 'button navigation', U, C, C, U, U, U, N],
+  ['footer', 'made-up main', C, C, C, C, C, C, C],
 
-  ['article', null, C, C, C, C, C],
-  ['article', 'navigation', N, N, N, N, N],
-  ['article', 'main', C, C, C, C, C],
-  ['article', 'article', C, C, C, C, C],
-  ['article', 'banner', N, N, N, N, N],
-  ['article', 'region', U, C, C, U, N],
-  ['article', 'button', U, C, C, U, N],
-  ['article', 'doc-chapter', U, C, C, U, N],
-  ['article', 'made-up', C, C, C, C, C],
-  ['article', 'button navigation', U, C, C, U, N],
-  ['article', 'made-up main', C, C, C, C, C],
+  ['main', null, C, C, C, C, C, C, C],
+  ['main', 'navigation', N, N, N, N, N, N, N],
+  ['main', 'main', C, C, C, C, C, C, C],
+  ['main', 'article', C, C, C, C, C, C, C],
+  ['main', 'banner', N, N, N, N, N, N, N],
+  ['main', 'region', U, C, C, U, U, U, N],
+  ['main', 'button', U, C, C, U, U, U, N],
+  ['main', 'doc-chapter', U, C, C, U, U, U, N],
+  ['main', 'graphics-document', U, C, C, U, U, U, N],
+  ['main', 'made-up', C, C, C, C, C, C, C],
+  ['main', 'button navigation', U, C, C, U, U, U, N],
+  ['main', 'made-up main', C, C, C, C, C, C, C],
 
-  ['section', null, U, C, C, U, N],
-  ['section', 'navigation', N, N, N, N, N],
-  ['section', 'main', C, C, C, C, C],
-  ['section', 'article', C, C, C, C, C],
-  ['section', 'banner', N, N, N, N, N],
-  ['section', 'region', U, C, C, U, N],
-  ['section', 'button', U, C, C, U, N],
-  ['section', 'doc-chapter', U, C, C, U, N],
-  ['section', 'made-up', U, C, C, U, N],
-  ['section', 'button navigation', U, C, C, U, N],
-  ['section', 'made-up main', C, C, C, C, C],
+  ['article', null, C, C, C, C, C, C, C],
+  ['article', 'navigation', N, N, N, N, N, N, N],
+  ['article', 'main', C, C, C, C, C, C, C],
+  ['article', 'article', C, C, C, C, C, C, C],
+  ['article', 'banner', N, N, N, N, N, N, N],
+  ['article', 'region', U, C, C, U, U, U, N],
+  ['article', 'button', U, C, C, U, U, U, N],
+  ['article', 'doc-chapter', U, C, C, U, U, U, N],
+  ['article', 'graphics-document', U, C, C, U, U, U, N],
+  ['article', 'made-up', C, C, C, C, C, C, C],
+  ['article', 'button navigation', U, C, C, U, U, U, N],
+  ['article', 'made-up main', C, C, C, C, C, C, C],
 
-  ['div', null, U, C, C, U, N],
-  ['div', 'navigation', N, N, N, N, N],
-  ['div', 'main', C, C, C, C, C],
-  ['div', 'article', C, C, C, C, C],
-  ['div', 'banner', N, N, N, N, N],
-  ['div', 'region', U, C, C, U, N],
-  ['div', 'button', U, C, C, U, N],
-  ['div', 'doc-chapter', U, C, C, U, N],
-  ['div', 'made-up', U, C, C, U, N],
-  ['div', 'button navigation', U, C, C, U, N],
-  ['div', 'made-up main', C, C, C, C, C],
+  ['section', null, U, C, C, U, U, U, N],
+  ['section', 'navigation', N, N, N, N, N, N, N],
+  ['section', 'main', C, C, C, C, C, C, C],
+  ['section', 'article', C, C, C, C, C, C, C],
+  ['section', 'banner', N, N, N, N, N, N, N],
+  ['section', 'region', U, C, C, U, U, U, N],
+  ['section', 'button', U, C, C, U, U, U, N],
+  ['section', 'doc-chapter', U, C, C, U, U, U, N],
+  ['section', 'graphics-document', U, C, C, U, U, U, N],
+  ['section', 'made-up', U, C, C, U, U, U, N],
+  ['section', 'button navigation', U, C, C, U, U, U, N],
+  ['section', 'made-up main', C, C, C, C, C, C, C],
+
+  ['div', null, U, C, C, U, U, U, N],
+  ['div', 'navigation', N, N, N, N, N, N, N],
+  ['div', 'main', C, C, C, C, C, C, C],
+  ['div', 'article', C, C, C, C, C, C, C],
+  ['div', 'banner', N, N, N, N, N, N, N],
+  ['div', 'region', U, C, C, U, U, U, N],
+  ['div', 'button', U, C, C, U, U, U, N],
+  ['div', 'doc-chapter', U, C, C, U, U, U, N],
+  ['div', 'graphics-document', U, C, C, U, U, U, N],
+  ['div', 'made-up', U, C, C, U, U, U, N],
+  ['div', 'button navigation', U, C, C, U, U, U, N],
+  ['div', 'made-up main', C, C, C, C, C, C, C],
 ]
 
 const cellId = (tag: string, role: string | null) => `${tag}.${(role ?? 'norole').replace(/\s+/g, '_')}`
@@ -230,33 +254,85 @@ describe('crawl link placement matrix', () => {
 })
 
 describe('crawl link placement', () => {
-  test('recognizes DPUB roles, so a doc role overrides its native tag', async () => {
-    for (const role of ['doc-chapter', 'doc-footnote', 'doc-toc', 'doc-biblioref', 'doc-pagebreak']) {
-      expect(RECOGNIZED_ARIA_ROLES.has(role)).toBe(true)
+  test('recognizes every W3C role module, so the enumeration is complete', () => {
+    // One role per module. A future module has an obvious home beside these.
+    expect(isRecognizedAriaRole('navigation')).toBe(true) // ARIA 1.2
+    expect(isRecognizedAriaRole('doc-chapter')).toBe(true) // DPUB-ARIA 1.1
+    expect(isRecognizedAriaRole('graphics-document')).toBe(true) // Graphics-ARIA 1.0
+    for (const role of ['doc-footnote', 'doc-toc', 'doc-biblioref', 'doc-pagebreak', 'graphics-object', 'graphics-symbol']) {
+      expect(isRecognizedAriaRole(role)).toBe(true)
+      expect(RECOGNIZED_ARIA_ROLES).toContain(role)
     }
+    expect(isRecognizedAriaRole('GRAPHICS-SYMBOL ')).toBe(true)
+  })
+
+  test('a module role overrides its native tag and carries no placement', async () => {
     const resolved = await probePlacements([
       ['footnote', (a) => `<footer role="doc-footnote">${a}</footer>`],
       ['toc', (a) => `<nav role="doc-toc">${a}</nav>`],
       ['chapter-in-aside', (a) => `<aside role="doc-chapter">${a}</aside>`],
+      ['graphics-in-nav', (a) => `<nav role="graphics-document">${a}</nav>`],
+      ['graphics-symbol-footer', (a) => `<footer role="graphics-symbol">${a}</footer>`],
       ['scoped-footnote', (a) => `<article><footer role="doc-footnote">${a}</footer></article>`],
     ])
 
-    // No doc-* role carries a placement, so the element is not a landmark and
-    // its tag is not consulted. The walk continues to whatever encloses it.
+    // No doc-* or graphics-* role carries a placement, so the element is not a
+    // landmark and its tag is not consulted. The walk continues past it.
     expect(resolved.footnote).toBe(U)
     expect(resolved.toc).toBe(U)
     expect(resolved['chapter-in-aside']).toBe(U)
+    expect(resolved['graphics-in-nav']).toBe(U)
+    expect(resolved['graphics-symbol-footer']).toBe(U)
     expect(resolved['scoped-footnote']).toBe(C)
+  })
+
+  test('a sectioning element scopes a header whatever role an author puts on it', async () => {
+    // Scoping is the UNION of tag and role, the opposite precedence from
+    // placement: a <section> does not stop being a sectioning element because
+    // the author labelled it, so the header inside is not a banner.
+    const resolved = await probePlacements([
+      ['section-doc', (a) => `<section role="doc-chapter"><header>${a}</header></section>`],
+      ['article-button', (a) => `<article role="button"><header>${a}</header></article>`],
+      ['nav-graphics', (a) => `<nav role="graphics-object"><footer>${a}</footer></nav>`],
+      // The role-derived half of the union still holds on a non-sectioning tag.
+      ['div-role-main', (a) => `<div role="main"><header>${a}</header></div>`],
+      ['div-role-region', (a) => `<div role="region"><header>${a}</header></div>`],
+      // A plain div neither scopes nor places, so the header stays a banner.
+      ['plain-div', (a) => `<div><header>${a}</header></div>`],
+    ])
+
+    expect(resolved['section-doc']).toBe(U)
+    expect(resolved['article-button']).toBe(U)
+    expect(resolved['nav-graphics']).toBe(U)
+    expect(resolved['div-role-main']).toBe(C)
+    expect(resolved['div-role-region']).toBe(U)
+    expect(resolved['plain-div']).toBe(N)
+  })
+
+  test('the published role registry cannot be widened at runtime', async () => {
+    const before = await probePlacements([['probe', (a) => `<nav role="made-up-role">${a}</nav>`]])
+    expect(before.probe).toBe(N)
+    vi.unstubAllGlobals()
+
+    // The exported view is a frozen array, not the live Set the resolver reads,
+    // so a consumer cannot widen the ruleset while the version string still
+    // reports 1.0.0.
+    expect(Object.isFrozen(RECOGNIZED_ARIA_ROLES)).toBe(true)
+    expect(() => (RECOGNIZED_ARIA_ROLES as string[]).push('made-up-role')).toThrow(TypeError)
+    expect(isRecognizedAriaRole('made-up-role')).toBe(false)
+
+    const after = await probePlacements([['probe', (a) => `<nav role="made-up-role">${a}</nav>`]])
+    expect(after.probe).toBe(N)
   })
 
   test('the recognized role list excludes abstract roles', async () => {
     for (const role of ['navigation', 'main', 'button', 'tablist', 'generic', 'none', 'region', 'search', 'form']) {
-      expect(RECOGNIZED_ARIA_ROLES.has(role)).toBe(true)
+      expect(isRecognizedAriaRole(role)).toBe(true)
     }
     // Authors must not use abstract roles and user agents ignore them, so they
     // must not suppress a tag's native landmark semantics.
     for (const role of ['landmark', 'widget', 'structure', 'roletype', 'section', 'sectionhead', 'window']) {
-      expect(RECOGNIZED_ARIA_ROLES.has(role)).toBe(false)
+      expect(isRecognizedAriaRole(role)).toBe(false)
     }
     const resolved = await probePlacements([['abstract', (a) => `<nav role="landmark">${a}</nav>`]])
     expect(resolved.abstract).toBe(N)
