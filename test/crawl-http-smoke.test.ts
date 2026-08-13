@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import { runSiteCrawl } from '../src/index.js'
+import { placementSitePages } from './fixtures/placement-site.js'
 
 describe('runSiteCrawl local HTTP smoke', () => {
   let server: Server | undefined
@@ -77,5 +78,52 @@ describe('runSiteCrawl local HTTP smoke', () => {
     expect(enabled.deadLinks.findings).toEqual([
       expect.objectContaining({ from: `${origin}/`, to: `${origin}/gone`, reason: 'http-error', statusCode: 404 }),
     ])
+  })
+
+  test('records where each link sits over real HTTP', async () => {
+    let origin = ''
+    server = createServer((request, response) => {
+      const path = new URL(request.url ?? '/', origin).pathname
+      const page = Object.hasOwn(placementSitePages, path) ? placementSitePages[path] : undefined
+      if (page === undefined) {
+        response.statusCode = 404
+        response.setHeader('content-type', 'text/plain')
+        response.end('missing')
+        return
+      }
+      response.setHeader('content-type', 'text/html')
+      response.end(page)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server!.once('error', reject)
+      server!.listen(0, '127.0.0.1', () => {
+        server!.off('error', reject)
+        resolve()
+      })
+    })
+    const address = server.address() as AddressInfo
+    origin = `http://127.0.0.1:${address.port}`
+
+    const report = await runSiteCrawl(`${origin}/`, { allowPrivateHost: '127.0.0.1', concurrency: 3 })
+    if (report.mode !== 'full') throw new Error('expected full report')
+    const placement = (from: string, to: string) => report.edges
+      .find((edge) => edge.type === 'anchor' && edge.from === `${origin}${from}` && edge.to === `${origin}${to}`)
+      ?.placementOccurrences
+    const post = '/blog/how-to-rank-on-chatgpt'
+
+    expect(report.pages.filter((page) => page.state === 'html')).toHaveLength(Object.keys(placementSitePages).length)
+    // Nav and prose link the same target with the same anchor text on one page.
+    expect(placement(post, '/chatgpt-seo-agency')).toEqual({ navigation: 1, content: 1, unknown: 0 })
+    // The post's own header and footer are scoped by the article, so they are
+    // the post's content, while the site header and footer stay chrome.
+    expect(placement(post, '/authors/dana')).toEqual({ navigation: 0, content: 1, unknown: 0 })
+    expect(placement(post, '/tags/answer-engines')).toEqual({ navigation: 0, content: 1, unknown: 0 })
+    expect(placement(post, '/terms')).toEqual({ navigation: 1, content: 0, unknown: 0 })
+    expect(placement('/', '/chatgpt-seo-agency')).toEqual({ navigation: 1, content: 0, unknown: 0 })
+    expect(placement('/', '/terms')).toEqual({ navigation: 1, content: 0, unknown: 0 })
+    expect(placement('/', post)).toEqual({ navigation: 0, content: 1, unknown: 0 })
+    expect(placement('/legacy-page', '/chatgpt-seo-agency')).toEqual({ navigation: 0, content: 0, unknown: 1 })
+    expect(report.summary.crawlSchemaVersion).toBe('1.2')
+    expect(report.summary.linkPlacementRulesetVersion).toBe('1.0.0')
   })
 })

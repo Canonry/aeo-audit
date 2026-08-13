@@ -22,6 +22,9 @@ export {
   URL_NORMALIZATION_VERSION,
   INDEXABILITY_RULESET_VERSION,
   LINK_SCORE_ALGORITHM_VERSION,
+  LINK_PLACEMENT_RULESET_VERSION,
+  RECOGNIZED_ARIA_ROLES,
+  isRecognizedAriaRole,
 } from './crawl.js'
 export { detectCriticalDefects, buildCriticalDefects } from './critical-defects.js'
 export { agentSummaryFromAudit, agentSummaryFromSitemap } from './agent-summary.js'
@@ -53,9 +56,11 @@ export type {
   CrawlEvent,
   CrawlEventBase,
   CrawlIndexabilityState,
+  CrawlLinkPlacement,
   CrawlPageMetrics,
   CrawlPageObservation,
   CrawlPageState,
+  CrawlPlacementOccurrences,
   CrawlProgress,
   CrawlSummary,
   CrawlTerminationReason,
@@ -70,6 +75,7 @@ export type {
 export {
   CRAWL_ENGINE_VERSION,
   CRAWL_INDEXABILITY_RULESET_VERSION,
+  CRAWL_LINK_PLACEMENT_RULESET_VERSION,
   CRAWL_LINK_SCORE_ALGORITHM_VERSION,
   CRAWL_SCHEMA_VERSION,
   CRAWL_URL_NORMALIZATION_VERSION,

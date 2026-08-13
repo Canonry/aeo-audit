@@ -21,6 +21,9 @@ import {
   runSiteCrawl,
   runSitemapAudit,
   CRAWL_SCHEMA_VERSION,
+  CRAWL_LINK_PLACEMENT_RULESET_VERSION,
+  RECOGNIZED_ARIA_ROLES,
+  isRecognizedAriaRole,
   type AeoAuditErrorCode,
   type AeoAuditOutboundAttempt,
   type AeoAuditOutboundAttemptKind,
@@ -32,7 +35,11 @@ import {
   type SitemapAuditOptions,
   type SitemapAuditPartialReason,
   type SitemapAuditReport,
+  type CrawlEdgeObservation,
   type CrawlEvent,
+  type CrawlLinkPlacement,
+  type CrawlPlacementOccurrences,
+  type CrawlSummary,
   type CrawlWarning,
   type SiteCrawlOptions,
   type SiteCrawlReport,
@@ -90,8 +97,42 @@ const metadata: SitemapAuditMetadata = {
   budget,
 }
 const partialReason: SitemapAuditPartialReason = 'duration-budget-exceeded'
+const placement: CrawlLinkPlacement = 'content'
+const placementOccurrences: CrawlPlacementOccurrences = { navigation: 1, content: 1, unknown: 0 }
+// A graph captured before the placement ruleset has no placement data. This
+// literal fails to compile (TS2741) if the added field is required, which is
+// what makes the addition a minor release rather than a breaking one.
+const legacyEdge: CrawlEdgeObservation = {
+  key: 'edge:0000',
+  from: 'https://example.com/blog/post',
+  to: 'https://example.com/service',
+  type: 'anchor',
+  classification: 'internal',
+  totalOccurrences: 2,
+  followableOccurrences: 2,
+  nofollowOccurrences: 0,
+  anchorSummaries: [{ text: 'Service', occurrences: 2 }],
+}
+const placedEdge: CrawlEdgeObservation = { ...legacyEdge, placementOccurrences }
+// Absence is a real state, so reading it has to survive the undefined case.
+const inContent: number = placedEdge.placementOccurrences?.[placement] ?? 0
+// Same check for the summary field, without restating every required field.
+const legacySummary: CrawlSummary = undefined as unknown as Omit<CrawlSummary, 'linkPlacementRulesetVersion'>
+
+// The role registry is part of the documented ruleset, so a consumer can pin to
+// it: a predicate for membership and a frozen array for enumeration. There is
+// no exported Set, because a Set cannot be frozen and would let a consumer widen
+// what the crawler accepts.
+const recognizesDpub: boolean = isRecognizedAriaRole('doc-chapter')
+const roleCount: number = RECOGNIZED_ARIA_ROLES.length
 
 void runAeoAudit
+void legacyEdge
+void inContent
+void legacySummary
+void recognizesDpub
+void roleCount
+void CRAWL_LINK_PLACEMENT_RULESET_VERSION
 void runSitemapAudit
 void runSiteCrawl
 void crawlOptions

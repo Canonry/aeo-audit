@@ -65,6 +65,40 @@ A false `summary.complete` value means that a declared crawl limit or the exact-
 
 Use `mode: 'full'` for a returned `pages` and `edges` graph. Use summary mode when the event handler stores the graph.
 
+### Link placement
+
+Every anchor edge carries `placementOccurrences?: { navigation, content, unknown }`, which is where the occurrences of that link sat in the page. Placement is read from HTML landmarks, so a nav link and an in-prose link to the same URL with the same anchor text are distinguishable without inferring anything from how often the link repeats across the site.
+
+| Placement | Resolved from |
+|---|---|
+| `navigation` | `nav` or `aside` at any depth, an unscoped `header` or `footer`, or `role="navigation" \| "banner" \| "contentinfo" \| "complementary"` |
+| `content` | `main`, `article`, or `role="main"` |
+| `unknown` | The page declares no landmark that answers the question |
+
+**Nearest ancestor wins.** A `nav` inside `main` is `navigation`, and an `article` inside an `aside` is `content`.
+
+**`header` and `footer` are scoped, by ancestor element *or* ancestor role.** Per HTML-ARIA a `header` maps to `banner` and a `footer` to `contentinfo` only when the element is not a descendant of `article`, `aside`, `main`, `nav`, or `section`, **or of an element whose role is `article`, `complementary`, `main`, `navigation`, or `region`**. The condition is the **union** of the two: a role-based ancestor scopes even on a plain `div`, so `<div role="main"><header>` is `content`; and a sectioning element scopes whatever role an author puts on it, so `<section role="doc-chapter"><header>` is still scoped. A blog post's own `<header>` (title, byline) and `<footer>` (author bio, tags) are therefore the post's `content`, not site chrome. A `header` scoped by a bare `section` resolves to `unknown`, since neither element is a placement landmark. `nav` and `aside` are chrome at any depth; the accessible-name condition HTML-AAM puts on a scoped `aside` is deliberately not applied, because whether a pull-quote is furniture should not depend on whether an author wrote an `aria-label`.
+
+**The first recognized role wins.** `role` is an ordered fallback list, so the engine takes the first token that is a recognized role and ignores the rest. If that role is a placement landmark it gives the placement. If it is recognized but carries no placement, the element is **not** a landmark and its tag name is not consulted, because an author role overrides native semantics: `<nav role="button navigation">` is a button, and `<nav role="tablist">` is not navigation. Only when no token is a recognized role does the tag name decide, so `<nav role="totally-made-up">` stays navigation. Abstract roles are not recognized, since authors must not use them.
+
+**Note the deliberate asymmetry between those two rules.** For **placement**, an author role *overrides* the tag. For **scoping**, an author role *adds to* the tag. They answer different questions: placement asks what an element is, and a role is exactly how an author says so; scoping asks whether a sectioning container encloses the header, and an element's sectioning nature does not disappear because the author labelled it something else.
+
+**DPUB-ARIA and Graphics-ARIA roles are recognized**, so `<footer role="doc-footnote">` is a footnote and not `contentinfo`, and `<nav role="graphics-document">` is not navigation. No `doc-*` or `graphics-*` role carries a placement of its own, so such an element is not a landmark and the walk continues past it. The engine recognizes the complete W3C role enumeration: [ARIA 1.2](https://www.w3.org/TR/wai-aria-1.2/) concrete roles, [DPUB-ARIA 1.1](https://www.w3.org/TR/dpub-aria-1.1/), and [Graphics-ARIA 1.0](https://www.w3.org/TR/graphics-aria-1.0/). Omitting a module would silently break first-recognized-role ordering by making a valid role look unrecognized.
+
+Test membership with `isRecognizedAriaRole(token)`, and enumerate with `RECOGNIZED_ARIA_ROLES`, a frozen sorted array. The package deliberately does **not** export the live `Set` the resolver reads: a `Set` cannot be frozen, so an exported one would let a consumer `.add()` a role and change every later placement while `linkPlacementRulesetVersion` still reported the published ruleset.
+
+**An author role always places the same as the native element it mirrors.** `<div role="article">` is `content` exactly as `<article>` is, and `<div role="complementary">` is `navigation` exactly as `<aside>` is. Both paths read one landmark table, so they cannot drift apart.
+
+`section` / `role="region"` is a landmark that carries **no** placement: a generic sectioning container says nothing about chrome versus content, so the walk continues past it. It still scopes a `header`. The `form` and `search` landmarks likewise carry no placement and no scope.
+
+`unknown` is a deliberate absence of evidence, never a guess. Class names and ids are never consulted, so a `<div class="footer">` on a page with no landmarks reports `unknown` and the caller decides the policy for it.
+
+Counts rather than a single value, because one edge aggregates every occurrence of the same `(from, to)` pair and those occurrences can differ: a page that links a target once from its nav and once from its prose yields `{ navigation: 1, content: 1, unknown: 0 }`. The counts sum to `totalOccurrences` on an `anchor` edge. `redirect` and `canonical` edges carry zeros, because a non-anchor edge has no position in a page.
+
+The field is **optional**, as is `summary.linkPlacementRulesetVersion`. The engine always populates both; a graph captured before this ruleset has neither, so absence is a real state to handle rather than a field to assume.
+
+`summary.linkPlacementRulesetVersion` (`CRAWL_LINK_PLACEMENT_RULESET_VERSION`) versions the landmark rules independently of `crawlSchemaVersion`, so a stored graph can tell a rules change from a shape change.
+
 ## Site-wide (sitemap)
 
 ```ts

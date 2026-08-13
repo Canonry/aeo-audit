@@ -5,6 +5,7 @@ import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, normalizeTa
 import { assertValidFactorIds, auditHtmlPage } from './audit-html.js'
 import { RequestPacer } from './request-pacer.js'
 import { engineVersion } from './schema.js'
+import { deepFreeze } from './immutable.js'
 import { parseSitemapXmlDocument } from './sitemap-xml.js'
 import type { FetchBudget } from './fetch-page.js'
 import type {
@@ -17,8 +18,10 @@ import type {
   CrawlEdgeType,
   CrawlEvent,
   CrawlIndexabilityState,
+  CrawlLinkPlacement,
   CrawlPageMetrics,
   CrawlPageObservation,
+  CrawlPlacementOccurrences,
   CrawlProgress,
   CrawlSummary,
   CrawlTerminationReason,
@@ -34,6 +37,7 @@ import type {
 import {
   CRAWL_ENGINE_VERSION,
   CRAWL_INDEXABILITY_RULESET_VERSION,
+  CRAWL_LINK_PLACEMENT_RULESET_VERSION,
   CRAWL_LINK_SCORE_ALGORITHM_VERSION,
   CRAWL_SCHEMA_VERSION,
   CRAWL_URL_NORMALIZATION_VERSION,
@@ -321,14 +325,303 @@ function robotsAllows(url: string, robots: RobotsRules): boolean {
   return best?.allow ?? true
 }
 
+/**
+ * Every role an author may write that a user agent will recognize, across all
+ * three W3C role modules. The enumeration is COMPLETE, not merely large:
+ *
+ *  - ARIA 1.2 concrete roles      https://www.w3.org/TR/wai-aria-1.2/
+ *  - DPUB-ARIA 1.1 (`doc-*`)      https://www.w3.org/TR/dpub-aria-1.1/
+ *  - Graphics-ARIA 1.0 (`graphics-*`)  https://www.w3.org/TR/graphics-aria-1.0/
+ *
+ * A new W3C role module is the only thing that can extend it, and it goes here.
+ *
+ * Role resolution needs the whole enumeration, not just the landmarks: `role` is
+ * an ordered fallback list and the FIRST RECOGNIZED role wins whether or not it
+ * carries a placement, so `role="button navigation"` is a button and the element
+ * is not a landmark at all. An omitted module silently breaks that ordering by
+ * making a valid role look unrecognized.
+ *
+ * Abstract roles are excluded because authors must not use them and user agents
+ * ignore them when computing the role.
+ */
+const CORE_ARIA_ROLES = [
+  'alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption',
+  'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'comment', 'complementary', 'contentinfo',
+  'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form',
+  'generic', 'grid', 'gridcell', 'group', 'heading', 'image', 'img', 'insertion', 'link', 'list',
+  'listbox', 'listitem', 'log', 'main', 'mark', 'marquee', 'math', 'menu', 'menubar', 'menuitem',
+  'menuitemcheckbox', 'menuitemradio', 'meter', 'navigation', 'none', 'note', 'option', 'paragraph',
+  'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader',
+  'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong',
+  'subscript', 'suggestion', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term',
+  'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem',
+] as const
+
+/**
+ * DPUB-ARIA 1.1 roles. They are recognized, so `<footer role="doc-footnote">`
+ * is a footnote and NOT contentinfo: the author role overrides the native tag
+ * even though no `doc-*` role carries a placement of its own.
+ */
+const DPUB_ARIA_ROLES = [
+  'doc-abstract', 'doc-acknowledgments', 'doc-afterword', 'doc-appendix', 'doc-backlink',
+  'doc-biblioentry', 'doc-bibliography', 'doc-biblioref', 'doc-chapter', 'doc-colophon',
+  'doc-conclusion', 'doc-cover', 'doc-credit', 'doc-credits', 'doc-dedication', 'doc-endnote',
+  'doc-endnotes', 'doc-epigraph', 'doc-epilogue', 'doc-errata', 'doc-example', 'doc-footnote',
+  'doc-foreword', 'doc-glossary', 'doc-glossref', 'doc-index', 'doc-introduction', 'doc-noteref',
+  'doc-notice', 'doc-pagebreak', 'doc-pagefooter', 'doc-pageheader', 'doc-pagelist', 'doc-part',
+  'doc-preface', 'doc-prologue', 'doc-pullquote', 'doc-qna', 'doc-subtitle', 'doc-tip', 'doc-toc',
+] as const
+
+/** Graphics-ARIA 1.0 roles. Recognized, and none carries a placement. */
+const GRAPHICS_ARIA_ROLES = ['graphics-document', 'graphics-object', 'graphics-symbol'] as const
+
+/**
+ * The lookup the resolver uses. Private on purpose: a `Set` cannot be made
+ * immutable by freezing it, and an exported live instance would let a consumer
+ * `.add()` a role and silently change every later placement while
+ * `linkPlacementRulesetVersion` still reported the published ruleset.
+ */
+const RECOGNIZED_ROLE_LOOKUP: ReadonlySet<string> = new Set<string>([
+  ...CORE_ARIA_ROLES,
+  ...DPUB_ARIA_ROLES,
+  ...GRAPHICS_ARIA_ROLES,
+])
+
+/** Whether a single role token is one a user agent recognizes. Case-insensitive. */
+export function isRecognizedAriaRole(token: string): boolean {
+  return RECOGNIZED_ROLE_LOOKUP.has(token.trim().toLowerCase())
+}
+
+/**
+ * The recognized roles, sorted, as a frozen array so a consumer can enumerate
+ * or pin the published set without being able to widen what the crawler
+ * accepts. Use `isRecognizedAriaRole` for membership tests.
+ */
+export const RECOGNIZED_ARIA_ROLES: readonly string[] = deepFreeze([...RECOGNIZED_ROLE_LOOKUP].sort())
+
+/**
+ * A landmark and everything placement needs to know about it, in ONE row.
+ *
+ * Two earlier rounds of spec bugs were all the same shape: a rule added to the
+ * tag path and forgotten on the role path, or to the placement path and
+ * forgotten on the scoping path. Every derived lookup below is generated from
+ * this table, so those paths cannot disagree.
+ */
+interface LandmarkRule {
+  /** The HTML element that carries this landmark natively. */
+  tag: string
+  /** The ARIA role an author writes to mean the same thing. */
+  role: string
+  /**
+   * Placement it contributes, or null when it is a landmark that says nothing
+   * about chrome versus content and the walk should continue past it.
+   */
+  placement: CrawlLinkPlacement | null
+  /**
+   * Whether it scopes a descendant `header` / `footer` out of its
+   * banner / contentinfo mapping. HTML-AAM scopes on both the element and the
+   * matching role, which is exactly the tag and role of this same row.
+   */
+  scopesChrome: boolean
+  /** Whether its OWN landmark status is conditional on not being scoped. */
+  scopedByAncestors: boolean
+}
+
+/**
+ * Placement's landmark table. Sourced from HTML-AAM element mappings.
+ *
+ * `section` / `region` is a landmark that carries no placement: a generic
+ * sectioning container says nothing about chrome versus content, so the walk
+ * continues past it to whatever encloses it. It still scopes a `header`.
+ *
+ * Landmarks NOT in this table (`form`, `search`) are recognized roles but carry
+ * no placement and no scope, so the walk passes through them. HTML-AAM does not
+ * list them as scoping either.
+ */
+const LANDMARK_RULES: readonly LandmarkRule[] = [
+  { tag: 'nav', role: 'navigation', placement: 'navigation', scopesChrome: true, scopedByAncestors: false },
+  { tag: 'aside', role: 'complementary', placement: 'navigation', scopesChrome: true, scopedByAncestors: false },
+  { tag: 'main', role: 'main', placement: 'content', scopesChrome: true, scopedByAncestors: false },
+  { tag: 'article', role: 'article', placement: 'content', scopesChrome: true, scopedByAncestors: false },
+  { tag: 'section', role: 'region', placement: null, scopesChrome: true, scopedByAncestors: false },
+  { tag: 'header', role: 'banner', placement: 'navigation', scopesChrome: false, scopedByAncestors: true },
+  { tag: 'footer', role: 'contentinfo', placement: 'navigation', scopesChrome: false, scopedByAncestors: true },
+]
+
+const placedRules = LANDMARK_RULES.filter((rule): rule is LandmarkRule & { placement: CrawlLinkPlacement } => rule.placement !== null)
+const TAG_PLACEMENT = new Map(placedRules.map((rule) => [rule.tag, rule.placement]))
+const ROLE_PLACEMENT = new Map(placedRules.map((rule) => [rule.role, rule.placement]))
+const SCOPING_TAGS = new Set(LANDMARK_RULES.filter((rule) => rule.scopesChrome).map((rule) => rule.tag))
+const SCOPING_ROLES = new Set(LANDMARK_RULES.filter((rule) => rule.scopesChrome).map((rule) => rule.role))
+const SCOPED_BY_ANCESTORS_TAGS = new Set(LANDMARK_RULES.filter((rule) => rule.scopedByAncestors).map((rule) => rule.tag))
+
+/** The subset of a parsed DOM node that placement reads. */
+interface PlacementNode {
+  type: string
+  name?: string
+  attribs?: Record<string, string>
+  parent: PlacementNode | null
+}
+
+function tagNameOf(node: PlacementNode): string {
+  return node.type === 'tag' ? (node.name ?? '').toLowerCase() : ''
+}
+
+/**
+ * First recognized role on an element, or null when it declares none.
+ *
+ * `role` is an ordered list of fallbacks. A user agent takes the first token it
+ * recognizes and ignores the rest, so `role="doc-chapter main"` is a chapter,
+ * not a main landmark, and `role="button navigation"` is a button.
+ */
+function firstRecognizedRole(node: PlacementNode): string | null {
+  for (const token of (node.attribs?.role ?? '').toLowerCase().trim().split(/\s+/)) {
+    if (RECOGNIZED_ROLE_LOOKUP.has(token)) return token
+  }
+  return null
+}
+
+/**
+ * Whether an ancestor scopes a descendant `header` / `footer`.
+ *
+ * The condition is the UNION of tag and role. HTML-ARIA words it as "not a
+ * descendant of an `article`, `aside`, `main`, `nav` or `section` ELEMENT, or an
+ * element WITH `role=article | complementary | main | navigation | region`", so
+ * either alone is enough. A `<section>` is a sectioning element whatever role an
+ * author puts on it, and `<section role="doc-chapter"><header>` still scopes.
+ *
+ * NOTE the deliberate asymmetry with `landmarkOf`, where an author role
+ * OVERRIDES the tag instead of adding to it. The two answer different questions.
+ * Placement asks what this element IS, and a role is exactly how an author
+ * answers that, so it wins. Scoping asks whether a sectioning container encloses
+ * the header, and an element's sectioning nature does not disappear because the
+ * author labelled it something else. One table, two rules, both intentional.
+ */
+function scopesChrome(node: PlacementNode): boolean {
+  if (node.type !== 'tag') return false
+  if (SCOPING_TAGS.has(tagNameOf(node))) return true
+  const role = firstRecognizedRole(node)
+  return role !== null && SCOPING_ROLES.has(role)
+}
+
+/**
+ * Whether a `header` or `footer` element is site chrome.
+ *
+ * Per HTML-AAM a `header` maps to `banner` and a `footer` to `contentinfo` ONLY
+ * when the element is not a descendant of `article`, `aside`, `main`, `nav`, or
+ * `section`, OR of an element whose role is `article`, `complementary`, `main`,
+ * `navigation`, or `region`. A role-based ancestor scopes exactly as the native
+ * element does, so `<div role="main"><header>` is content. A blog post's own
+ * `header` (title, byline) and `footer` (author bio, tags) are therefore NOT
+ * page chrome, and treating them as chrome would hide exactly the editorial
+ * links this feature exists to surface.
+ *
+ * Memoized per element, and headers and footers are few, so the extra upward
+ * scan does not change the per-page cost in practice.
+ */
+function isUnscopedChrome(node: PlacementNode, scopeMemo: Map<PlacementNode, boolean>): boolean {
+  const cached = scopeMemo.get(node)
+  if (cached !== undefined) return cached
+  let ancestor = node.parent
+  let unscoped = true
+  while (ancestor) {
+    if (scopesChrome(ancestor)) {
+      unscoped = false
+      break
+    }
+    ancestor = ancestor.parent
+  }
+  scopeMemo.set(node, unscoped)
+  return unscoped
+}
+
+/**
+ * Landmark contribution of a single element, or null when it is not a landmark.
+ *
+ * Precedence within one element:
+ *  1. An explicit `role` decides, if any token is a recognized role. A role in
+ *     the landmark table gives its placement; any other recognized role means
+ *     the element is NOT a landmark and its tag name is NOT consulted, because
+ *     an author role overrides native semantics.
+ *  2. Otherwise the tag name decides, through the same table. `header` and
+ *     `footer` are chrome only when unscoped (see `isUnscopedChrome`).
+ *
+ * Because both branches read one table, an author role always produces the same
+ * placement as the native element it mirrors: `<div role="article">` is content
+ * exactly as `<article>` is.
+ *
+ * `aside` is deliberately chrome at every depth. HTML-AAM makes a scoped aside's
+ * `complementary` mapping conditional on the author having given it an
+ * accessible name; placement does not follow that, because whether a pull-quote
+ * is furniture should not depend on whether someone wrote an `aria-label`.
+ *
+ * Class names and ids are never consulted: `<div class="footer">` is exactly the
+ * unreliable signal this function exists to replace, so it stays unresolved.
+ */
+function landmarkOf(node: PlacementNode, scopeMemo: Map<PlacementNode, boolean>): CrawlLinkPlacement | null {
+  if (node.type !== 'tag') return null
+  const role = firstRecognizedRole(node)
+  if (role !== null) return ROLE_PLACEMENT.get(role) ?? null
+  const name = tagNameOf(node)
+  const placement = TAG_PLACEMENT.get(name)
+  if (placement === undefined) return null
+  if (SCOPED_BY_ANCESTORS_TAGS.has(name) && !isUnscopedChrome(node, scopeMemo)) return null
+  return placement
+}
+
+/**
+ * Resolve where link occurrences sit, from the NEAREST landmark ancestor.
+ *
+ * Nearest wins in both directions, because nesting is how real templates are
+ * built: a `nav` inside `main` is `navigation`, and an `article` inside an
+ * `aside` is `content`. A link with no landmark ancestor at all is `unknown` —
+ * an absence of evidence the consumer decides what to do with, never a guess.
+ *
+ * One upward walk per link, memoized per ancestor node, so a page costs a single
+ * visit per node on any link's ancestor path however many links share a
+ * container. Returns a resolver bound to one parsed document.
+ */
+function placementResolver(): (start: PlacementNode) => CrawlLinkPlacement {
+  const memo = new Map<PlacementNode, CrawlLinkPlacement>()
+  const scopeMemo = new Map<PlacementNode, boolean>()
+  return (start) => {
+    const pending: PlacementNode[] = []
+    let node = start.parent
+    let resolved: CrawlLinkPlacement | null = null
+    while (node) {
+      const cached = memo.get(node)
+      if (cached) {
+        resolved = cached
+        break
+      }
+      const own = landmarkOf(node, scopeMemo)
+      if (own) {
+        memo.set(node, own)
+        resolved = own
+        break
+      }
+      pending.push(node)
+      node = node.parent
+    }
+    const placement = resolved ?? 'unknown'
+    for (const visited of pending) memo.set(visited, placement)
+    return placement
+  }
+}
+
+function emptyPlacementOccurrences(): CrawlPlacementOccurrences {
+  return { navigation: 0, content: 0, unknown: 0 }
+}
+
 function collectLinks(html: string, from: string, limit: number): {
-  links: Array<{ to: string; text: string; nofollow: boolean }>
+  links: Array<{ to: string; text: string; nofollow: boolean; placement: CrawlLinkPlacement }>
   canonicalUrl: string | null
   metaRobots: string[]
   truncated: boolean
 } {
   const $ = load(html)
-  const links: Array<{ to: string; text: string; nofollow: boolean }> = []
+  const links: Array<{ to: string; text: string; nofollow: boolean; placement: CrawlLinkPlacement }> = []
+  const placementOf = placementResolver()
   let total = 0
   $('a[href]').each((_, element) => {
     total += 1
@@ -340,6 +633,7 @@ function collectLinks(html: string, from: string, limit: number): {
         to: normalizeCrawlUrl(href, from),
         text: $(element).text().replace(/\s+/g, ' ').trim().slice(0, 200),
         nofollow: (($(element).attr('rel') ?? '').toLowerCase().split(/\s+/)).includes('nofollow'),
+        placement: placementOf(element),
       })
     } catch {
       // A malformed href has no usable crawl identity.
@@ -545,14 +839,25 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     }
     if (rows.length > 0) await emit('progress', { progress: progress() })
   }
-  const recordEdge = async (input: {
-    from: string
-    to: string
-    type: CrawlEdgeType
-    classification: CrawlEdgeClassification
-    nofollow?: boolean
-    text?: string
-  }): Promise<void> => {
+  // Anchor-only detail is carried on the anchor variant so a call site cannot
+  // omit the text, nofollow, or placement of an occurrence it just observed.
+  const recordEdge = async (input:
+    | {
+      from: string
+      to: string
+      type: 'anchor'
+      classification: CrawlEdgeClassification
+      nofollow: boolean
+      text: string
+      placement: CrawlLinkPlacement
+    }
+    | {
+      from: string
+      to: string
+      type: Exclude<CrawlEdgeType, 'anchor'>
+      classification: CrawlEdgeClassification
+    },
+  ): Promise<void> => {
     const key = anchorKey(input.from, input.to, input.type)
     const current = edges.get(key)
     if (current) {
@@ -560,9 +865,11 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       if (input.type === 'anchor') {
         if (input.nofollow) current.nofollowOccurrences += 1
         else current.followableOccurrences += 1
-        const existing = current.anchorSummaries.find((summary) => summary.text === (input.text ?? ''))
+        const counts = current.placementOccurrences ?? (current.placementOccurrences = emptyPlacementOccurrences())
+        counts[input.placement] += 1
+        const existing = current.anchorSummaries.find((summary) => summary.text === input.text)
         if (existing) existing.occurrences += 1
-        else if (current.anchorSummaries.length < MAX_ANCHOR_SUMMARIES) current.anchorSummaries.push({ text: input.text ?? '', occurrences: 1 })
+        else if (current.anchorSummaries.length < MAX_ANCHOR_SUMMARIES) current.anchorSummaries.push({ text: input.text, occurrences: 1 })
         current.anchorSummaries.sort((left, right) => left.text.localeCompare(right.text))
       }
       pendingEdges.set(key, current)
@@ -572,6 +879,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       budget.stop('max-edges')
       return
     }
+    const placementOccurrences = emptyPlacementOccurrences()
+    if (input.type === 'anchor') placementOccurrences[input.placement] = 1
     const edge: CrawlEdgeObservation = {
       key,
       from: input.from,
@@ -581,7 +890,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       totalOccurrences: 1,
       followableOccurrences: input.type === 'anchor' && !input.nofollow ? 1 : 0,
       nofollowOccurrences: input.type === 'anchor' && input.nofollow ? 1 : 0,
-      anchorSummaries: input.type === 'anchor' ? [{ text: input.text ?? '', occurrences: 1 }] : [],
+      anchorSummaries: input.type === 'anchor' ? [{ text: input.text, occurrences: 1 }] : [],
+      placementOccurrences,
     }
     edges.set(key, edge)
     pendingEdges.set(key, edge)
@@ -978,7 +1288,15 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     }
     for (const link of parsed.links) {
       const classification: CrawlEdgeClassification = isAllowed(new URL(link.to)) ? 'internal' : 'external'
-      await recordEdge({ from: page.finalUrl!, to: link.to, type: 'anchor', classification, nofollow: link.nofollow || pageNofollow, text: link.text })
+      await recordEdge({
+        from: page.finalUrl!,
+        to: link.to,
+        type: 'anchor',
+        classification,
+        nofollow: link.nofollow || pageNofollow,
+        text: link.text,
+        placement: link.placement,
+      })
       if (classification === 'internal') {
         await markDiscovered(link.to, item.depth + 1, { from: page.finalUrl! })
       }
@@ -1163,6 +1481,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     urlNormalizationVersion: CRAWL_URL_NORMALIZATION_VERSION,
     indexabilityRulesetVersion: CRAWL_INDEXABILITY_RULESET_VERSION,
     linkScoreAlgorithmVersion: CRAWL_LINK_SCORE_ALGORITHM_VERSION,
+    linkPlacementRulesetVersion: CRAWL_LINK_PLACEMENT_RULESET_VERSION,
     rootUrl,
     finalRootUrl,
     startedAt,
@@ -1333,3 +1652,4 @@ export const SITE_CRAWL_ENGINE_VERSION = CRAWL_ENGINE_VERSION
 export const URL_NORMALIZATION_VERSION = CRAWL_URL_NORMALIZATION_VERSION
 export const INDEXABILITY_RULESET_VERSION = CRAWL_INDEXABILITY_RULESET_VERSION
 export const LINK_SCORE_ALGORITHM_VERSION = CRAWL_LINK_SCORE_ALGORITHM_VERSION
+export const LINK_PLACEMENT_RULESET_VERSION = CRAWL_LINK_PLACEMENT_RULESET_VERSION

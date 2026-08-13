@@ -1,4 +1,5 @@
 import type { CheerioAPI } from 'cheerio'
+import { deepFreeze } from './immutable.js'
 
 export type FindingType = 'found' | 'missing' | 'info' | 'timeout' | 'unreachable'
 
@@ -611,12 +612,14 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
 /* ── Full site crawl types ── */
 
 /** A report-shape version owned by the crawl engine, independent from `SCHEMA_VERSION`. */
-export const CRAWL_SCHEMA_VERSION = '1.1'
+export const CRAWL_SCHEMA_VERSION = '1.2'
 /** Version identifiers let persisted checkpoints detect changes in crawl semantics. */
-export const CRAWL_ENGINE_VERSION = '1.1.0'
+export const CRAWL_ENGINE_VERSION = '1.2.0'
 export const CRAWL_URL_NORMALIZATION_VERSION = '1.1.0'
 export const CRAWL_INDEXABILITY_RULESET_VERSION = '1.0.0'
 export const CRAWL_LINK_SCORE_ALGORITHM_VERSION = 'pagerank-1.0.0'
+/** Landmark rules behind `CrawlLinkPlacement`, versioned separately from the schema. */
+export const CRAWL_LINK_PLACEMENT_RULESET_VERSION = '1.0.0'
 
 export interface SiteCrawlLimits {
   maxPages: number
@@ -636,7 +639,7 @@ export interface SiteCrawlLimits {
 }
 
 /** Safe defaults for an untrusted public site. Every value may be tightened by callers. */
-export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = {
+export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = deepFreeze({
   maxPages: 1_000,
   maxEdges: 100_000,
   maxFetches: 5_000,
@@ -650,7 +653,7 @@ export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = {
   maxSitemapUrls: 50_000,
   concurrency: 5,
   requestDelayMs: 0,
-}
+})
 
 export type CrawlTerminationReason =
   | 'max-pages'
@@ -736,6 +739,25 @@ export interface CrawlAnchorSummary {
   occurrences: number
 }
 
+/**
+ * Where one link occurrence sits in the page, read from HTML landmarks rather
+ * than inferred from how often the link repeats across a site.
+ *
+ * - `navigation` — inside a landmark that is chrome by definition.
+ * - `content` — inside a main/article landmark and not inside chrome.
+ * - `unknown` — the page declares no landmark that answers the question. This
+ *   is a deliberate absence of evidence, never a guess from class names or ids;
+ *   the consumer owns the policy for what to do with it.
+ */
+export type CrawlLinkPlacement = 'navigation' | 'content' | 'unknown'
+
+/** Link occurrences split by `CrawlLinkPlacement`. */
+export interface CrawlPlacementOccurrences {
+  navigation: number
+  content: number
+  unknown: number
+}
+
 export interface CrawlEdgeObservation {
   /** Stable, endpoint-and-type-derived key suitable for idempotent checkpoint upserts. */
   key: string
@@ -748,6 +770,22 @@ export interface CrawlEdgeObservation {
   nofollowOccurrences: number
   /** At most five normalized anchor texts, ordered deterministically. */
   anchorSummaries: CrawlAnchorSummary[]
+  /**
+   * Occurrences split by DOM position. One edge aggregates every occurrence of
+   * the same (from, to) pair, and those occurrences can sit in different parts
+   * of the page, so this is counts rather than a single verdict: a page that
+   * links a target once from its nav and once from its prose yields
+   * `{ navigation: 1, content: 1, unknown: 0 }`.
+   *
+   * `anchor` edges only. The three counts sum to `totalOccurrences` on an anchor
+   * edge; `redirect` and `canonical` edges carry zeros, because a non-anchor
+   * edge has no position in a page. Same rule as `anchorSummaries`.
+   *
+   * Optional, and the crawl engine always populates it. A graph captured before
+   * the placement ruleset genuinely has no placement data, so absence is a real
+   * state a consumer must handle rather than a field it can assume.
+   */
+  placementOccurrences?: CrawlPlacementOccurrences
 }
 
 export interface CrawlDeadLinkFinding {
@@ -772,6 +810,12 @@ export interface CrawlSummary {
   urlNormalizationVersion: string
   indexabilityRulesetVersion: string
   linkScoreAlgorithmVersion: string
+  /**
+   * Landmark ruleset that produced every edge's `placementOccurrences`. Optional
+   * for the same reason: a summary from before the ruleset existed has no value
+   * to report, and its absence tells a consumer the edges carry no placement.
+   */
+  linkPlacementRulesetVersion?: string
   rootUrl: string
   finalRootUrl: string | null
   startedAt: string
