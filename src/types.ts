@@ -159,11 +159,15 @@ export interface ScoredFactorFields {
    *
    * NOT the same number as `weight`, and that is the whole point. Weights are
    * relative and do not sum to 100 (the core set sums to 111, and the optional
-   * factors move it), while the score divides by their ACTUAL total. So a
-   * weight-12 factor is 10.8 percent of the score, not 12. Printing `weight`
-   * with a percent sign overstates every factor and produces a column that never
-   * adds up, which is what this field exists to stop. Report it; do not derive a
-   * percentage from `weight` yourself.
+   * factors move it), while the score divides by their ACTUAL total. Printing
+   * `weight` with a percent sign overstates every factor and produces a column
+   * that never adds up, which is what this field exists to stop. Report it; do
+   * not derive a percentage from `weight` yourself.
+   *
+   * Allocated by largest remainder, so the shares in ONE report sum to exactly
+   * 100 and a total row is safe to print. Rounding each weight independently
+   * would not: the 16 core factors over a denominator of 111 come to 99.9.
+   * A factor that did not apply to the page reports 0.
    */
   sharePct?: number
 }

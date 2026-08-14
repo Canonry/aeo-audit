@@ -2,52 +2,150 @@ import { describe, expect, it } from 'vitest'
 import { selectRepresentativeSample } from '../src/url-templates.js'
 
 /**
- * The sub-value interleave must stay LINEAR.
+ * The sub-value interleave must stay LINEAR and must not change what it picks.
  *
- * The shape that breaks it is ordinary, not adversarial: one dominant sub-value
+ * The shape that broke it is ordinary, not adversarial: one dominant sub-value
  * plus a long tail of one-off ones, which is what a real sitemap of
  * /p/<city>/<slug> URLs looks like. Walking every bucket on every round makes
- * both factors ~n/2, so emitting n values costs ~n^2/4.
+ * both the round count and the bucket count ~n/2, so emitting n values cost
+ * ~n^2/4.
  *
  * It matters more than a slow function because the work is SYNCHRONOUS and runs
  * before the first page fetch: it blocks the event loop, which suspends the very
  * timeouts, AbortSignals and fetch budgets meant to bound a sitemap audit. One
- * 5 MB sitemap (about 110k URLs, one fetch of the budget) froze the process for
- * 13 seconds. This asserts the shape stays cheap; a quadratic regression blows
- * the budget by orders of magnitude, so the threshold needs no tight tuning.
+ * 5 MB sitemap (~110k URLs, one fetch of the budget) froze the process for 13
+ * seconds.
  */
-describe('selectRepresentativeSample cost', () => {
+
+/**
+ * The pre-fix implementation, kept verbatim as the reference ORDER.
+ *
+ * The whole safety argument for the rewrite is "emits the identical sequence",
+ * so the thing it is identical TO has to live in the repo. Without it the claim
+ * is a sentence in a commit message and a later refactor can silently change
+ * which pages a sitemap audit samples.
+ */
+function referenceInterleave<T>(
+  indices: readonly number[],
+  items: readonly T[],
+  spreadBy: (item: T) => string,
+): number[] {
+  const buckets = new Map<string, number[]>()
+  for (const index of indices) {
+    const key = spreadBy(items[index] as T)
+    const bucket = buckets.get(key)
+    if (bucket) bucket.push(index)
+    else buckets.set(key, [index])
+  }
+  if (buckets.size <= 1) return [...indices]
+  const ordered = [...buckets.entries()].sort(
+    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
+  )
+  const result: number[] = []
+  for (let round = 0; result.length < indices.length; round++) {
+    for (const [, bucket] of ordered) {
+      const index = bucket[round]
+      if (index !== undefined) result.push(index)
+    }
+  }
+  return result
+}
+
+/** Deterministic PRNG, so a failure reproduces exactly from the seed. */
+function seeded(seed: number): () => number {
+  let state = seed
+  return () => (state = (state * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
+}
+
+interface Item {
+  loc: string
+  sub: string
+}
+
+/** Drive the sampler through one template group so `spreadBy` is the only axis. */
+function sample(items: readonly Item[], limit: number): Item[] {
+  return selectRepresentativeSample(items, limit, {
+    keyOf: () => 'one-template',
+    spreadBy: (item) => item.sub,
+  })
+}
+
+describe('selectRepresentativeSample', () => {
+  it('picks exactly what the pre-fix implementation picked, across random shapes', () => {
+    const rnd = seeded(20260814)
+    for (let trial = 0; trial < 500; trial++) {
+      const n = 1 + Math.floor(rnd() * 40)
+      const subValues = 1 + Math.floor(rnd() * 6)
+      const items: Item[] = Array.from({ length: n }, (_, i) => ({
+        loc: `https://e.test/p/${i}`,
+        sub: `s${Math.floor(rnd() * subValues)}`,
+      }))
+      const limit = 1 + Math.floor(rnd() * n)
+
+      // With one template group the outer round-robin walks the interleaved
+      // order straight through, so the first `limit` of it is what gets selected.
+      // The function then returns its picks in DOCUMENT order, so sort before
+      // comparing: what the interleave decides is WHICH pages, not their order.
+      const expected = referenceInterleave(
+        items.map((_, i) => i),
+        items,
+        (item) => item.sub,
+      )
+        .slice(0, limit)
+        .sort((a, b) => a - b)
+        .map((index) => (items[index] as Item).loc)
+
+      expect(sample(items, limit).map((item) => item.loc)).toEqual(expected)
+    }
+  })
+
   it('stays linear on one dominant sub-value plus a long singleton tail', () => {
-    const n = 60_000
-    const items = Array.from({ length: n }, (_, i) => ({
-      loc: i % 2 === 0 ? `https://e.test/p/hot/s${i}` : `https://e.test/p/u${i}/s${i}`,
+    // Sized so the two implementations are separated by ~3 orders of magnitude:
+    // linear is tens of ms here, the quadratic version took ~53 s at 110k. The
+    // threshold therefore needs no tuning and cannot be tripped by a loaded
+    // runner doing correct work.
+    const n = 110_000
+    const items: Item[] = Array.from({ length: n }, (_, i) => ({
+      loc: `https://e.test/p/${i}`,
+      sub: i % 2 === 0 ? 'hot' : `u${i}`,
     }))
     const started = Date.now()
-    const picked = selectRepresentativeSample(items, 25, {
-      keyOf: () => 'one-template',
-      spreadBy: (item) => (item.loc.includes('/p/hot/') ? 'hot' : item.loc),
-    })
+    const picked = sample(items, 25)
     const elapsedMs = Date.now() - started
     expect(picked).toHaveLength(25)
-    // Linear is a few tens of ms here; the quadratic version took ~7 s at n=40k
-    // and ~53 s at n=110k, so any regression clears this by a wide margin.
-    expect(elapsedMs).toBeLessThan(2_000)
+    expect(elapsedMs).toBeLessThan(5_000)
+  })
+
+  it('does not degrade superlinearly as the corpus doubles', () => {
+    // A ratio check catches a quadratic regression even on a slow machine, where
+    // an absolute threshold only says "everything is slow". Doubling n roughly
+    // doubles linear work and roughly quadruples quadratic work; 3x leaves room
+    // for constant factors and jitter while a real regression clears it easily.
+    const build = (n: number): Item[] =>
+      Array.from({ length: n }, (_, i) => ({
+        loc: `https://e.test/p/${i}`,
+        sub: i % 2 === 0 ? 'hot' : `u${i}`,
+      }))
+    const time = (n: number): number => {
+      const items = build(n)
+      const started = process.hrtime.bigint()
+      sample(items, 25)
+      return Number(process.hrtime.bigint() - started) / 1e6
+    }
+    time(20_000) // warm up, so JIT does not land inside the measured pair
+    const small = Math.max(time(20_000), 1)
+    const large = time(40_000)
+    expect(large / small).toBeLessThan(3)
   })
 
   it('still spreads across sub-values rather than taking a prefix', () => {
-    const items = [
-      { loc: 'https://e.test/p/a/1' },
-      { loc: 'https://e.test/p/a/2' },
-      { loc: 'https://e.test/p/a/3' },
-      { loc: 'https://e.test/p/b/1' },
-      { loc: 'https://e.test/p/c/1' },
+    const items: Item[] = [
+      { loc: 'https://e.test/p/a/1', sub: 'a' },
+      { loc: 'https://e.test/p/a/2', sub: 'a' },
+      { loc: 'https://e.test/p/a/3', sub: 'a' },
+      { loc: 'https://e.test/p/b/1', sub: 'b' },
+      { loc: 'https://e.test/p/c/1', sub: 'c' },
     ]
-    const picked = selectRepresentativeSample(items, 3, {
-      keyOf: () => 'one-template',
-      spreadBy: (item) => item.loc.split('/')[4] as string,
-    })
-    // Three picks must touch three distinct sub-values, not three from 'a'.
-    const subValues = new Set(picked.map((p) => p.loc.split('/')[4]))
-    expect(subValues.size).toBe(3)
+    expect(new Set(sample(items, 3).map((item) => item.sub)).size).toBe(3)
   })
 })

@@ -37,10 +37,34 @@ describe('factor share of score', () => {
     EQ(factors.find((f) => f.id === 'b')?.sharePct, 89.2)
   })
 
-  it('shares sum to 100 within rounding, which weights never did', () => {
+  it('shares sum to EXACTLY 100, which independent rounding does not', () => {
     const { factors } = scoreFactors(FACTOR_DEFINITIONS.map((f) => raw({ id: f.id, weight: f.weight })))
     const total = factors.reduce((sum, f) => sum + (f.sharePct ?? 0), 0)
-    OK(Math.abs(total - 100) < 0.5, `shares sum to ${total}`)
+    EQ(Math.round(total * 10) / 10, 100)
+
+    // The point of the allocator: rounding each weight on its own lands at 99.9
+    // for this exact factor set, so a consumer printing a total row would show it.
+    const totalWeight = FACTOR_DEFINITIONS.reduce((sum, f) => sum + f.weight, 0)
+    const naive = FACTOR_DEFINITIONS.reduce(
+      (sum, f) => sum + Math.round((f.weight / totalWeight) * 1000) / 10,
+      0,
+    )
+    EQ(Math.round(naive * 10) / 10, 99.9)
+  })
+
+  it('sums to 100 for every subset a --factors run can produce', () => {
+    // The denominator moves with the subset, so one lucky factor set proves
+    // nothing. Walk many subsets and assert the invariant on each.
+    for (let size = 1; size <= FACTOR_DEFINITIONS.length; size++) {
+      for (let offset = 0; offset < FACTOR_DEFINITIONS.length; offset += 5) {
+        const subset = [...FACTOR_DEFINITIONS, ...FACTOR_DEFINITIONS]
+          .slice(offset, offset + size)
+          .map((f) => raw({ id: f.id, weight: f.weight }))
+        const { factors } = scoreFactors(subset)
+        const total = factors.reduce((sum, f) => sum + (f.sharePct ?? 0), 0)
+        EQ(Math.round(total * 10) / 10, 100)
+      }
+    }
   })
 
   it('share tracks the same denominator the overall score uses', () => {
@@ -103,5 +127,45 @@ describe('factor share of score', () => {
   it('scores everything rather than dividing by zero when nothing applies', () => {
     const inputs = [raw({ id: 'faq-content', weight: 8, score: 60, applicable: false })]
     EQ(scoreFactors(inputs).overallScore, 60)
+  })
+
+  /**
+   * `factorApplies` resolves three ways: an explicit flag, the presence rule for a
+   * page-specific factor, or always-true. Only the first was ever recorded, so a
+   * factor judged by presence came back score 0 / sharePct 0 with NO flag, and a
+   * consumer could not tell "did not apply here" from "applied and scored zero"
+   * without reimplementing PAGE_SPECIFIC_FACTOR_IDS and the threshold.
+   */
+  it('records the RESOLVED applicability, including when it was inferred', () => {
+    const { factors } = scoreFactors([
+      raw({ id: 'content-depth', weight: 10, score: 80 }),
+      // Page-specific, below the presence threshold, analyzer said nothing.
+      raw({ id: 'faq-content', weight: 8, score: 0 }),
+    ])
+    const faq = factors.find((f) => f.id === 'faq-content')!
+    EQ(faq.applicable, false)
+    EQ(faq.sharePct, 0)
+    // And an always-applicable factor is affirmatively marked, not left undefined.
+    EQ(factors.find((f) => f.id === 'content-depth')?.applicable, true)
+  })
+
+  it('distinguishes a page-specific factor that DID apply and scored zero', () => {
+    const { factors } = scoreFactors([
+      raw({ id: 'content-depth', weight: 10, score: 80 }),
+      // Above the presence threshold: a real FAQ, implemented badly.
+      raw({ id: 'faq-content', weight: 8, score: 35 }),
+    ])
+    const faq = factors.find((f) => f.id === 'faq-content')!
+    EQ(faq.applicable, true)
+    OK((faq.sharePct ?? 0) > 0, 'an applicable factor carries a share')
+  })
+
+  it('never contradicts an analyzer that spoke', () => {
+    const { factors } = scoreFactors([
+      raw({ id: 'content-depth', weight: 10, score: 80 }),
+      // Explicitly applicable despite scoring below the presence threshold.
+      raw({ id: 'faq-content', weight: 8, score: 0, applicable: true }),
+    ])
+    EQ(factors.find((f) => f.id === 'faq-content')?.applicable, true)
   })
 })

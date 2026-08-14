@@ -82,6 +82,49 @@ export function factorApplies(factor: { id: string; score: number; applicable?: 
   return factor.score >= PAGE_SPECIFIC_PRESENT_THRESHOLD
 }
 
+/**
+ * Split 100 across the scored factors so the shares actually SUM to 100.
+ *
+ * Rounding each weight/total independently does not preserve the total: the 16
+ * core factors over a denominator of 111 round to 99.9. A consumer that adds a
+ * total row then prints 99.9 percent, which is the same "column that never adds
+ * up" this field exists to remove, one decimal place down.
+ *
+ * Largest remainder: floor everyone to a tenth, then hand the leftover tenths to
+ * the largest fractional parts. Ties break on weight then id so the allocation is
+ * deterministic for a given factor set rather than dependent on input order.
+ */
+function allocateShares(scored: readonly { id: string; weight: number }[]): Map<string, number> {
+  const shares = new Map<string, number>()
+  const totalWeight = scored.reduce((sum, factor) => sum + factor.weight, 0)
+  if (totalWeight <= 0 || scored.length === 0) {
+    for (const factor of scored) shares.set(factor.id, 0)
+    return shares
+  }
+  // Work in TENTHS of a percent so the arithmetic is integer and exact.
+  const exact = scored.map((factor) => ({
+    id: factor.id,
+    weight: factor.weight,
+    tenths: (factor.weight / totalWeight) * 1000,
+  }))
+  const floored = exact.map((entry) => ({ ...entry, floor: Math.floor(entry.tenths) }))
+  let remaining = 1000 - floored.reduce((sum, entry) => sum + entry.floor, 0)
+  const byRemainder = [...floored].sort(
+    (a, b) =>
+      (b.tenths - b.floor) - (a.tenths - a.floor) || b.weight - a.weight || a.id.localeCompare(b.id),
+  )
+  const bonus = new Set<string>()
+  for (const entry of byRemainder) {
+    if (remaining <= 0) break
+    bonus.add(entry.id)
+    remaining--
+  }
+  for (const entry of floored) {
+    shares.set(entry.id, (entry.floor + (bonus.has(entry.id) ? 1 : 0)) / 10)
+  }
+  return shares
+}
+
 export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorSummary {
   const clamped = rawFactorResults.map((factor) => ({
     ...factor,
@@ -112,13 +155,17 @@ export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorS
   // all sixteen into a column that never adds up.
   //
   // A factor that did not apply has NO share: it moved the score by nothing.
-  const inScore = new Set(scored.map((factor) => factor.id))
+  const shares = allocateShares(scored)
   const factors = clamped.map((factor) => ({
     ...factor,
-    sharePct:
-      totalWeight > 0 && inScore.has(factor.id)
-        ? Math.round((factor.weight / totalWeight) * 1000) / 10
-        : 0,
+    // Record the RESOLVED applicability, not just what an analyzer volunteered.
+    // Otherwise a page-specific factor judged by the presence fallback reports
+    // score 0 and sharePct 0 with no flag, and a consumer cannot tell "did not
+    // apply here" from "applied and scored zero" without reimplementing
+    // PAGE_SPECIFIC_FACTOR_IDS and the threshold. Same argument as sharePct: the
+    // payload was missing the answer.
+    applicable: factorApplies(factor),
+    sharePct: shares.get(factor.id) ?? 0,
   }))
 
   const weightedTotal = scored.reduce((sum, factor) => (
@@ -149,6 +196,7 @@ export function factorSharePct(
   if (!factorApplies(factor)) return 0
   const scored = allFactors.filter((f) => factorApplies(f))
   const pool = scored.length > 0 ? scored : allFactors
-  const totalWeight = pool.reduce((sum, f) => sum + f.weight, 0)
-  return totalWeight > 0 ? Math.round((factor.weight / totalWeight) * 1000) / 10 : 0
+  // The SAME allocation the engine uses, so a derived column and a recorded one
+  // both add to 100 rather than differing by a tenth depending on the report age.
+  return allocateShares(pool).get(factor.id) ?? 0
 }
