@@ -100,10 +100,16 @@ describe('selectRepresentativeSample', () => {
   })
 
   it('stays linear on one dominant sub-value plus a long singleton tail', () => {
-    // Sized so the two implementations are separated by ~3 orders of magnitude:
-    // linear is tens of ms here, the quadratic version took ~53 s at 110k. The
-    // threshold therefore needs no tuning and cannot be tripped by a loaded
-    // runner doing correct work.
+    // ONE absolute check at a size where the two implementations are ~3 orders of
+    // magnitude apart: ~22 ms linear against ~53 s quadratic. That gap is what
+    // makes a wall clock acceptable here, since no threshold tuning is possible
+    // and no plausibly-loaded runner closes it.
+    //
+    // A ratio check at n and 2n reads as the more rigorous option and is not: at
+    // those sizes linear work is a few milliseconds, so the ratio measures GC and
+    // JIT rather than the algorithm. It flaked on its first CI run at 3.53
+    // against a 3x bound while the code was correct, which is worse than no test,
+    // because the failure teaches maintainers to re-run rather than to look.
     const n = 110_000
     const items: Item[] = Array.from({ length: n }, (_, i) => ({
       loc: `https://e.test/p/${i}`,
@@ -114,28 +120,6 @@ describe('selectRepresentativeSample', () => {
     const elapsedMs = Date.now() - started
     expect(picked).toHaveLength(25)
     expect(elapsedMs).toBeLessThan(5_000)
-  })
-
-  it('does not degrade superlinearly as the corpus doubles', () => {
-    // A ratio check catches a quadratic regression even on a slow machine, where
-    // an absolute threshold only says "everything is slow". Doubling n roughly
-    // doubles linear work and roughly quadruples quadratic work; 3x leaves room
-    // for constant factors and jitter while a real regression clears it easily.
-    const build = (n: number): Item[] =>
-      Array.from({ length: n }, (_, i) => ({
-        loc: `https://e.test/p/${i}`,
-        sub: i % 2 === 0 ? 'hot' : `u${i}`,
-      }))
-    const time = (n: number): number => {
-      const items = build(n)
-      const started = process.hrtime.bigint()
-      sample(items, 25)
-      return Number(process.hrtime.bigint() - started) / 1e6
-    }
-    time(20_000) // warm up, so JIT does not land inside the measured pair
-    const small = Math.max(time(20_000), 1)
-    const large = time(40_000)
-    expect(large / small).toBeLessThan(3)
   })
 
   it('still spreads across sub-values rather than taking a prefix', () => {
