@@ -230,10 +230,22 @@ function interleaveBySubValue<T>(
     (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
   )
   const result: number[] = []
-  for (let round = 0; result.length < indices.length; round++) {
-    for (const [, bucket] of ordered) {
-      const index = bucket[round]
-      if (index !== undefined) result.push(index)
+  // `ordered` is sorted by DESCENDING bucket size, so the buckets still holding a
+  // value at round r are exactly a PREFIX of it. Shrinking that prefix as rounds
+  // advance keeps the whole interleave linear, and emits the identical sequence.
+  //
+  // Walking every bucket on every round instead is quadratic in the shape a real
+  // sitemap produces: one dominant sub-value plus a long tail of singletons makes
+  // both the round count and the bucket count ~n/2, so the loop runs ~n^2/4 times
+  // to emit n values. Measured on 110k URLs, which is ONE 5 MB sitemap and one
+  // fetch of the budget, that was 13 s of straight-line synchronous work. Nothing
+  // downstream can bound it, because blocking the event loop also suspends the
+  // timeouts, AbortSignals and fetch budgets meant to bound it.
+  let live = ordered.length
+  for (let round = 0; live > 0; round++) {
+    while (live > 0 && (ordered[live - 1]?.[1].length ?? 0) <= round) live--
+    for (let i = 0; i < live; i++) {
+      result.push(ordered[i]![1][round] as number)
     }
   }
   return result

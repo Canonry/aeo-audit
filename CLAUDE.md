@@ -49,7 +49,8 @@ test/                # Unit and integration tests
 ## Architecture
 
 - Each analyzer receives a context object `{ $, html, url, headers, auxiliary, structuredData, textContent, pageTitle }` and returns `{ score, findings, recommendations }`
-- Scores are weighted and normalized in `scoring.ts`; weights sum to 100% for active factors
+- Scores are weighted and normalized in `scoring.ts`. Weights are RELATIVE and do NOT sum to 100 (the core set sums to 111); the score divides by the actual total of the factors it scored. Each factor carries `sharePct`, its real share of the score. Never present `weight` as a percentage
+- A factor an analyzer reports `applicable: false` for is excluded from the score entirely, weight and all (`factorApplies` in `scoring.ts`), so a page is not marked down for lacking something it has no reason to have
 - Geographic signals is optional (excluded by default); when included, weights renormalize
 - The `--factors` flag allows running a subset of analyzers
 - SSRF protection blocks private IPs and hostnames in `fetch-page.ts`

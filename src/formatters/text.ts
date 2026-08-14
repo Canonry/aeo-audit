@@ -6,6 +6,7 @@ const YELLOW = '\x1b[33m'
 const RED = '\x1b[31m'
 const CYAN = '\x1b[36m'
 
+import { factorSharePct } from '../scoring.js'
 import { isHomepageUrl } from '../critical-defects.js'
 import type {
   AuditReport,
@@ -55,7 +56,7 @@ export function formatText(report: AuditReport): string {
     const icon = scoreIcon(factor.score)
     const fc = scoreColor(factor.score)
     const name = factor.name.padEnd(30)
-    lines.push(`  ${icon} ${name} ${bar(factor.score)} ${fc}${String(factor.score).padStart(3)}${RESET} ${DIM}(${factor.weight}%)${RESET}`)
+    lines.push(`  ${icon} ${name} ${bar(factor.score)} ${fc}${String(factor.score).padStart(3)}${RESET} ${DIM}(${factorSharePct(factor, report.factors)}% of score)${RESET}`)
   }
 
   lines.push(`${'─'.repeat(70)}`)

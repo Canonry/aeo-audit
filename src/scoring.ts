@@ -65,15 +65,110 @@ export const PAGE_SPECIFIC_FACTOR_IDS: ReadonlySet<string> = new Set([
  */
 export const PAGE_SPECIFIC_PRESENT_THRESHOLD = 30
 
+/**
+ * Does this factor apply to this page at all?
+ *
+ * An analyzer that reports `applicable` is believed. Otherwise a page-specific
+ * factor is judged by presence (the pre-existing rule, so a silent analyzer
+ * behaves exactly as before), and every other factor always applies.
+ *
+ * ONE predicate, used by both the page score below and the sitemap rollup. They
+ * disagreed before: the rollup already excluded non-applicable factors from
+ * `applicableAvgScore`, while the page score counted them as zeros.
+ */
+export function factorApplies(factor: { id: string; score: number; applicable?: boolean }): boolean {
+  if (typeof factor.applicable === 'boolean') return factor.applicable
+  if (!PAGE_SPECIFIC_FACTOR_IDS.has(factor.id)) return true
+  return factor.score >= PAGE_SPECIFIC_PRESENT_THRESHOLD
+}
+
+/**
+ * Split 100 across the scored factors so the shares actually SUM to 100.
+ *
+ * Rounding each weight/total independently does not preserve the total: the 16
+ * core factors over a denominator of 111 round to 99.9. A consumer that adds a
+ * total row then prints 99.9 percent, which is the same "column that never adds
+ * up" this field exists to remove, one decimal place down.
+ *
+ * Largest remainder: floor everyone to a tenth, then hand the leftover tenths to
+ * the largest fractional parts. Ties break on weight then id so the allocation is
+ * deterministic for a given factor set rather than dependent on input order.
+ */
+function allocateShares(scored: readonly { id: string; weight: number }[]): Map<string, number> {
+  const shares = new Map<string, number>()
+  const totalWeight = scored.reduce((sum, factor) => sum + factor.weight, 0)
+  if (totalWeight <= 0 || scored.length === 0) {
+    for (const factor of scored) shares.set(factor.id, 0)
+    return shares
+  }
+  // Work in TENTHS of a percent so the arithmetic is integer and exact.
+  const exact = scored.map((factor) => ({
+    id: factor.id,
+    weight: factor.weight,
+    tenths: (factor.weight / totalWeight) * 1000,
+  }))
+  const floored = exact.map((entry) => ({ ...entry, floor: Math.floor(entry.tenths) }))
+  let remaining = 1000 - floored.reduce((sum, entry) => sum + entry.floor, 0)
+  const byRemainder = [...floored].sort(
+    (a, b) =>
+      (b.tenths - b.floor) - (a.tenths - a.floor) || b.weight - a.weight || a.id.localeCompare(b.id),
+  )
+  const bonus = new Set<string>()
+  for (const entry of byRemainder) {
+    if (remaining <= 0) break
+    bonus.add(entry.id)
+    remaining--
+  }
+  for (const entry of floored) {
+    shares.set(entry.id, (entry.floor + (bonus.has(entry.id) ? 1 : 0)) / 10)
+  }
+  return shares
+}
+
 export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorSummary {
-  const factors = rawFactorResults.map((factor) => ({
+  const clamped = rawFactorResults.map((factor) => ({
     ...factor,
     score: clampScore(factor.score),
   }))
 
-  const totalWeight = factors.reduce((sum, factor) => sum + factor.weight, 0)
+  // Score only what APPLIES. A factor the analyzer says does not apply to this
+  // page still reports 0, and counting that 0 against the page penalizes it for
+  // lacking something it has no reason to have: a product page with no FAQ was
+  // losing real points for not being an FAQ page. The flag existed to say exactly
+  // that, and the sitemap rollup already honored it; the page score did not.
+  //
+  // Excluding it from BOTH sides is the point. Dropping only the numerator would
+  // be worse than the bug, silently capping every such page below 100.
+  const applicable = clamped.filter((factor) => factorApplies(factor))
+  // Nothing applying at all is not a real page shape (14 of the 16 factors always
+  // apply), but an empty denominator must not become a divide-by-zero or a
+  // fabricated 0, so fall back to scoring everything.
+  const scored = applicable.length > 0 ? applicable : clamped
+  const totalWeight = scored.reduce((sum, factor) => sum + factor.weight, 0)
 
-  const weightedTotal = factors.reduce((sum, factor) => (
+  // Weights are RELATIVE, and the set they are drawn from does not sum to 100:
+  // the core factors sum to 111, and the optional ones move it again. The score
+  // below divides by the real total of what it scored, so a factor's true share
+  // is weight/totalWeight, not weight. Report that share rather than leaving every
+  // consumer to either divide correctly or, as happened in both formatters here
+  // and in a customer dashboard, print `weight` with a percent sign and overstate
+  // all sixteen into a column that never adds up.
+  //
+  // A factor that did not apply has NO share: it moved the score by nothing.
+  const shares = allocateShares(scored)
+  const factors = clamped.map((factor) => ({
+    ...factor,
+    // Record the RESOLVED applicability, not just what an analyzer volunteered.
+    // Otherwise a page-specific factor judged by the presence fallback reports
+    // score 0 and sharePct 0 with no flag, and a consumer cannot tell "did not
+    // apply here" from "applied and scored zero" without reimplementing
+    // PAGE_SPECIFIC_FACTOR_IDS and the threshold. Same argument as sharePct: the
+    // payload was missing the answer.
+    applicable: factorApplies(factor),
+    sharePct: shares.get(factor.id) ?? 0,
+  }))
+
+  const weightedTotal = scored.reduce((sum, factor) => (
     sum + ((factor.score / 100) * (factor.weight / totalWeight) * 100)
   ), 0)
 
@@ -83,4 +178,25 @@ export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorS
     overallScore,
     factors,
   }
+}
+
+/**
+ * A factor's share of the overall score, for a consumer holding a report.
+ *
+ * Prefers the value the engine recorded, and falls back to the report's OWN
+ * weight sum for a report produced before `sharePct` existed. Never falls back
+ * to `weight`: that is the mistake this exists to prevent, and it silently
+ * overstates every factor because the weights do not sum to 100.
+ */
+export function factorSharePct(
+  factor: { id: string; weight: number; score: number; applicable?: boolean; sharePct?: number },
+  allFactors: readonly { id: string; weight: number; score: number; applicable?: boolean }[],
+): number {
+  if (typeof factor.sharePct === 'number') return factor.sharePct
+  if (!factorApplies(factor)) return 0
+  const scored = allFactors.filter((f) => factorApplies(f))
+  const pool = scored.length > 0 ? scored : allFactors
+  // The SAME allocation the engine uses, so a derived column and a recorded one
+  // both add to 100 rather than differing by a tenth depending on the report age.
+  return allocateShares(pool).get(factor.id) ?? 0
 }
