@@ -1,5 +1,16 @@
 # Changelog
 
+## 5.0.0 (2026-08-14)
+
+### Fixed
+
+- **`selectRepresentativeSample` was quadratic, and it blocks the event loop.** `interleaveBySubValue` walked EVERY sub-value bucket on every round, including buckets long since exhausted. The shape that triggers it is ordinary rather than adversarial: one dominant sub-value plus a long tail of one-off ones, which is what a sitemap of `/p/<city>/<slug>` URLs looks like. Both the round count and the bucket count become about n/2, so emitting n values cost about n^2/4. `ordered` is already sorted by descending bucket size, so the buckets still holding a value at round r are exactly a PREFIX of it; shrinking that prefix as rounds advance is linear and emits the identical sequence (verified against the old implementation on 3000 random shapes). 40k URLs went from 6851ms to 8ms, and 110k from 52695ms to 22ms. The severity is not the wall clock: the work is synchronous and runs before the first page fetch, so it blocks the event loop and suspends the very timeouts, AbortSignals, and fetch budgets meant to bound a sitemap audit. In a hosted deployment one 5 MB sitemap, a single fetch of the budget, froze the whole process for 13 seconds and took the health endpoint and every other tenant's in-flight audit with it.
+
+### Changed
+
+- **BREAKING: a factor that does not apply to a page no longer counts against it.** An analyzer reporting `applicable: false` still returns score 0, and that 0 was weighted into `overallScore`, so a product page lost real points for not being an FAQ page. The flag existed to say exactly that, and the sitemap rollup already honored it through `applicableAvgScore` while the page score did not. Non-applicable factors are now excluded from both the numerator AND the denominator; excluding only the numerator would be worse than the bug, silently capping such pages below 100. `factorApplies` moves to `scoring.ts` and is now the ONE predicate both the page score and the sitemap rollup use. example.com goes from 31 to 35. Scores rise on pages carrying a page-specific factor that does not apply to them, and are unchanged everywhere else, so this is a major bump: a stored report cannot be compared across it.
+- **BREAKING: `weight` is not a percentage, and we printed it as one.** The core weights sum to 111, not 100, and the score correctly divides by the actual total, so a weight-12 factor is worth about 12.4 percent of a typical page's score. Both formatters printed `${factor.weight}%`, overstating all sixteen and producing a column that never added up; a downstream dashboard reproduced the same mistake independently, which is the signal that the payload was missing the number rather than that consumers were careless. Factors now carry `sharePct`, computed from the same denominator the score uses, and it sums to 100 for a report. It is OPTIONAL so `compare` still reads reports produced before it existed, and the exported `factorSharePct` helper derives it from a report's own weights in that case, never from `weight` alone. A non-applicable factor reports `sharePct: 0`, because it moved the score by nothing. The markdown column header is now "% of score", and `docs/scoring.md` no longer claims the weights sum to 100.
+
 ## 4.7.0 (2026-08-11)
 
 ### Added

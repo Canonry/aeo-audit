@@ -12,7 +12,7 @@ import {
 import { parseSitemapXmlDocument, type SitemapXmlEntry } from './sitemap-xml.js'
 import { runAeoAudit } from './index.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
-import { PAGE_SPECIFIC_FACTOR_IDS, PAGE_SPECIFIC_PRESENT_THRESHOLD } from './scoring.js'
+import { PAGE_SPECIFIC_FACTOR_IDS, factorApplies } from './scoring.js'
 import { buildTemplateGroups, summarizeFixReach } from './templates.js'
 import { buildCoverage, deriveUrlShapes, selectRepresentativeSample } from './url-templates.js'
 import type {
@@ -416,12 +416,6 @@ const MIN_PAGES_FOR_ORPHANS = 5
  * analyzer's help. The fallback is deliberately the pre-existing presence rule,
  * so an analyzer that stays silent behaves exactly as it did before.
  */
-function factorApplies(factor: ScoredFactor): boolean {
-  if (typeof factor.applicable === 'boolean') return factor.applicable
-  if (!PAGE_SPECIFIC_FACTOR_IDS.has(factor.id)) return true
-  return factor.score >= PAGE_SPECIFIC_PRESENT_THRESHOLD
-}
-
 function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue[] {
   if (successPages.length === 0) return []
 

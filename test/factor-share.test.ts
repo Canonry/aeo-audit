@@ -53,14 +53,55 @@ describe('factor share of score', () => {
   })
 
   it('falls back to the report weight sum for a report predating the field, never to weight', () => {
-    const all = [{ weight: 12 }, { weight: 99 }]
-    EQ(factorSharePct({ weight: 12 }, all), 10.8)
+    const a = { id: 'a', weight: 12, score: 50 }
+    const b = { id: 'b', weight: 99, score: 50 }
+    EQ(factorSharePct(a, [a, b]), 10.8)
     // A recorded value wins over the derivation.
-    EQ(factorSharePct({ weight: 12, sharePct: 42 }, all), 42)
+    EQ(factorSharePct({ ...a, sharePct: 42 }, [a, b]), 42)
+  })
+
+  it('gives a NOT-APPLICABLE factor no share, because it moved the score by nothing', () => {
+    const faq = { id: 'faq-content', weight: 8, score: 0, applicable: false }
+    const depth = { id: 'content-depth', weight: 10, score: 70 }
+    const all = [faq, depth]
+    EQ(factorSharePct(faq, all), 0)
+    // content-depth is then the whole of the score.
+    EQ(factorSharePct(depth, all), 100)
   })
 
   it('an empty factor set reports 0 rather than dividing by zero', () => {
-    EQ(factorSharePct({ weight: 5 }, []), 0)
+    EQ(factorSharePct({ id: 'x', weight: 5, score: 0 }, []), 0)
     DEQ(scoreFactors([]).factors, [])
+  })
+
+  /**
+   * A factor the analyzer says does not apply still reports 0, and counting that
+   * 0 penalized the page for lacking something it had no reason to have. The
+   * flag existed to say exactly that, and the sitemap rollup already honored it.
+   */
+  it('does not penalize a page for a factor that does not apply to it', () => {
+    const inputs = [
+      raw({ id: 'content-depth', weight: 10, score: 80 }),
+      raw({ id: 'faq-content', weight: 8, score: 0, applicable: false }),
+    ]
+    const { overallScore, factors } = scoreFactors(inputs)
+    // Scored on content-depth alone: 80, not 80*10/18 = 44.
+    EQ(overallScore, 80)
+    EQ(factors.find((f) => f.id === 'faq-content')?.sharePct, 0)
+    EQ(factors.find((f) => f.id === 'content-depth')?.sharePct, 100)
+  })
+
+  it('still counts a page-specific factor that the analyzer says DOES apply', () => {
+    const inputs = [
+      raw({ id: 'content-depth', weight: 10, score: 80 }),
+      raw({ id: 'faq-content', weight: 8, score: 0, applicable: true }),
+    ]
+    // A real FAQ page implemented badly keeps its zero: 80*10/18 = 44.4 -> 44.
+    EQ(scoreFactors(inputs).overallScore, 44)
+  })
+
+  it('scores everything rather than dividing by zero when nothing applies', () => {
+    const inputs = [raw({ id: 'faq-content', weight: 8, score: 60, applicable: false })]
+    EQ(scoreFactors(inputs).overallScore, 60)
   })
 })

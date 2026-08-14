@@ -65,27 +65,63 @@ export const PAGE_SPECIFIC_FACTOR_IDS: ReadonlySet<string> = new Set([
  */
 export const PAGE_SPECIFIC_PRESENT_THRESHOLD = 30
 
+/**
+ * Does this factor apply to this page at all?
+ *
+ * An analyzer that reports `applicable` is believed. Otherwise a page-specific
+ * factor is judged by presence (the pre-existing rule, so a silent analyzer
+ * behaves exactly as before), and every other factor always applies.
+ *
+ * ONE predicate, used by both the page score below and the sitemap rollup. They
+ * disagreed before: the rollup already excluded non-applicable factors from
+ * `applicableAvgScore`, while the page score counted them as zeros.
+ */
+export function factorApplies(factor: { id: string; score: number; applicable?: boolean }): boolean {
+  if (typeof factor.applicable === 'boolean') return factor.applicable
+  if (!PAGE_SPECIFIC_FACTOR_IDS.has(factor.id)) return true
+  return factor.score >= PAGE_SPECIFIC_PRESENT_THRESHOLD
+}
+
 export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorSummary {
   const clamped = rawFactorResults.map((factor) => ({
     ...factor,
     score: clampScore(factor.score),
   }))
 
-  const totalWeight = clamped.reduce((sum, factor) => sum + factor.weight, 0)
+  // Score only what APPLIES. A factor the analyzer says does not apply to this
+  // page still reports 0, and counting that 0 against the page penalizes it for
+  // lacking something it has no reason to have: a product page with no FAQ was
+  // losing real points for not being an FAQ page. The flag existed to say exactly
+  // that, and the sitemap rollup already honored it; the page score did not.
+  //
+  // Excluding it from BOTH sides is the point. Dropping only the numerator would
+  // be worse than the bug, silently capping every such page below 100.
+  const applicable = clamped.filter((factor) => factorApplies(factor))
+  // Nothing applying at all is not a real page shape (14 of the 16 factors always
+  // apply), but an empty denominator must not become a divide-by-zero or a
+  // fabricated 0, so fall back to scoring everything.
+  const scored = applicable.length > 0 ? applicable : clamped
+  const totalWeight = scored.reduce((sum, factor) => sum + factor.weight, 0)
 
   // Weights are RELATIVE, and the set they are drawn from does not sum to 100:
   // the core factors sum to 111, and the optional ones move it again. The score
-  // below already divides by the real total, so each factor's true share is
-  // weight/totalWeight, not weight. Report that share rather than leaving every
+  // below divides by the real total of what it scored, so a factor's true share
+  // is weight/totalWeight, not weight. Report that share rather than leaving every
   // consumer to either divide correctly or, as happened in both formatters here
   // and in a customer dashboard, print `weight` with a percent sign and overstate
   // all sixteen into a column that never adds up.
+  //
+  // A factor that did not apply has NO share: it moved the score by nothing.
+  const inScore = new Set(scored.map((factor) => factor.id))
   const factors = clamped.map((factor) => ({
     ...factor,
-    sharePct: totalWeight > 0 ? Math.round((factor.weight / totalWeight) * 1000) / 10 : 0,
+    sharePct:
+      totalWeight > 0 && inScore.has(factor.id)
+        ? Math.round((factor.weight / totalWeight) * 1000) / 10
+        : 0,
   }))
 
-  const weightedTotal = factors.reduce((sum, factor) => (
+  const weightedTotal = scored.reduce((sum, factor) => (
     sum + ((factor.score / 100) * (factor.weight / totalWeight) * 100)
   ), 0)
 
@@ -106,10 +142,13 @@ export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorS
  * overstates every factor because the weights do not sum to 100.
  */
 export function factorSharePct(
-  factor: { weight: number; sharePct?: number },
-  allFactors: readonly { weight: number }[],
+  factor: { id: string; weight: number; score: number; applicable?: boolean; sharePct?: number },
+  allFactors: readonly { id: string; weight: number; score: number; applicable?: boolean }[],
 ): number {
   if (typeof factor.sharePct === 'number') return factor.sharePct
-  const totalWeight = allFactors.reduce((sum, f) => sum + f.weight, 0)
+  if (!factorApplies(factor)) return 0
+  const scored = allFactors.filter((f) => factorApplies(f))
+  const pool = scored.length > 0 ? scored : allFactors
+  const totalWeight = pool.reduce((sum, f) => sum + f.weight, 0)
   return totalWeight > 0 ? Math.round((factor.weight / totalWeight) * 1000) / 10 : 0
 }

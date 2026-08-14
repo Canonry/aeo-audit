@@ -30,7 +30,18 @@ AI answer engines are replacing traditional search for millions of queries. Gett
 | Schema Validity | 5% | Duplicate singleton @types, JSON parse errors, empty JSON-LD blocks |
 | AI Crawler Access | 4% | Per-bot robots.txt rules for GPTBot, ClaudeBot, PerplexityBot, etc., plus Content Signals directives |
 
-Weights sum to 100% for the active factors. Pass `--factors <list>` to run a subset (see the [CLI reference](cli.md#running-a-subset-of-factors)).
+**These are weights, not percentages of the score.** They are relative and do NOT
+sum to 100 (the core set sums to 111), so the table's `%` column is the weight,
+not the share. The score divides by the actual total of the factors it scored, so
+a weight-12 factor is worth about 12.4% of a typical page's score, and less on a
+page where more factors apply. Read `sharePct` on each factor for its real share;
+it always sums to 100 for one report. Pass `--factors <list>` to run a subset (see
+the [CLI reference](cli.md#running-a-subset-of-factors)), which changes the total
+again.
+
+A factor the analyzer reports as not applicable to a page is left out of the score
+entirely, weight and all, so a product page is not marked down for having no FAQ.
+Its `sharePct` is 0.
 
 ## Optional factors
 
