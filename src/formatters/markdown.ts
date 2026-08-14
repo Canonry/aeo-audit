@@ -1,3 +1,4 @@
+import { factorSharePct } from '../scoring.js'
 import { isHomepageUrl } from '../critical-defects.js'
 import type {
   AuditCoverage,
@@ -25,11 +26,11 @@ export function formatMarkdown(report: AuditReport): string {
   lines.push(``)
   lines.push(`## Factor Breakdown`)
   lines.push(``)
-  lines.push(`| Factor | Weight | Score |`)
+  lines.push(`| Factor | % of score | Score |`)
   lines.push(`|--------|--------|-------|`)
 
   for (const factor of report.factors) {
-    lines.push(`| ${factor.name} | ${factor.weight}% | ${factor.score} |`)
+    lines.push(`| ${factor.name} | ${factorSharePct(factor, report.factors)}% | ${factor.score} |`)
   }
 
   lines.push(``)

@@ -66,12 +66,24 @@ export const PAGE_SPECIFIC_FACTOR_IDS: ReadonlySet<string> = new Set([
 export const PAGE_SPECIFIC_PRESENT_THRESHOLD = 30
 
 export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorSummary {
-  const factors = rawFactorResults.map((factor) => ({
+  const clamped = rawFactorResults.map((factor) => ({
     ...factor,
     score: clampScore(factor.score),
   }))
 
-  const totalWeight = factors.reduce((sum, factor) => sum + factor.weight, 0)
+  const totalWeight = clamped.reduce((sum, factor) => sum + factor.weight, 0)
+
+  // Weights are RELATIVE, and the set they are drawn from does not sum to 100:
+  // the core factors sum to 111, and the optional ones move it again. The score
+  // below already divides by the real total, so each factor's true share is
+  // weight/totalWeight, not weight. Report that share rather than leaving every
+  // consumer to either divide correctly or, as happened in both formatters here
+  // and in a customer dashboard, print `weight` with a percent sign and overstate
+  // all sixteen into a column that never adds up.
+  const factors = clamped.map((factor) => ({
+    ...factor,
+    sharePct: totalWeight > 0 ? Math.round((factor.weight / totalWeight) * 1000) / 10 : 0,
+  }))
 
   const weightedTotal = factors.reduce((sum, factor) => (
     sum + ((factor.score / 100) * (factor.weight / totalWeight) * 100)
@@ -83,4 +95,21 @@ export function scoreFactors(rawFactorResults: RawFactorResult[]): ScoredFactorS
     overallScore,
     factors,
   }
+}
+
+/**
+ * A factor's share of the overall score, for a consumer holding a report.
+ *
+ * Prefers the value the engine recorded, and falls back to the report's OWN
+ * weight sum for a report produced before `sharePct` existed. Never falls back
+ * to `weight`: that is the mistake this exists to prevent, and it silently
+ * overstates every factor because the weights do not sum to 100.
+ */
+export function factorSharePct(
+  factor: { weight: number; sharePct?: number },
+  allFactors: readonly { weight: number }[],
+): number {
+  if (typeof factor.sharePct === 'number') return factor.sharePct
+  const totalWeight = allFactors.reduce((sum, f) => sum + f.weight, 0)
+  return totalWeight > 0 ? Math.round((factor.weight / totalWeight) * 1000) / 10 : 0
 }

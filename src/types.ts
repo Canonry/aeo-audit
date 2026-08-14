@@ -148,12 +148,32 @@ export interface RawFactorResult extends AnalysisResult {
   weight: number
 }
 
+/** A factor with its score finalized, plus its true share of the overall score. */
+export interface ScoredFactorFields {
+  /**
+   * OPTIONAL because `compare` reads reports produced before this field existed;
+   * a stored 4.x report simply omits it. Derive it from the report's own weight
+   * sum in that case (see `factorSharePct`), never from `weight` alone.
+   *
+   * This factor's actual share of `overallScore`, 0-100, to one decimal.
+   *
+   * NOT the same number as `weight`, and that is the whole point. Weights are
+   * relative and do not sum to 100 (the core set sums to 111, and the optional
+   * factors move it), while the score divides by their ACTUAL total. So a
+   * weight-12 factor is 10.8 percent of the score, not 12. Printing `weight`
+   * with a percent sign overstates every factor and produces a column that never
+   * adds up, which is what this field exists to stop. Report it; do not derive a
+   * percentage from `weight` yourself.
+   */
+  sharePct?: number
+}
+
 /**
  * A factor with its score finalized (clamped to 0–100). Structurally identical to
  * `RawFactorResult`: the audit reports a raw 0–100 score per factor, with no
  * derived letter grade or pass/partial/fail band.
  */
-export type ScoredFactor = RawFactorResult
+export type ScoredFactor = RawFactorResult & ScoredFactorFields
 
 export interface AuditMetadata {
   fetchTimeMs: number
