@@ -60,7 +60,8 @@ describe('dead-link classification separates "broken" from "could not check"', (
       expect.objectContaining({
         from: 'https://example.test/',
         to: 'https://example.test/flaky',
-        reason: 'fetch-error',
+        reason: 'unreachable',
+        statusCode: null,
       }),
     ])
     // The unverified row carries WHY, which the fabricated dead links never did.
@@ -235,6 +236,144 @@ describe('bounded retry before classification', () => {
     })
 
     expect(calls.flaky).toBe(1)
+    expect(report.summary.fetchRetries).toEqual({ attempted: 0, recovered: 0 })
+  })
+})
+
+describe('a target that answered is never described as silent, and 429 is never broken', () => {
+  const linkTo = (path: string) => vi.fn(async (input: string) => {
+    const url = new URL(input)
+    if (url.pathname === '/') return html(`<a href="${path}">t</a>`)
+    if (url.pathname === path) return new Response('slow down', { status: 429, headers: { 'content-type': 'text/html' } })
+    return missing()
+  })
+
+  test('a throttled target is unverified, not a dead link', async () => {
+    // 429 describes OUR request rate. Reporting it as a broken link blames the
+    // site for how hard we crawled it, which is the same mistake as reporting
+    // a timeout — it just arrives with a status code attached.
+    vi.stubGlobal('fetch', linkTo('/throttled'))
+
+    const report = await runSiteCrawl('https://example.test/', {
+      allowPrivateHost: 'example.test', checkDeadLinks: true, maxFetchRetries: 0,
+    })
+
+    expect(report.deadLinks.findings).toEqual([])
+    expect(report.deadLinks.unverified).toEqual([
+      expect.objectContaining({ to: 'https://example.test/throttled', reason: 'throttled', statusCode: 429 }),
+    ])
+  })
+
+  test('a 429 is retried, and a target that then answers is neither bucket', async () => {
+    let hits = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(input)
+      if (url.pathname === '/') return html('<a href="/busy">busy</a>')
+      if (url.pathname === '/busy') {
+        hits += 1
+        if (hits === 1) return new Response('slow down', { status: 429, headers: { 'retry-after': '0' } })
+        return html('<p>alive</p>')
+      }
+      return missing()
+    }))
+
+    const report = await runSiteCrawl('https://example.test/', {
+      allowPrivateHost: 'example.test', checkDeadLinks: true, maxFetchRetries: 2,
+    })
+
+    expect(hits).toBe(2)
+    expect(report.deadLinks.findings).toEqual([])
+    expect(report.deadLinks.unverified).toEqual([])
+    expect(report.summary.fetchRetries).toEqual({ attempted: 1, recovered: 1 })
+  })
+
+  test('a redirect loop says redirect-limit, because the target did answer', async () => {
+    let hops = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(input)
+      if (url.pathname === '/') return html('<a href="/loop">loop</a>')
+      if (url.pathname.startsWith('/loop')) {
+        hops += 1
+        return new Response('', { status: 302, headers: { location: `/loop${hops}` } })
+      }
+      return missing()
+    }))
+
+    const report = await runSiteCrawl('https://example.test/', {
+      allowPrivateHost: 'example.test', checkDeadLinks: true,
+    })
+
+    // "never answered" would be false here: it answered, repeatedly.
+    expect(report.deadLinks.unverified).toEqual([
+      expect.objectContaining({ to: 'https://example.test/loop', reason: 'redirect-limit' }),
+    ])
+    expect(report.deadLinks.findings).toEqual([])
+  })
+})
+
+describe('a request may not outlive the crawl that owns it', () => {
+  test('a retry dispatched inside the budget is still bounded by the deadline', async () => {
+    let hits = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+      const url = new URL(input)
+      if (url.pathname === '/') return html('<a href="/slow">slow</a>')
+      if (url.pathname === '/slow') {
+        hits += 1
+        if (hits === 1) throw new TypeError('fetch failed')
+        // Hangs far past both the crawl budget and the 10s per-request ceiling.
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 30_000)
+          init?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')) }, { once: true })
+        })
+        return html('<p>ok</p>')
+      }
+      return missing()
+    }))
+
+    const startedAt = Date.now()
+    const report = await runSiteCrawl('https://example.test/', {
+      allowPrivateHost: 'example.test', checkDeadLinks: true, maxDurationMs: 2_000, maxFetchRetries: 1,
+    })
+    const elapsed = Date.now() - startedAt
+
+    // Before the fix this took ~10.7s on a 3s budget: the backoff was clipped
+    // to the deadline but the retry it released then ran on the fixed 10s
+    // socket timeout, which no budget check can interrupt mid-flight.
+    expect(elapsed).toBeLessThan(6_000)
+    // The hung target is reported as unchecked rather than broken, and the
+    // crawl still says it covered everything it discovered — nothing was
+    // truncated, one page just never answered in the time it was allowed.
+    expect(report.deadLinks.findings).toEqual([])
+    expect(report.deadLinks.unverified).toEqual([
+      expect.objectContaining({ to: 'https://example.test/slow', reason: 'unreachable' }),
+    ])
+  }, 30_000)
+
+  test('a deadline that expires during backoff still records the page', async () => {
+    // The retry never happens, but the transient failure that prompted it is
+    // real and observed. Losing it would drop the URL from the crawl entirely:
+    // no page row, no unverified entry, nothing to explain the gap.
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(input)
+      if (url.pathname === '/') return html('<a href="/gone-quiet">x</a>')
+      if (url.pathname === '/gone-quiet') throw new TypeError('fetch failed')
+      return missing()
+    }))
+
+    const report = await runSiteCrawl('https://example.test/', {
+      allowPrivateHost: 'example.test',
+      checkDeadLinks: true,
+      mode: 'full',
+      // Enough to fetch the root and fail the child once, then expire during
+      // the 500ms backoff before the retry can be dispatched.
+      maxDurationMs: 300,
+      maxFetchRetries: 2,
+    })
+    if (report.mode !== 'full') throw new Error('expected full report')
+
+    const target = report.pages.find((page) => page.requestedUrl.endsWith('/gone-quiet'))
+    expect(target).toMatchObject({ state: 'fetch-error', statusCode: null })
+    // Nothing was retried, so nothing may be counted as attempted.
     expect(report.summary.fetchRetries).toEqual({ attempted: 0, recovered: 0 })
   })
 })

@@ -123,7 +123,7 @@ describe('runSiteCrawl local HTTP smoke', () => {
     expect(placement('/', '/terms')).toEqual({ navigation: 1, content: 0, unknown: 0 })
     expect(placement('/', post)).toEqual({ navigation: 0, content: 1, unknown: 0 })
     expect(placement('/legacy-page', '/chatgpt-seo-agency')).toEqual({ navigation: 0, content: 0, unknown: 1 })
-    expect(report.summary.crawlSchemaVersion).toBe('1.3')
+    expect(report.summary.crawlSchemaVersion).toBe('2.0')
     expect(report.summary.linkPlacementRulesetVersion).toBe('1.0.0')
   })
 })

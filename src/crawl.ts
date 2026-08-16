@@ -26,6 +26,7 @@ import type {
   CrawlSummary,
   CrawlTerminationReason,
   CrawlUnverifiedLinkFinding,
+  CrawlUnverifiedReason,
   CrawlWarning,
   FullSiteCrawlReport,
   RedirectHop,
@@ -47,6 +48,13 @@ import {
 
 const CRAWL_FETCH_TIMEOUT_MS = 10_000
 const FETCH_RETRY_BASE_DELAY_MS = 500
+/** Longest we will honour a `Retry-After` for; the crawl deadline still clips it. */
+const MAX_RETRY_AFTER_MS = 10_000
+/**
+ * "Too Many Requests" is the server describing OUR request rate, not the
+ * resource. It is the one 4xx that is never evidence about the link.
+ */
+const RATE_LIMITED_STATUS = 429
 const MAX_ANCHOR_SUMMARIES = 5
 const TRACKING_PARAM = /^(?:utm_[^=]*|gclid|dclid|fbclid|msclkid|_ga(?:_.+)?|mc_[ce]id)$/i
 
@@ -160,6 +168,11 @@ class CrawlBudget implements FetchBudget {
 
   constructor(readonly limits: SiteCrawlLimits) {}
 
+  /** Milliseconds left on the crawl's own deadline; negative once it is spent. */
+  remainingMs(): number {
+    return this.limits.maxDurationMs - (Date.now() - this.startedAt)
+  }
+
   assertWithinDuration(): void {
     if (Date.now() - this.startedAt >= this.limits.maxDurationMs) {
       throw this.durationExceededError()
@@ -215,9 +228,32 @@ function isTransientFetchError(error: unknown): boolean {
   return code === 'TIMEOUT' || code === 'UNREACHABLE'
 }
 
+/**
+ * A request may not outlive the crawl that owns it. Clipped to the remaining
+ * deadline, floored at 1ms so an exhausted budget produces an immediate timeout
+ * rather than a non-positive one the fetch layer would read as "no timeout".
+ */
+function fetchTimeoutMs(budget: CrawlBudget): number {
+  return Math.max(1, Math.min(CRAWL_FETCH_TIMEOUT_MS, budget.remainingMs()))
+}
+
 /** Backoff between fetch attempts, doubling per retry. */
 function fetchRetryDelayMs(retry: number): number {
   return FETCH_RETRY_BASE_DELAY_MS * 2 ** (retry - 1)
+}
+
+/**
+ * A throttled server usually says how long to wait. Prefer that over our own
+ * backoff, bounded so a hostile or mistaken header cannot stall the crawl.
+ * Only the delta-seconds form is read; the HTTP-date form is rare here and
+ * misparsing one would be worse than falling back to the default backoff.
+ */
+function retryAfterMs(response: Response, fallbackMs: number): number {
+  const header = response.headers.get('retry-after')
+  if (!header) return fallbackMs
+  const seconds = Number(header.trim())
+  if (!Number.isFinite(seconds) || seconds < 0) return fallbackMs
+  return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS)
 }
 
 /**
@@ -739,7 +775,12 @@ async function fetchCrawlUrl(
   beforeOutboundAttempt: () => Promise<void>,
 ): Promise<CrawlFetchResult> {
   const result = await fetchWithValidatedRedirects(requestedUrl, {
-    timeoutMs: CRAWL_FETCH_TIMEOUT_MS,
+    // Bounded by whatever is LEFT of the crawl deadline, not just by the
+    // per-request ceiling. A 10s socket timeout inside a 3s crawl budget lets
+    // one hung request overrun the whole crawl by 7s — and with retries, by a
+    // multiple of that. The budget checks around this call cannot help: they
+    // run before the request starts and after it ends, never during.
+    timeoutMs: fetchTimeoutMs(budget),
     allowPrivateHost: options.allowPrivateHost,
     signal: options.signal,
     onOutboundAttempt: options.onOutboundAttempt,
@@ -841,20 +882,50 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
    * sees a failure the crawler could not shake off.
    */
   const fetchWithRetries = async (url: string): Promise<CrawlFetchResult> => {
-    for (let retry = 0; ; retry += 1) {
+    // Waits out a backoff and reports whether a retry may actually be
+    // dispatched. Returning false rather than throwing is what keeps the
+    // ORIGINAL failure alive: if the crawl deadline expires mid-backoff, the
+    // caller still has the transient error to record an observation from,
+    // instead of a budget error that would drop the page silently.
+    const waitToRetry = async (delayMs: number): Promise<boolean> => {
       try {
-        const fetched = await fetchCrawlUrl(url, options, budget, isAllowed, paceRequest)
-        if (retry > 0) fetchRetriesRecovered += 1
-        return fetched
+        await backoffDelay(delayMs, options.signal, budget)
+        return true
+      } catch (backoffError) {
+        if (isCallerAbort(backoffError, options.signal)) throw backoffError
+        return false
+      }
+    }
+
+    for (let retry = 0; ; retry += 1) {
+      let fetched: CrawlFetchResult
+      try {
+        fetched = await fetchCrawlUrl(url, options, budget, isAllowed, paceRequest)
       } catch (error) {
         // An abort is the caller leaving and a budget error is the crawl's own
         // ceiling; retrying either would spend a resource that is already gone.
         if (isCallerAbort(error, options.signal)) throw error
         if (isBudgetError(error)) throw error
         if (retry >= limits.maxFetchRetries || !isTransientFetchError(error)) throw error
+        if (!await waitToRetry(fetchRetryDelayMs(retry + 1))) throw error
+        // Counted only once the retry can actually be dispatched, so the
+        // number never claims a request that was never sent.
         fetchRetriesAttempted += 1
-        await backoffDelay(fetchRetryDelayMs(retry + 1), options.signal, budget)
+        continue
       }
+
+      // A 429 is the one error STATUS worth retrying: the server is describing
+      // our request rate, so backing off is exactly the corrective action, and
+      // the response we already hold is not evidence about the link.
+      if (fetched.response.status === RATE_LIMITED_STATUS && retry < limits.maxFetchRetries) {
+        if (await waitToRetry(retryAfterMs(fetched.response, fetchRetryDelayMs(retry + 1)))) {
+          fetchRetriesAttempted += 1
+          continue
+        }
+        return fetched
+      }
+      if (retry > 0) fetchRetriesRecovered += 1
+      return fetched
     }
   }
   const addWarning = (warning: CrawlWarning): void => {
@@ -1052,6 +1123,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         indexability: deriveIndexability({ state: 'discovered', metaRobots: [], xRobots: [] }),
         audit: null,
         error: null,
+        errorCode: null,
       }))
       return
     }
@@ -1075,7 +1147,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     if (!processed.has(rootUrl) && budget.fetchesStarted >= limits.maxFetches - 1) return null
     try {
       const result = await fetchWithValidatedRedirects(url, {
-        timeoutMs: CRAWL_FETCH_TIMEOUT_MS,
+        timeoutMs: fetchTimeoutMs(budget),
         allowPrivateHost: options.allowPrivateHost,
         signal: options.signal,
         onOutboundAttempt: options.onOutboundAttempt,
@@ -1274,6 +1346,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         indexability: deriveIndexability({ state: 'fetch-error', metaRobots: [], xRobots: headersRobots }),
         audit: null,
         error: `HTTP ${fetched.response.status}`,
+        errorCode: null,
       }))
       return
     }
@@ -1294,6 +1367,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         indexability: deriveIndexability({ state: 'non-html', metaRobots: [], xRobots: headersRobots }),
         audit: null,
         error: null,
+        errorCode: null,
       }))
       return
     }
@@ -1345,6 +1419,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       }),
       audit,
       error: analyzerError,
+      // An analyzer failure is not a fetch failure: the page was retrieved.
+      errorCode: null,
     }))
     const pageNofollow = parsed.metaRobots.includes('nofollow')
       || parsed.metaRobots.includes('none')
@@ -1398,6 +1474,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         indexability: deriveIndexability({ state: 'robots-blocked', metaRobots: [], xRobots: [] }),
         audit: null,
         error: null,
+        errorCode: null,
       }))
       return
     }
@@ -1409,6 +1486,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       if (isCallerAbort(error, options.signal)) throw error
       if (isBudgetError(error)) return
       const message = error instanceof Error ? error.message : String(error)
+      const failureCode = getAeoAuditErrorCode(error)
       await recordPage(createObservation({
         requestedUrl: item.url,
         finalUrl: null,
@@ -1425,6 +1503,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         indexability: deriveIndexability({ state: 'fetch-error', metaRobots: [], xRobots: [] }),
         audit: null,
         error: message,
+        errorCode: failureCode,
       }))
       return
     }
@@ -1451,6 +1530,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         indexability: deriveIndexability({ state: 'redirect', metaRobots: [], xRobots: [] }),
         audit: null,
         error: null,
+        errorCode: null,
       }))
       if (item.url === rootUrl) {
         const lastHop = fetched.redirectChain.at(-1)!
@@ -1687,6 +1767,30 @@ function deriveMetrics(pages: CrawlPageObservation[], edges: CrawlEdgeObservatio
   }
 }
 
+/**
+ * Whether this target failed in a way that says nothing about the LINK, and if
+ * so which way. Returns null for a target the crawl could actually judge —
+ * whether it answered fine or answered with a real error status.
+ *
+ * The 429 case is the reason this runs before the 4xx/5xx test: it is an error
+ * status, but it describes our request rate rather than the resource, so
+ * reporting it as a broken link blames the site for how hard we crawled it.
+ */
+function unverifiedLinkReason(target: CrawlPageObservation): CrawlUnverifiedReason | null {
+  if (target.statusCode === RATE_LIMITED_STATUS) return 'throttled'
+  if (target.state !== 'fetch-error' || target.statusCode !== null) return null
+  switch (target.errorCode) {
+    case 'REDIRECT_LIMIT': return 'redirect-limit'
+    case 'BODY_TOO_LARGE': return 'body-too-large'
+    case 'TIMEOUT':
+    case 'UNREACHABLE': return 'unreachable'
+    // A code the engine does not classify, or a pre-2.0 observation that
+    // recorded no code at all. Saying `unknown` is honest; picking the most
+    // common cause would invent a diagnosis.
+    default: return 'unknown'
+  }
+}
+
 function deriveDeadLinks(
   enabled: boolean,
   complete: boolean,
@@ -1711,9 +1815,24 @@ function deriveDeadLinks(
     const target = resolveTarget(edge.to)
     if (!target) continue
     const identity = `${edge.from}\u0000${edge.to}`
+    const unverifiedReason = unverifiedLinkReason(target)
+    if (unverifiedReason) {
+      // Keyed under its own prefix so a consumer storing findings by key
+      // cannot mix the buckets back together.
+      unverified.push({
+        key: keyFor('unverified-link', identity),
+        from: edge.from,
+        to: edge.to,
+        reason: unverifiedReason,
+        error: target.error,
+        statusCode: target.statusCode,
+      })
+      continue
+    }
     // A status code is the whole evidence for calling a link dead. This reads
     // the CODE, not `state === 'fetch-error'`, which the traversal also uses
-    // for a page that answered 4xx/5xx.
+    // for a page that answered 4xx/5xx. Checked AFTER the unverified test, so
+    // the one error status that is not about the link (429) never lands here.
     if (target.statusCode !== null && target.statusCode >= 400) {
       findings.push({
         key: keyFor('dead-link', identity),
@@ -1721,19 +1840,6 @@ function deriveDeadLinks(
         to: edge.to,
         statusCode: target.statusCode,
         reason: 'http-error',
-      })
-      continue
-    }
-    // No status at all, after every retry: the target never answered, so the
-    // crawl has no evidence either way and says exactly that. Keyed under its
-    // own prefix so a consumer storing findings by key cannot mix the buckets.
-    if (target.state === 'fetch-error' && target.statusCode === null) {
-      unverified.push({
-        key: keyFor('unverified-link', identity),
-        from: edge.from,
-        to: edge.to,
-        reason: 'fetch-error',
-        error: target.error,
       })
     }
   }

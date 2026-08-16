@@ -1,5 +1,6 @@
 import type { CheerioAPI } from 'cheerio'
 import { deepFreeze } from './immutable.js'
+import type { AeoAuditErrorCode } from './errors.js'
 
 export type FindingType = 'found' | 'missing' | 'info' | 'timeout' | 'unreachable'
 
@@ -636,9 +637,9 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
 /* ── Full site crawl types ── */
 
 /** A report-shape version owned by the crawl engine, independent from `SCHEMA_VERSION`. */
-export const CRAWL_SCHEMA_VERSION = '1.3'
+export const CRAWL_SCHEMA_VERSION = '2.0'
 /** Version identifiers let persisted checkpoints detect changes in crawl semantics. */
-export const CRAWL_ENGINE_VERSION = '1.3.0'
+export const CRAWL_ENGINE_VERSION = '2.0.0'
 export const CRAWL_URL_NORMALIZATION_VERSION = '1.1.0'
 export const CRAWL_INDEXABILITY_RULESET_VERSION = '1.0.0'
 export const CRAWL_LINK_SCORE_ALGORITHM_VERSION = 'pagerank-1.0.0'
@@ -765,6 +766,12 @@ export interface CrawlPageObservation {
   }
   audit: AuditReport | null
   error: string | null
+  /**
+   * Typed code behind `error`, when the failure was one the engine classifies.
+   * `error` is a human string that has never been safe to branch on; this is.
+   * Null when the page did not fail, or failed in a way with no code.
+   */
+  errorCode: AeoAuditErrorCode | null
   metrics: CrawlPageMetrics
 }
 
@@ -836,19 +843,42 @@ export interface CrawlDeadLinkFinding {
 }
 
 /**
- * A link whose target could not be fetched, after every retry. This is a
- * statement about the crawl, NOT about the link: a timeout, a reset connection,
- * or throttling under crawl concurrency all land here, and none of them is
- * evidence the URL is broken. Consumers must never present these as broken
- * links; the honest reading is "we could not check this one".
+ * Why a target could not be checked. Every value is a statement about the
+ * CRAWL, never about the link, so none of them may be presented as broken:
+ *
+ * - `unreachable`    — no response at all: a timeout, a reset or refused socket.
+ * - `throttled`      — the target answered 429. That is the server telling us we
+ *                      asked too fast; it says nothing about the resource, and
+ *                      calling it broken would blame a site for our own crawl rate.
+ * - `redirect-limit` — it answered, with a redirect chain we stopped following.
+ * - `body-too-large` — it answered, with more bytes than the crawl will read.
+ * - `unknown`        — it failed in a way the engine does not classify.
+ *
+ * The last three DID answer, which is why the bucket is named for what we could
+ * not establish rather than for silence.
+ */
+export type CrawlUnverifiedReason =
+  | 'unreachable'
+  | 'throttled'
+  | 'redirect-limit'
+  | 'body-too-large'
+  | 'unknown'
+
+/**
+ * A link whose target could not be checked, after every retry. A timeout, a
+ * reset connection, or throttling under crawl concurrency all land here, and
+ * none of them is evidence the URL is broken. Consumers must never present
+ * these as broken links; the honest reading is "we could not check this one".
  */
 export interface CrawlUnverifiedLinkFinding {
   key: string
   from: string
   to: string
-  reason: 'fetch-error'
-  /** The last transport failure observed for the target, when one was recorded. */
+  reason: CrawlUnverifiedReason
+  /** The last failure observed for the target, when one was recorded. */
   error: string | null
+  /** Status the target answered with, when it answered at all. */
+  statusCode: number | null
 }
 
 /**
