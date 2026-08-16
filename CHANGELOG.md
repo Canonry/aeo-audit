@@ -1,5 +1,21 @@
 # Changelog
 
+## 6.0.0 (2026-08-16)
+
+### Fixed
+
+- **BREAKING: a link we could not fetch was reported as a broken link.** `deriveDeadLinks` treated a page observation with `state: 'fetch-error'` and `statusCode: null` as a dead link, tagged `reason: 'fetch-error'`. Those are different claims. A 404 is the site telling you the link is broken; a timeout or a reset socket is the crawler failing to ask, and the URL can be perfectly healthy. On one 228-page site the run produced 15 "dead links" across 6 URLs, every one with `statusCode: null` and no error string, and every one of those 6 served a 200 in under a second on a manual check moments later — the crawl fetches at concurrency 5 with no delay by default, which is the likely cause. That output was client-facing. A finding now requires an actual status code (`statusCode: number`, `reason: 'http-error'`), and a target that never answered goes to the new `deadLinks.unverified` array with the transport error that stopped it. The two use different key prefixes, so a consumer storing findings by `key` cannot merge them back together by accident.
+- **A single transient fetch failure decided a URL's fate.** There was no retry anywhere in the crawl: one refused connection under crawl concurrency permanently marked the page `fetch-error`, and everything downstream read that as fact. A page URL now gets `maxFetchRetries` extra attempts (default 2, 500ms doubling) BEFORE any classification reads the observation, so the classifier only ever sees a failure the crawler could not shake off. Only `TIMEOUT` and `UNREACHABLE` are retried — a blocked host, a redirect limit, an oversized body, and an exhausted budget all reproduce on a retry, so retrying them would only spend budget. Retries consume the fetch budget and are paced like any other request, the backoff is abortable and clipped to the remaining duration budget, and `maxFetchRetries: 0` restores the old single-attempt behavior.
+
+### Added
+
+- **`summary.fetchRetries: { attempted, recovered }`** — optional, since a summary captured before retries existed genuinely has no such count. A nonzero `recovered` is direct evidence the crawler rather than the site was the flaky party, which is exactly the question you have to answer before believing any crawl-derived link finding.
+- **`CrawlUnverifiedLinkFinding`** is exported from the package root alongside `CrawlDeadLinkFinding`.
+
+### Changed
+
+- **Crawl schema `1.2` → `1.3` and crawl engine `1.2.0` → `1.3.0`.** The report shape changed and the traversal changed. Unlike 1.1 → 1.2 this is NOT purely additive: `CrawlDeadLinkResult` gains a required `unverified` array, and `CrawlDeadLinkFinding` narrows to `statusCode: number` and `reason: 'http-error'`. Reading a finding still compiles (both are narrowings); constructing a `CrawlDeadLinkResult` does not. `unverified` is deliberately required rather than optional — a consumer skipping it is the exact failure this release fixes. Dead-link counts drop against 5.x on any site where the crawler ever failed to connect, so a stored crawl cannot be compared across this boundary.
+
 ## 5.0.0 (2026-08-14)
 
 ### Fixed

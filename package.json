@@ -1,6 +1,6 @@
 {
   "name": "@canonry/aeo-audit",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "The most comprehensive open-source Answer Engine Optimization (AEO) audit tool. Scores websites across 16 ranking factors that determine AI citation.",
   "type": "module",
   "main": "./dist/index.js",

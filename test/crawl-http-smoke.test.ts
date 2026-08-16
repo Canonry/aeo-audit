@@ -59,7 +59,7 @@ describe('runSiteCrawl local HTTP smoke', () => {
     origin = `http://127.0.0.1:${address.port}`
 
     const disabled = await runSiteCrawl(`${origin}/`, { allowPrivateHost: '127.0.0.1', concurrency: 3 })
-    expect(disabled.deadLinks).toEqual({ state: 'disabled', findings: [] })
+    expect(disabled.deadLinks).toEqual({ state: 'disabled', findings: [], unverified: [] })
     expect(requested).not.toContain('/blocked')
     if (disabled.mode !== 'full') throw new Error('expected full report')
     expect(disabled.pages.find((page) => page.finalUrl === `${origin}/`)?.metrics.shortestFollowableAnchorDepth).toBe(0)
@@ -123,7 +123,7 @@ describe('runSiteCrawl local HTTP smoke', () => {
     expect(placement('/', '/terms')).toEqual({ navigation: 1, content: 0, unknown: 0 })
     expect(placement('/', post)).toEqual({ navigation: 0, content: 1, unknown: 0 })
     expect(placement('/legacy-page', '/chatgpt-seo-agency')).toEqual({ navigation: 0, content: 0, unknown: 1 })
-    expect(report.summary.crawlSchemaVersion).toBe('1.2')
+    expect(report.summary.crawlSchemaVersion).toBe('1.3')
     expect(report.summary.linkPlacementRulesetVersion).toBe('1.0.0')
   })
 })

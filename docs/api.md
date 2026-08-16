@@ -42,6 +42,7 @@ const report = await runSiteCrawl('https://example.com', {
   maxEdges: 250_000,
   maxDepth: 20,
   requestDelayMs: 0,        // Minimum spacing between request starts
+  maxFetchRetries: 2,       // Extra attempts after a transient fetch failure
   checkDeadLinks: false,
   onEvent: async (event) => {
     await saveCheckpoint(event)
@@ -57,7 +58,14 @@ console.log(report.deadLinks.state) // 'disabled'
 
 The event handler receives bounded page, edge, progress, metric, and summary batches. Each batch has a stable ID and checksum.
 
-`checkDeadLinks` is false by default. If it is true, the engine reports failed internal targets that the crawl already observed.
+`checkDeadLinks` is false by default. When it is true, the result splits into two arrays, because "this link is broken" and "we could not check this link" are different claims:
+
+- `deadLinks.findings` — the target ANSWERED, with 4xx or 5xx. `statusCode` is always a number, because the status code is the evidence.
+- `deadLinks.unverified` — the target never answered, after every retry. A timeout, a reset connection, or throttling under crawl concurrency all land here, and none of them is evidence the URL is broken. Each row carries the last transport `error`. Never present these as broken links.
+
+`deadLinks.state` describes the TRAVERSAL, not the confidence of the check: `complete` means no budget truncated the crawl. A complete crawl can still carry `unverified` rows.
+
+`maxFetchRetries` (default 2) is how many extra attempts a page URL gets after a TRANSIENT fetch failure, and the retry happens before anything classifies the observation. Only a timeout or an unreachable host is retried; a blocked host, a redirect limit, an oversized body, and an exhausted budget all reproduce on a retry, so they are not. Each attempt consumes the fetch budget and is paced like any other request. Set it to `0` for single-attempt behavior. `summary.fetchRetries` reports `{ attempted, recovered }`; a nonzero `recovered` is direct evidence the crawler, not the site, was the flaky party.
 
 The engine never fetches an external link for dead-link analysis. Robots rules match the normalized URL that the crawler actually requests. With robots enabled, a valid `Crawl-delay` raises the effective delay above `requestDelayMs`; waits remain abortable and bounded by `maxDurationMs`.
 

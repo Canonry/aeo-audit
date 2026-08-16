@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { load } from 'cheerio'
-import { AeoAuditError, isAeoAuditError } from './errors.js'
+import { AeoAuditError, getAeoAuditErrorCode, isAeoAuditError } from './errors.js'
 import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, normalizeTargetUrl, readResponseBodyAsText, throwIfAborted } from './fetch-page.js'
 import { assertValidFactorIds, auditHtmlPage } from './audit-html.js'
 import { RequestPacer } from './request-pacer.js'
@@ -25,6 +25,7 @@ import type {
   CrawlProgress,
   CrawlSummary,
   CrawlTerminationReason,
+  CrawlUnverifiedLinkFinding,
   CrawlWarning,
   FullSiteCrawlReport,
   RedirectHop,
@@ -45,6 +46,7 @@ import {
 } from './types.js'
 
 const CRAWL_FETCH_TIMEOUT_MS = 10_000
+const FETCH_RETRY_BASE_DELAY_MS = 500
 const MAX_ANCHOR_SUMMARIES = 5
 const TRACKING_PARAM = /^(?:utm_[^=]*|gclid|dclid|fbclid|msclkid|_ga(?:_.+)?|mc_[ce]id)$/i
 
@@ -146,6 +148,7 @@ function defaults(options: SiteCrawlOptions): SiteCrawlLimits {
     maxSitemapUrls: integer(options.maxSitemapUrls, DEFAULT_SITE_CRAWL_LIMITS.maxSitemapUrls),
     concurrency: integer(options.concurrency, DEFAULT_SITE_CRAWL_LIMITS.concurrency),
     requestDelayMs: integer(options.requestDelayMs, DEFAULT_SITE_CRAWL_LIMITS.requestDelayMs, 0),
+    maxFetchRetries: integer(options.maxFetchRetries, DEFAULT_SITE_CRAWL_LIMITS.maxFetchRetries, 0),
   }
 }
 
@@ -196,6 +199,49 @@ class CrawlBudget implements FetchBudget {
 
 function isBudgetError(error: unknown): boolean {
   return isAeoAuditError(error) && error.code === 'BUDGET_EXCEEDED'
+}
+
+/**
+ * Failures that say nothing about the URL. A timeout or a refused/reset socket
+ * is a property of this attempt — of the network, of the moment, of how hard
+ * the crawler is leaning on the host — and the site can serve the same URL
+ * perfectly on the next one. Everything else (blocked host, redirect limit,
+ * oversized body, budget) reproduces on a retry, so retrying it only costs
+ * budget. `timedFetch` funnels every unrecognized transport failure into
+ * `UNREACHABLE`, so these two codes cover the transient set.
+ */
+function isTransientFetchError(error: unknown): boolean {
+  const code = getAeoAuditErrorCode(error)
+  return code === 'TIMEOUT' || code === 'UNREACHABLE'
+}
+
+/** Backoff between fetch attempts, doubling per retry. */
+function fetchRetryDelayMs(retry: number): number {
+  return FETCH_RETRY_BASE_DELAY_MS * 2 ** (retry - 1)
+}
+
+/**
+ * Abortable, duration-budgeted sleep. Waiting past the crawl's own deadline
+ * would let a backoff outlive the budget it is supposed to respect, so the wait
+ * is clipped to whatever remains and the caller re-checks the budget after.
+ */
+async function backoffDelay(ms: number, signal: AbortSignal | undefined, budget: CrawlBudget): Promise<void> {
+  const remaining = budget.startedAt + budget.limits.maxDurationMs - Date.now()
+  const wait = Math.min(ms, remaining)
+  if (wait > 0) {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(finish, wait)
+      function finish(): void {
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', finish)
+        resolve()
+      }
+      signal?.addEventListener('abort', finish, { once: true })
+      if (signal?.aborted) finish()
+    })
+  }
+  throwIfAborted(signal)
+  budget.assertWithinDuration()
 }
 
 function isHardFetchStop(reason: CrawlTerminationReason | null): boolean {
@@ -775,6 +821,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   }> | null = null
   let sequence = 0
   let finalRootUrl: string | null = null
+  let fetchRetriesAttempted = 0
+  let fetchRetriesRecovered = 0
 
   const isAllowed = (url: URL): boolean => hostBoundary(url) === allowedHost
   const paceRequest = async (): Promise<void> => {
@@ -783,6 +831,31 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       deadlineAt: budget.startedAt + limits.maxDurationMs,
       deadlineError: () => budget.durationExceededError(),
     })
+  }
+  /**
+   * Retry a page fetch that failed transiently, BEFORE anything reads the
+   * observation. A single refused connection under crawl concurrency used to
+   * become a `fetch-error` page, and a `fetch-error` page used to become a
+   * reported dead link — so one flaky moment fabricated a broken link on a site
+   * that was serving the URL fine. Retrying here means the classifier only ever
+   * sees a failure the crawler could not shake off.
+   */
+  const fetchWithRetries = async (url: string): Promise<CrawlFetchResult> => {
+    for (let retry = 0; ; retry += 1) {
+      try {
+        const fetched = await fetchCrawlUrl(url, options, budget, isAllowed, paceRequest)
+        if (retry > 0) fetchRetriesRecovered += 1
+        return fetched
+      } catch (error) {
+        // An abort is the caller leaving and a budget error is the crawl's own
+        // ceiling; retrying either would spend a resource that is already gone.
+        if (isCallerAbort(error, options.signal)) throw error
+        if (isBudgetError(error)) throw error
+        if (retry >= limits.maxFetchRetries || !isTransientFetchError(error)) throw error
+        fetchRetriesAttempted += 1
+        await backoffDelay(fetchRetryDelayMs(retry + 1), options.signal, budget)
+      }
+    }
   }
   const addWarning = (warning: CrawlWarning): void => {
     if (warnings.some((existing) => existing.code === warning.code && existing.from === warning.from && existing.to === warning.to)) return
@@ -1331,7 +1404,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
 
     let fetched: CrawlFetchResult
     try {
-      fetched = await fetchCrawlUrl(item.url, options, budget, isAllowed, paceRequest)
+      fetched = await fetchWithRetries(item.url)
     } catch (error) {
       if (isCallerAbort(error, options.signal)) throw error
       if (isBudgetError(error)) return
@@ -1518,6 +1591,10 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         }))
         .sort((left, right) => left.id.localeCompare(right.id)),
     },
+    fetchRetries: {
+      attempted: fetchRetriesAttempted,
+      recovered: fetchRetriesRecovered,
+    },
   }
   await emit('summary', { summary })
   if (mode === 'summary') return { mode, summary, deadLinks }
@@ -1616,7 +1693,7 @@ function deriveDeadLinks(
   edges: CrawlEdgeObservation[],
   pageByUrl: Map<string, CrawlPageObservation>,
 ): CrawlDeadLinkResult {
-  if (!enabled) return { state: 'disabled', findings: [] }
+  if (!enabled) return { state: 'disabled', findings: [], unverified: [] }
   const resolveTarget = (url: string): CrawlPageObservation | undefined => {
     let target = pageByUrl.get(url)
     const visited = new Set<string>()
@@ -1628,23 +1705,41 @@ function deriveDeadLinks(
     return target
   }
   const findings: CrawlDeadLinkFinding[] = []
+  const unverified: CrawlUnverifiedLinkFinding[] = []
   for (const edge of edges) {
     if (edge.type !== 'anchor' || edge.classification !== 'internal') continue
     const target = resolveTarget(edge.to)
     if (!target) continue
-    const httpFailure = target.statusCode !== null && target.statusCode >= 400
-    const fetchFailure = target.state === 'fetch-error' && target.statusCode === null
-    if (!httpFailure && !fetchFailure) continue
-    findings.push({
-      key: keyFor('dead-link', `${edge.from}\u0000${edge.to}`),
-      from: edge.from,
-      to: edge.to,
-      statusCode: target.statusCode,
-      reason: httpFailure ? 'http-error' : 'fetch-error',
-    })
+    const identity = `${edge.from}\u0000${edge.to}`
+    // A status code is the whole evidence for calling a link dead. This reads
+    // the CODE, not `state === 'fetch-error'`, which the traversal also uses
+    // for a page that answered 4xx/5xx.
+    if (target.statusCode !== null && target.statusCode >= 400) {
+      findings.push({
+        key: keyFor('dead-link', identity),
+        from: edge.from,
+        to: edge.to,
+        statusCode: target.statusCode,
+        reason: 'http-error',
+      })
+      continue
+    }
+    // No status at all, after every retry: the target never answered, so the
+    // crawl has no evidence either way and says exactly that. Keyed under its
+    // own prefix so a consumer storing findings by key cannot mix the buckets.
+    if (target.state === 'fetch-error' && target.statusCode === null) {
+      unverified.push({
+        key: keyFor('unverified-link', identity),
+        from: edge.from,
+        to: edge.to,
+        reason: 'fetch-error',
+        error: target.error,
+      })
+    }
   }
   findings.sort((left, right) => left.key.localeCompare(right.key))
-  return complete ? { state: 'complete', findings } : { state: 'partial', findings }
+  unverified.sort((left, right) => left.key.localeCompare(right.key))
+  return complete ? { state: 'complete', findings, unverified } : { state: 'partial', findings, unverified }
 }
 
 export const SITE_CRAWL_SCHEMA_VERSION = CRAWL_SCHEMA_VERSION
