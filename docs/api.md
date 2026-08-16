@@ -42,6 +42,7 @@ const report = await runSiteCrawl('https://example.com', {
   maxEdges: 250_000,
   maxDepth: 20,
   requestDelayMs: 0,        // Minimum spacing between request starts
+  maxFetchRetries: 2,       // Extra attempts after a transient fetch failure
   checkDeadLinks: false,
   onEvent: async (event) => {
     await saveCheckpoint(event)
@@ -57,7 +58,22 @@ console.log(report.deadLinks.state) // 'disabled'
 
 The event handler receives bounded page, edge, progress, metric, and summary batches. Each batch has a stable ID and checksum.
 
-`checkDeadLinks` is false by default. If it is true, the engine reports failed internal targets that the crawl already observed.
+`checkDeadLinks` is false by default. When it is true, the result splits into two arrays, because "this link is broken" and "we could not check this link" are different claims:
+
+- `deadLinks.findings` — the target ANSWERED, with 4xx or 5xx. `statusCode` is always a number, because the status code is the evidence.
+- `deadLinks.unverified` — the crawl could not establish whether the link works. Each row carries a typed `reason`, the last `error`, and the `statusCode` if the target answered at all:
+  - `unreachable` — no response: a timeout, a reset or refused socket.
+  - `throttled` — the target answered `429`. That is the server describing OUR request rate, not the resource, so it is never evidence about the link. It is retried first (honouring `Retry-After`, bounded); only a target still throttled after every retry lands here.
+  - `redirect-limit` / `body-too-large` — it answered, but with a redirect chain we stopped following or more bytes than the crawl reads.
+  - `unknown` — it failed in a way the engine does not classify.
+
+  The last three DID answer, which is why the bucket is named for what could not be established rather than for silence. Never present any of them as broken links.
+
+`deadLinks.state` describes the TRAVERSAL, not the confidence of the check: `complete` means no budget truncated the crawl. A complete crawl can still carry `unverified` rows.
+
+`maxFetchRetries` (default 2) is how many extra attempts a page URL gets after a TRANSIENT failure, and the retry happens before anything classifies the observation. A timeout, an unreachable host, and an HTTP `429` are retried; a blocked host, a redirect limit, an oversized body, and an exhausted budget all reproduce on a retry, so they are not.
+
+Every request is bounded by whatever is LEFT of `maxDurationMs`, not just by the per-request ceiling — a 10s socket timeout inside a 3s crawl budget would otherwise let one hung request overrun the crawl, and with retries by a multiple of that. Each attempt consumes the fetch budget and is paced like any other request. Set it to `0` for single-attempt behavior. `summary.fetchRetries` reports `{ attempted, recovered }`; a nonzero `recovered` is direct evidence the crawler, not the site, was the flaky party.
 
 The engine never fetches an external link for dead-link analysis. Robots rules match the normalized URL that the crawler actually requests. With robots enabled, a valid `Crawl-delay` raises the effective delay above `requestDelayMs`; waits remain abortable and bounded by `maxDurationMs`.
 

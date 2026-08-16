@@ -1,5 +1,6 @@
 import type { CheerioAPI } from 'cheerio'
 import { deepFreeze } from './immutable.js'
+import type { AeoAuditErrorCode } from './errors.js'
 
 export type FindingType = 'found' | 'missing' | 'info' | 'timeout' | 'unreachable'
 
@@ -636,9 +637,9 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
 /* ── Full site crawl types ── */
 
 /** A report-shape version owned by the crawl engine, independent from `SCHEMA_VERSION`. */
-export const CRAWL_SCHEMA_VERSION = '1.2'
+export const CRAWL_SCHEMA_VERSION = '2.0'
 /** Version identifiers let persisted checkpoints detect changes in crawl semantics. */
-export const CRAWL_ENGINE_VERSION = '1.2.0'
+export const CRAWL_ENGINE_VERSION = '2.0.0'
 export const CRAWL_URL_NORMALIZATION_VERSION = '1.1.0'
 export const CRAWL_INDEXABILITY_RULESET_VERSION = '1.0.0'
 export const CRAWL_LINK_SCORE_ALGORITHM_VERSION = 'pagerank-1.0.0'
@@ -660,6 +661,15 @@ export interface SiteCrawlLimits {
   concurrency: number
   /** Minimum delay between outbound request starts. Robots may raise the effective delay. */
   requestDelayMs: number
+  /**
+   * Extra attempts per page URL after a TRANSIENT fetch failure (timeout or
+   * unreachable). A refused connection under crawl concurrency is not evidence
+   * about the URL, and classifying it as one produced fabricated dead links, so
+   * the retry happens before any classification reads the observation. Each
+   * attempt consumes the fetch budget and is paced like any other request, and
+   * a permanent failure (blocked host, redirect limit) is never retried.
+   */
+  maxFetchRetries: number
 }
 
 /** Safe defaults for an untrusted public site. Every value may be tightened by callers. */
@@ -677,6 +687,7 @@ export const DEFAULT_SITE_CRAWL_LIMITS: Readonly<SiteCrawlLimits> = deepFreeze({
   maxSitemapUrls: 50_000,
   concurrency: 5,
   requestDelayMs: 0,
+  maxFetchRetries: 2,
 })
 
 export type CrawlTerminationReason =
@@ -755,6 +766,12 @@ export interface CrawlPageObservation {
   }
   audit: AuditReport | null
   error: string | null
+  /**
+   * Typed code behind `error`, when the failure was one the engine classifies.
+   * `error` is a human string that has never been safe to branch on; this is.
+   * Null when the page did not fail, or failed in a way with no code.
+   */
+  errorCode: AeoAuditErrorCode | null
   metrics: CrawlPageMetrics
 }
 
@@ -812,18 +829,68 @@ export interface CrawlEdgeObservation {
   placementOccurrences?: CrawlPlacementOccurrences
 }
 
+/**
+ * A link whose target ANSWERED, and answered with an error. The status code is
+ * the evidence, so it is always a number: a link the crawler could not fetch
+ * has no status and is not a finding at all — see `CrawlUnverifiedLinkFinding`.
+ */
 export interface CrawlDeadLinkFinding {
   key: string
   from: string
   to: string
-  statusCode: number | null
-  reason: 'http-error' | 'fetch-error'
+  statusCode: number
+  reason: 'http-error'
 }
 
+/**
+ * Why a target could not be checked. Every value is a statement about the
+ * CRAWL, never about the link, so none of them may be presented as broken:
+ *
+ * - `unreachable`    — no response at all: a timeout, a reset or refused socket.
+ * - `throttled`      — the target answered 429. That is the server telling us we
+ *                      asked too fast; it says nothing about the resource, and
+ *                      calling it broken would blame a site for our own crawl rate.
+ * - `redirect-limit` — it answered, with a redirect chain we stopped following.
+ * - `body-too-large` — it answered, with more bytes than the crawl will read.
+ * - `unknown`        — it failed in a way the engine does not classify.
+ *
+ * The last three DID answer, which is why the bucket is named for what we could
+ * not establish rather than for silence.
+ */
+export type CrawlUnverifiedReason =
+  | 'unreachable'
+  | 'throttled'
+  | 'redirect-limit'
+  | 'body-too-large'
+  | 'unknown'
+
+/**
+ * A link whose target could not be checked, after every retry. A timeout, a
+ * reset connection, or throttling under crawl concurrency all land here, and
+ * none of them is evidence the URL is broken. Consumers must never present
+ * these as broken links; the honest reading is "we could not check this one".
+ */
+export interface CrawlUnverifiedLinkFinding {
+  key: string
+  from: string
+  to: string
+  reason: CrawlUnverifiedReason
+  /** The last failure observed for the target, when one was recorded. */
+  error: string | null
+  /** Status the target answered with, when it answered at all. */
+  statusCode: number | null
+}
+
+/**
+ * `state` describes the TRAVERSAL, not the confidence of the check: `complete`
+ * means the crawl was not truncated by a budget. A complete crawl can still
+ * carry `unverified` entries, and that array is the only place a caller learns
+ * which links went unchecked.
+ */
 export type CrawlDeadLinkResult =
-  | { state: 'disabled'; findings: [] }
-  | { state: 'complete'; findings: CrawlDeadLinkFinding[] }
-  | { state: 'partial'; findings: CrawlDeadLinkFinding[] }
+  | { state: 'disabled'; findings: []; unverified: [] }
+  | { state: 'complete'; findings: CrawlDeadLinkFinding[]; unverified: CrawlUnverifiedLinkFinding[] }
+  | { state: 'partial'; findings: CrawlDeadLinkFinding[]; unverified: CrawlUnverifiedLinkFinding[] }
 
 export interface CrawlSummary {
   crawlSchemaVersion: string
@@ -865,6 +932,16 @@ export interface CrawlSummary {
     auditedPages: number
     aggregateScore: number | null
     factors: Array<{ id: string; name: string; count: number; averageScore: number }>
+  }
+  /**
+   * Transient-failure retries spent by this crawl. `recovered` counts URLs that
+   * a retry turned into a real observation, so a nonzero value is direct
+   * evidence the crawler — not the site — was the flaky party. Optional: a
+   * summary captured before retries existed genuinely has no such count.
+   */
+  fetchRetries?: {
+    attempted: number
+    recovered: number
   }
 }
 
@@ -919,6 +996,8 @@ export interface SiteCrawlOptions extends RunAeoAuditOptions {
   concurrency?: number
   /** Minimum delay between all outbound request starts, including redirect hops. Defaults to 0. */
   requestDelayMs?: number
+  /** Extra attempts per page URL after a transient fetch failure. Defaults to 2; 0 disables retrying. */
+  maxFetchRetries?: number
   /** Awaited after each checkpoint-safe observed/derived batch. */
   onEvent?: SiteCrawlEventHandler
 }

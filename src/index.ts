@@ -49,6 +49,7 @@ export type {
   CrawlAnchorSummary,
   CrawlDeadLinkFinding,
   CrawlDeadLinkResult,
+  CrawlUnverifiedLinkFinding,
   CrawlDiscoveryProvenance,
   CrawlEdgeClassification,
   CrawlEdgeObservation,
