@@ -16,6 +16,7 @@ export { runSitemapAudit } from './sitemap.js'
 export { runStaticAudit } from './static-audit.js'
 export {
   runSiteCrawl,
+  resolveSiteCrawlLimits,
   normalizeCrawlUrl,
   SITE_CRAWL_SCHEMA_VERSION,
   SITE_CRAWL_ENGINE_VERSION,
