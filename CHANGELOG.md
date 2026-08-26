@@ -1,5 +1,24 @@
 # Changelog
 
+## 6.1.0 (2026-08-26)
+
+### Fixed
+
+- **A soft stop hid the hard stop that actually ended the crawl.** `CrawlBudget.stop()` was first-write-wins across a single field, so once a soft reason latched (`max-query-variants`, `max-depth`, `max-links-per-page`) a later hard reason could not replace it. The fetch loop continues while the reason is not a hard stop, so the crawler kept issuing real requests at the audited origin and discarding every response until the frontier drained, then reported the soft reason and sent anyone diagnosing it to the wrong budget. Measured against a fixture origin with a 1,000,000-byte budget: 4,197,578 bytes read across 85 requests, reported as `max-query-variants`. After the fix the same crawl reads 1,234,598 bytes across 25 requests and reports `max-bytes`. Hard and soft reasons now latch separately and the getter prefers hard; first-write-wins still applies within a class, never across them.
+- **The fetch budgets had no relationship to the page budget.** `maxPages` and `maxBytes` each resolved against an independent flat default, so the smaller silently won. Asking for 1,000 pages of a site serving ~745 KB each returned 140, because the 100 MB byte default ran out first, with no error, no warning, and a `partial` flag naming the wrong budget. `maxFetches`, `maxDurationMs` and `maxBytes` now derive from `maxPages` when the caller has not set them explicitly.
+
+### Added
+
+- **`resolveSiteCrawlLimits(options)`** is exported from the package root. The limits a crawl runs under are derived, not the options passed in, so a caller that needs to know what it is about to spend (or which budget stopped a run) can ask rather than recompute the derivation and drift from it.
+
+### Changed
+
+- **Crawl engine `2.0.0` to `2.1.0`.** A minor bump: the report shape is unchanged, so `CRAWL_SCHEMA_VERSION` stays at `2.0`, but crawl semantics changed. The same options can now produce a larger crawl than 6.0.0 did, because a page budget that used to be cut short by an unrelated flat byte or duration default is now honoured. A persisted checkpoint taken before this version was produced under different budgets and page counts are not comparable across the boundary.
+
+### Compatibility
+
+- Raising unset ceilings only. A budget the caller states explicitly is honoured exactly and is never scaled up or down, and a call that sets no `maxPages` still gets the documented flat `DEFAULT_SITE_CRAWL_LIMITS`. A caller that passes `maxPages` and relied on a flat `maxBytes` to cut the crawl short will now crawl further, fetch more, and take longer; pass `maxBytes` explicitly to pin the old ceiling.
+
 ## 6.0.0 (2026-08-16)
 
 ### Fixed
