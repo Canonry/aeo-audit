@@ -146,10 +146,33 @@ export function normalizeCrawlUrl(rawUrl: string, baseUrl?: string): string {
  * silently truncated crawl.
  */
 const SCALED_BYTES_PER_PAGE = 1_500_000
-/** Fetches per page when scaling: redirects and dead-link probes cost extra. */
-const SCALED_FETCHES_PER_PAGE = 1.5
+/**
+ * Requests a single page can cost before retries: the page itself, plus the one
+ * a site that redirects `/p` to `/p/` spends before the body is read.
+ *
+ * The retry multiplier is NOT folded in here, because `maxFetchRetries` is a
+ * caller knob: at the default 2 a page can cost 6 requests, and a flat constant
+ * chosen for one retry setting silently under-budgets every larger one. At 1.5
+ * fetches per page a 10,000-page request derived 15,000 where ~24,400 were
+ * needed, so the crawl stopped at ~74% and blamed a budget the caller never set:
+ * the same defect this scaling exists to remove, moved from bytes to fetches.
+ */
+const SCALED_REQUESTS_PER_PAGE = 2
 /** Pages per second at the default concurrency, halved for slow origins. */
 const SCALED_PAGES_PER_SECOND = 2.5
+
+/**
+ * Ceilings every resolved budget is clamped to.
+ *
+ * `setTimeout` truncates a delay past 2^31-1 ms and fires it immediately, so a
+ * duration budget above that would not be a long budget, it would be no budget
+ * at all. The count ceiling keeps arithmetic exact and the report serialisable:
+ * `maxPages: Number.MAX_VALUE` used to derive `Infinity` for all three fetch-side
+ * budgets, which `JSON.stringify` writes as `null`, so a report could state that
+ * a crawl ran under no byte budget whatsoever.
+ */
+const MAX_DURATION_MS = 2_147_483_647
+const MAX_COUNT = Number.MAX_SAFE_INTEGER
 
 /**
  * Resolve the budgets a crawl will actually run under.
@@ -160,10 +183,15 @@ const SCALED_PAGES_PER_SECOND = 2.5
  * and drift from it.
  */
 export function resolveSiteCrawlLimits(options: SiteCrawlOptions): SiteCrawlLimits {
-  const integer = (value: number | undefined, fallback: number, minimum = 1): number => (
-    Number.isFinite(value) ? Math.max(minimum, Math.floor(value!)) : fallback
+  const integer = (value: number | undefined, fallback: number, minimum = 1, cap = MAX_COUNT): number => (
+    // Math.min last so a non-finite or absurd input lands on the ceiling rather
+    // than propagating Infinity into the report.
+    Number.isFinite(value) ? Math.min(cap, Math.max(minimum, Math.floor(value!))) : fallback
   )
   const maxPages = integer(options.maxPages, DEFAULT_SITE_CRAWL_LIMITS.maxPages)
+  // Both feed the derivation below, so they have to resolve before it runs.
+  const requestDelayMs = integer(options.requestDelayMs, DEFAULT_SITE_CRAWL_LIMITS.requestDelayMs, 0)
+  const maxFetchRetries = integer(options.maxFetchRetries, DEFAULT_SITE_CRAWL_LIMITS.maxFetchRetries, 0)
 
   /**
    * A caller who asks for N pages should get N pages.
@@ -176,14 +204,22 @@ export function resolveSiteCrawlLimits(options: SiteCrawlOptions): SiteCrawlLimi
    * wrong budget.
    *
    * So the fetch-side budgets now SCALE to the page budget when the caller has
-   * not set them, and the defaults apply only when nothing was asked for.
-   * A caller who sets a budget explicitly still gets exactly what they set:
-   * this raises unset ceilings, it never lowers a stated one.
+   * not set them. A caller who sets a budget explicitly still gets exactly what
+   * they set: this raises unset ceilings, it never lowers a stated one, and the
+   * flat defaults are the floor rather than the answer.
+   *
+   * The scaling keys off the RESOLVED page count, not off whether the caller
+   * spelled `maxPages` out. Keying off presence made the default path the one
+   * case the fix did not reach: `runSiteCrawl(url)` resolves to the documented
+   * 1,000 pages but kept the flat 100 MB, so it still returned ~140 pages of a
+   * media-heavy site, while `runSiteCrawl(url, {maxPages: 1_000})` — the same
+   * request, written out — got a 1.5 GB ceiling. Identical work, budgets 14x
+   * apart, decided by whether a key was present.
    */
-  const scaled = (explicit: number | undefined, derived: number, flat: number): number => (
+  const scaled = (explicit: number | undefined, derived: number, flat: number, cap = MAX_COUNT): number => (
     Number.isFinite(explicit)
-      ? Math.max(1, Math.floor(explicit!))
-      : Number.isFinite(options.maxPages) ? Math.max(flat, Math.ceil(derived)) : flat
+      ? Math.min(cap, Math.max(1, Math.floor(explicit!)))
+      : Math.min(cap, Math.max(flat, Math.ceil(derived)))
   )
 
   return {
@@ -191,13 +227,19 @@ export function resolveSiteCrawlLimits(options: SiteCrawlOptions): SiteCrawlLimi
     maxEdges: integer(options.maxEdges, DEFAULT_SITE_CRAWL_LIMITS.maxEdges),
     maxFetches: scaled(
       options.maxFetches,
-      maxPages * SCALED_FETCHES_PER_PAGE,
+      // A retry is a real request against this budget, so the ceiling has to
+      // cover the worst case the caller's own retry setting allows.
+      maxPages * SCALED_REQUESTS_PER_PAGE * (1 + maxFetchRetries),
       DEFAULT_SITE_CRAWL_LIMITS.maxFetches,
     ),
     maxDurationMs: scaled(
       options.maxDurationMs,
-      (maxPages / SCALED_PAGES_PER_SECOND) * 1_000,
+      // Pacing is time the crawl is required to spend NOT fetching. Ignoring it
+      // budgeted 5,000 politely-paced pages 2,000s for work that cannot finish
+      // in under 5,000s, so the politeness knob caused the truncation.
+      maxPages * (1_000 / SCALED_PAGES_PER_SECOND + requestDelayMs),
       DEFAULT_SITE_CRAWL_LIMITS.maxDurationMs,
+      MAX_DURATION_MS,
     ),
     maxBytes: scaled(
       options.maxBytes,
@@ -211,8 +253,8 @@ export function resolveSiteCrawlLimits(options: SiteCrawlOptions): SiteCrawlLimi
     maxSitemapFanout: integer(options.maxSitemapFanout, DEFAULT_SITE_CRAWL_LIMITS.maxSitemapFanout),
     maxSitemapUrls: integer(options.maxSitemapUrls, DEFAULT_SITE_CRAWL_LIMITS.maxSitemapUrls),
     concurrency: integer(options.concurrency, DEFAULT_SITE_CRAWL_LIMITS.concurrency),
-    requestDelayMs: integer(options.requestDelayMs, DEFAULT_SITE_CRAWL_LIMITS.requestDelayMs, 0),
-    maxFetchRetries: integer(options.maxFetchRetries, DEFAULT_SITE_CRAWL_LIMITS.maxFetchRetries, 0),
+    requestDelayMs,
+    maxFetchRetries,
   }
 }
 

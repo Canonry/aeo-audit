@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http'
+import { gzipSync } from 'node:zlib'
 import type { AddressInfo } from 'node:net'
 
 import { afterEach, describe, expect, test } from 'vitest'
@@ -25,7 +26,7 @@ describe('crawl budget coherence', () => {
    * early, while the padding trips a HARD byte stop later, the exact order
    * that used to hide the byte stop.
    */
-  async function serveSite(options: {padKb: number, paths: number, variants: number}): Promise<{origin: string, served: () => number}> {
+  async function serveSite(options: {padKb: number, paths: number, variants: number, gzip?: boolean}): Promise<{origin: string, served: () => number}> {
     let origin = ''
     let served = 0
     const pad = 'x'.repeat(options.padKb * 1024)
@@ -40,7 +41,15 @@ describe('crawl budget coherence', () => {
       }
       served += 1
       response.setHeader('content-type', 'text/html')
-      response.end(`<html><body>${links}<!--${pad}--></body></html>`)
+      const page = `<html><body>${links}<!--${pad}--></body></html>`
+      if (options.gzip) {
+        // The byte budget counts DECOMPRESSED bytes, so a repetitive pad crosses
+        // a 100MB ceiling over ~1.5KB of wire. Same evidence, no 128MB of traffic.
+        response.setHeader('content-encoding', 'gzip')
+        response.end(gzipSync(Buffer.from(page)))
+        return
+      }
+      response.end(page)
     })
     await new Promise<void>((resolve, reject) => {
       server!.once('error', reject)
@@ -102,6 +111,26 @@ describe('crawl budget coherence', () => {
     expect(site.served()).toBeLessThanOrEqual(8)
   }, 120_000)
 
+  test('a real crawl runs under the DERIVED budgets, not the flat ones', async () => {
+    // The unit tests below prove the derivation computes the right numbers; this
+    // one proves runSiteCrawl actually USES them. Without it the wiring can be
+    // reverted and every other test still passes, which was true of this suite.
+    //
+    // 100 pages at ~1.2MB is ~120MB: past the flat 100MB ceiling, inside the
+    // derived one (100 x 1.5MB). Under flat budgets the crawl stops early on
+    // max-bytes; under derived budgets the page cap is the only thing that ends it.
+    const site = await serveSite({padKb: 1200, paths: 100, variants: 0, gzip: true})
+
+    const report = await runSiteCrawl(`${site.origin}/`, {
+      allowPrivateHost: '127.0.0.1',
+      mode: 'summary',
+      maxPages: 100,
+    })
+
+    expect(report.summary.terminationReason).not.toBe('max-bytes')
+    expect(report.summary.bytesRead).toBeGreaterThan(DEFAULT_SITE_CRAWL_LIMITS.maxBytes)
+  }, 180_000)
+
   test('unset fetch budgets scale to the page count the caller asked for', () => {
     // The production failure: 1,000 pages requested, the flat 100MB byte
     // default reached at ~140 pages of ~745KB each, and the run reported
@@ -133,6 +162,44 @@ describe('crawl budget coherence', () => {
     }
   })
 
+  test('an absurd page count yields finite, serialisable, schedulable budgets', () => {
+    // maxPages: Number.MAX_VALUE derived Infinity for all three fetch-side
+    // budgets. JSON.stringify writes Infinity as null, so a report could state a
+    // crawl ran under NO byte budget, and a duration past 2^31-1 ms makes
+    // setTimeout fire immediately, turning the longest budget into none at all.
+    for (const maxPages of [Number.MAX_VALUE, 1e300, Number.MAX_SAFE_INTEGER]) {
+      const limits = resolveSiteCrawlLimits({maxPages})
+      for (const [name, value] of Object.entries(limits)) {
+        expect(Number.isFinite(value), `${name} is not finite`).toBe(true)
+        expect(Number.isSafeInteger(value), `${name} is not a safe integer`).toBe(true)
+      }
+      expect(limits.maxDurationMs).toBeLessThanOrEqual(2_147_483_647)
+      // A report carrying these must survive the wire.
+      expect(JSON.parse(JSON.stringify(limits))).toEqual(limits)
+    }
+  })
+
+  test('the fetch budget covers the retries the caller allows', () => {
+    // A retry is a real request against maxFetches. Deriving from pages alone
+    // budgeted 5,000 pages 15,000 fetches, which one recoverable 429 per page
+    // exhausts at ~3,700 pages, blaming a budget the caller never set.
+    const none = resolveSiteCrawlLimits({maxPages: 5_000, maxFetchRetries: 0})
+    const some = resolveSiteCrawlLimits({maxPages: 5_000, maxFetchRetries: 2})
+    const many = resolveSiteCrawlLimits({maxPages: 5_000, maxFetchRetries: 5})
+    expect(some.maxFetches).toBeGreaterThan(none.maxFetches)
+    expect(many.maxFetches).toBeGreaterThan(some.maxFetches)
+    // Worst case is every page redirecting and exhausting its retries.
+    expect(some.maxFetches).toBeGreaterThanOrEqual(5_000 * 2 * (1 + 2))
+  })
+
+  test('the duration budget covers the pacing the caller asked for', () => {
+    // requestDelayMs is time the crawl is REQUIRED to spend not fetching, so
+    // ignoring it made the politeness knob cause the truncation.
+    const paced = resolveSiteCrawlLimits({maxPages: 5_000, requestDelayMs: 1_000})
+    expect(paced.maxDurationMs).toBeGreaterThanOrEqual(5_000 * 1_000)
+    expect(paced.maxDurationMs).toBeGreaterThan(resolveSiteCrawlLimits({maxPages: 5_000}).maxDurationMs)
+  })
+
   test('a stated budget is never raised or lowered by the derivation', () => {
     const limits = resolveSiteCrawlLimits({maxPages: 5_000, maxBytes: 1_000, maxDurationMs: 25, maxFetches: 7})
     expect(limits.maxBytes).toBe(1_000)
@@ -140,11 +207,16 @@ describe('crawl budget coherence', () => {
     expect(limits.maxFetches).toBe(7)
   })
 
-  test('asking for nothing still gets the documented flat defaults', () => {
-    const limits = resolveSiteCrawlLimits({})
-    expect(limits.maxPages).toBe(DEFAULT_SITE_CRAWL_LIMITS.maxPages)
-    expect(limits.maxBytes).toBe(DEFAULT_SITE_CRAWL_LIMITS.maxBytes)
-    expect(limits.maxDurationMs).toBe(DEFAULT_SITE_CRAWL_LIMITS.maxDurationMs)
-    expect(limits.maxFetches).toBe(DEFAULT_SITE_CRAWL_LIMITS.maxFetches)
+  test('the default path scales like any other page count', () => {
+    // Keying the derivation off whether `maxPages` was PRESENT made the default
+    // path the one case the fix did not reach, and an earlier version of this
+    // test asserted that as if it were the guarantee. `runSiteCrawl(url)` passes
+    // `{}` and resolves to the documented 1,000 pages, so it must be budgeted
+    // for 1,000 pages.
+    const implicit = resolveSiteCrawlLimits({})
+    const explicit = resolveSiteCrawlLimits({maxPages: DEFAULT_SITE_CRAWL_LIMITS.maxPages})
+    expect(implicit).toEqual(explicit)
+    expect(implicit.maxPages).toBe(DEFAULT_SITE_CRAWL_LIMITS.maxPages)
+    expect(implicit.maxBytes).toBeGreaterThan(DEFAULT_SITE_CRAWL_LIMITS.maxBytes)
   })
 })

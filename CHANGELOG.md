@@ -1,11 +1,12 @@
 # Changelog
 
-## 6.1.0 (2026-08-26)
+## 7.0.0 (2026-08-26)
 
 ### Fixed
 
+- **BREAKING: a page budget was not a page budget.** `maxPages` and the fetch-side budgets each resolved against an independent flat default, so the smaller silently won. Asking for 1,000 pages of a site serving ~745 KB each returned 140, because the 100 MB byte default ran out first, with no error, no warning, and a `partial` flag naming the wrong budget. `maxFetches`, `maxDurationMs` and `maxBytes` now derive from the resolved page count. The flat `DEFAULT_SITE_CRAWL_LIMITS` are the FLOOR, not the answer: a derived budget may raise a ceiling and may never lower one, and a budget the caller states explicitly is honoured exactly.
+- **BREAKING: this changes a default crawl.** The derivation keys off the RESOLVED page count, not off whether the caller spelled `maxPages` out, so `runSiteCrawl(url)` with no options is budgeted for the 1,000 pages it already documented as its default. It previously kept the flat 100 MB and truncated at ~140 pages on a media-heavy site, so the default path was the one case the fix did not reach. A default crawl of a large site now returns more pages, reads more bytes, and takes longer than 6.0.0 did. Pass `maxBytes` or `maxPages` explicitly to pin the old behaviour. Stored crawls are not comparable across this boundary.
 - **A soft stop hid the hard stop that actually ended the crawl.** `CrawlBudget.stop()` was first-write-wins across a single field, so once a soft reason latched (`max-query-variants`, `max-depth`, `max-links-per-page`) a later hard reason could not replace it. The fetch loop continues while the reason is not a hard stop, so the crawler kept issuing real requests at the audited origin and discarding every response until the frontier drained, then reported the soft reason and sent anyone diagnosing it to the wrong budget. Measured against a fixture origin with a 1,000,000-byte budget: 4,197,578 bytes read across 85 requests, reported as `max-query-variants`. After the fix the same crawl reads 1,234,598 bytes across 25 requests and reports `max-bytes`. Hard and soft reasons now latch separately and the getter prefers hard; first-write-wins still applies within a class, never across them.
-- **The fetch budgets had no relationship to the page budget.** `maxPages` and `maxBytes` each resolved against an independent flat default, so the smaller silently won. Asking for 1,000 pages of a site serving ~745 KB each returned 140, because the 100 MB byte default ran out first, with no error, no warning, and a `partial` flag naming the wrong budget. `maxFetches`, `maxDurationMs` and `maxBytes` now derive from `maxPages` when the caller has not set them explicitly.
 
 ### Added
 
@@ -13,11 +14,10 @@
 
 ### Changed
 
-- **Crawl engine `2.0.0` to `2.1.0`.** A minor bump: the report shape is unchanged, so `CRAWL_SCHEMA_VERSION` stays at `2.0`, but crawl semantics changed. The same options can now produce a larger crawl than 6.0.0 did, because a page budget that used to be cut short by an unrelated flat byte or duration default is now honoured. A persisted checkpoint taken before this version was produced under different budgets and page counts are not comparable across the boundary.
-
-### Compatibility
-
-- Raising unset ceilings only. A budget the caller states explicitly is honoured exactly and is never scaled up or down, and a call that sets no `maxPages` still gets the documented flat `DEFAULT_SITE_CRAWL_LIMITS`. A caller that passes `maxPages` and relied on a flat `maxBytes` to cut the crawl short will now crawl further, fetch more, and take longer; pass `maxBytes` explicitly to pin the old ceiling.
+- **Crawl engine `2.0.0` to `2.1.0`.** The report shape is unchanged, so `CRAWL_SCHEMA_VERSION` stays at `2.0`, but that constant exists so persisted checkpoints can detect a change in crawl semantics, and the same options now produce a different crawl.
+- **A derived budget can no longer overflow.** `maxPages: Number.MAX_VALUE` derived `Infinity` for every fetch-side budget. `JSON.stringify` writes `Infinity` as `null`, so a report could state that a crawl ran under no byte budget at all, and a duration past 2^31-1 ms makes `setTimeout` fire immediately, turning the longest possible budget into none. Every resolved limit is now clamped to a safe integer, and `maxDurationMs` to the `setTimeout` ceiling.
+- **The fetch budget covers retries, and the duration budget covers pacing.** Both were derived from the page count alone. A retry is a real request against `maxFetches`, so one recoverable `429` per page exhausted a 5,000-page budget at ~3,700 pages; and `requestDelayMs` is time the crawl is required to spend NOT fetching, so 5,000 politely-paced pages were given 2,000s for work that cannot finish in under 5,000s. Pacing the crawler is a politeness knob, and it was causing the truncation. Fetch scaling is now `pages x 2 requests x (1 + maxFetchRetries)`, and duration scaling adds `requestDelayMs` per page.
+- **`SCALED_REQUESTS_PER_PAGE` replaces `SCALED_FETCHES_PER_PAGE`, at 2 rather than 1.5.** A page is not one request: a site that redirects `/p` to `/p/` spends two before the body is read, `maxFetchRetries` can add more, and robots/sitemap/llms probes come off the same budget. A page is not one request: a site that redirects `/p` to `/p/` spends two before the body is read. At 1.5 a 10,000-page request derived 15,000 fetches where ~24,400 were needed, so the crawl stopped at ~74% and blamed a budget the caller never set: the same defect this release removes, moved from bytes to fetches. The retry multiplier is applied separately so it tracks the caller's own `maxFetchRetries` instead of being frozen into one constant.
 
 ## 6.0.0 (2026-08-16)
 
