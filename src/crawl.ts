@@ -138,16 +138,72 @@ export function normalizeCrawlUrl(rawUrl: string, baseUrl?: string): string {
   return parsed.toString()
 }
 
-function defaults(options: SiteCrawlOptions): SiteCrawlLimits {
+/**
+ * Bytes of decompressed HTML to allow per page when scaling an unset byte
+ * budget. Deliberately generous: media-heavy marketing sites routinely serve
+ * ~750 KB, and the cost of over-provisioning is nothing (the budget is a
+ * ceiling, not an allocation) while the cost of under-provisioning is a
+ * silently truncated crawl.
+ */
+const SCALED_BYTES_PER_PAGE = 1_500_000
+/** Fetches per page when scaling: redirects and dead-link probes cost extra. */
+const SCALED_FETCHES_PER_PAGE = 1.5
+/** Pages per second at the default concurrency, halved for slow origins. */
+const SCALED_PAGES_PER_SECOND = 2.5
+
+/**
+ * Resolve the budgets a crawl will actually run under.
+ *
+ * Exported because the limits are DERIVED, not the options passed in: a caller
+ * that needs to know what it is about to spend (or to report which budget
+ * stopped a run) has to be able to ask, rather than recompute the derivation
+ * and drift from it.
+ */
+export function resolveSiteCrawlLimits(options: SiteCrawlOptions): SiteCrawlLimits {
   const integer = (value: number | undefined, fallback: number, minimum = 1): number => (
     Number.isFinite(value) ? Math.max(minimum, Math.floor(value!)) : fallback
   )
+  const maxPages = integer(options.maxPages, DEFAULT_SITE_CRAWL_LIMITS.maxPages)
+
+  /**
+   * A caller who asks for N pages should get N pages.
+   *
+   * Every limit used to resolve independently against a flat default, so
+   * `maxPages` and `maxBytes` were set by different people with no relationship
+   * between them and the smaller silently won. Asking for 1,000 pages of a site
+   * serving ~745 KB each returned 140, because the 100 MB byte default ran out
+   * first, with no error, no warning, and a `partial` flag that named the
+   * wrong budget.
+   *
+   * So the fetch-side budgets now SCALE to the page budget when the caller has
+   * not set them, and the defaults apply only when nothing was asked for.
+   * A caller who sets a budget explicitly still gets exactly what they set:
+   * this raises unset ceilings, it never lowers a stated one.
+   */
+  const scaled = (explicit: number | undefined, derived: number, flat: number): number => (
+    Number.isFinite(explicit)
+      ? Math.max(1, Math.floor(explicit!))
+      : Number.isFinite(options.maxPages) ? Math.max(flat, Math.ceil(derived)) : flat
+  )
+
   return {
-    maxPages: integer(options.maxPages, DEFAULT_SITE_CRAWL_LIMITS.maxPages),
+    maxPages,
     maxEdges: integer(options.maxEdges, DEFAULT_SITE_CRAWL_LIMITS.maxEdges),
-    maxFetches: integer(options.maxFetches, DEFAULT_SITE_CRAWL_LIMITS.maxFetches),
-    maxDurationMs: integer(options.maxDurationMs, DEFAULT_SITE_CRAWL_LIMITS.maxDurationMs),
-    maxBytes: integer(options.maxBytes, DEFAULT_SITE_CRAWL_LIMITS.maxBytes),
+    maxFetches: scaled(
+      options.maxFetches,
+      maxPages * SCALED_FETCHES_PER_PAGE,
+      DEFAULT_SITE_CRAWL_LIMITS.maxFetches,
+    ),
+    maxDurationMs: scaled(
+      options.maxDurationMs,
+      (maxPages / SCALED_PAGES_PER_SECOND) * 1_000,
+      DEFAULT_SITE_CRAWL_LIMITS.maxDurationMs,
+    ),
+    maxBytes: scaled(
+      options.maxBytes,
+      maxPages * SCALED_BYTES_PER_PAGE,
+      DEFAULT_SITE_CRAWL_LIMITS.maxBytes,
+    ),
     maxPageBytes: integer(options.maxPageBytes, DEFAULT_SITE_CRAWL_LIMITS.maxPageBytes),
     maxDepth: integer(options.maxDepth, DEFAULT_SITE_CRAWL_LIMITS.maxDepth, 0),
     maxLinksPerPage: integer(options.maxLinksPerPage, DEFAULT_SITE_CRAWL_LIMITS.maxLinksPerPage),
@@ -164,9 +220,36 @@ class CrawlBudget implements FetchBudget {
   readonly startedAt = Date.now()
   fetchesStarted = 0
   bytesRead = 0
-  terminationReason: CrawlTerminationReason | null = null
+
+  /**
+   * Hard and soft stops are latched SEPARATELY, and a hard one always wins.
+   *
+   * They answer different questions. A soft stop means "stop admitting URLs":
+   * the frontier is full, the depth is reached, this many query variants is
+   * enough. A hard stop means "stop fetching, now": the bytes, the clock or
+   * the fetch count is spent.
+   *
+   * Sharing one first-write-wins field conflated them, and the failure was not
+   * cosmetic. Seeding a large sitemap latches a soft `max-query-variants`
+   * early; when the byte budget is later exhausted the hard stop is discarded,
+   * `isHardFetchStop()` reads the soft reason and answers false, and
+   * `drainFrontier()` keeps issuing real requests at the audited site and
+   * throwing every response away until the duration cap ends the run.
+   *
+   * That means the crawler was at its LEAST polite toward the site being
+   * audited exactly when it had already given up on collecting anything, and
+   * the run then reported the soft reason, sending anyone diagnosing it to the
+   * wrong budget entirely.
+   */
+  private hardStop: CrawlTerminationReason | null = null
+  private softStop: CrawlTerminationReason | null = null
 
   constructor(readonly limits: SiteCrawlLimits) {}
+
+  /** The reason to report: a hard stop if one occurred, else the soft one. */
+  get terminationReason(): CrawlTerminationReason | null {
+    return this.hardStop ?? this.softStop
+  }
 
   /** Milliseconds left on the crawl's own deadline; negative once it is spent. */
   remainingMs(): number {
@@ -202,7 +285,13 @@ class CrawlBudget implements FetchBudget {
   }
 
   stop(reason: CrawlTerminationReason): void {
-    if (!this.terminationReason) this.terminationReason = reason
+    // First-write-wins WITHIN a class, never across them: a later hard stop
+    // must be able to override an earlier soft one.
+    if (isHardFetchStop(reason)) {
+      if (!this.hardStop) this.hardStop = reason
+      return
+    }
+    if (!this.softStop) this.softStop = reason
   }
 
   private exhaustedError(): AeoAuditError {
@@ -827,7 +916,7 @@ function pageSort(left: CrawlPageObservation, right: CrawlPageObservation): numb
 export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {}): Promise<SiteCrawlReport> {
   throwIfAborted(options.signal)
   assertValidFactorIds(options.factors ?? [])
-  const limits = defaults(options)
+  const limits = resolveSiteCrawlLimits(options)
   const mode = options.summaryOnly ? 'summary' : options.mode ?? 'full'
   const startedAt = new Date().toISOString()
   const budget = new CrawlBudget(limits)
