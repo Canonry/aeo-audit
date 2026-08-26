@@ -183,7 +183,7 @@ export function resolveSiteCrawlLimits(options: SiteCrawlOptions): SiteCrawlLimi
   const scaled = (explicit: number | undefined, derived: number, flat: number): number => (
     Number.isFinite(explicit)
       ? Math.max(1, Math.floor(explicit!))
-      : Number.isFinite(options.maxPages) ? Math.ceil(derived) : flat
+      : Number.isFinite(options.maxPages) ? Math.max(flat, Math.ceil(derived)) : flat
   )
 
   return {

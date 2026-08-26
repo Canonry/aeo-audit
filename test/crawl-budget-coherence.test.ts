@@ -118,6 +118,21 @@ describe('crawl budget coherence', () => {
     expect(more.maxFetches).toBeGreaterThan(asked.maxFetches)
   })
 
+  test('a small page count never DROPS a budget below the flat default', () => {
+    // The derivation shipped without its floor and silently inverted: at
+    // maxPages 1 it produced maxFetches 2 and maxDurationMs 400, so the crawler
+    // could not afford its own auxiliary fetches (llms.txt, robots, sitemap)
+    // and a 400ms cap made the whole crawl a race it lost on a slower runtime.
+    // Scaling is a CEILING RAISE. It may never lower a budget the caller did
+    // not ask to lower.
+    for (const maxPages of [1, 2, 5, 50, 67, 300, 1_000]) {
+      const limits = resolveSiteCrawlLimits({maxPages})
+      expect(limits.maxFetches).toBeGreaterThanOrEqual(DEFAULT_SITE_CRAWL_LIMITS.maxFetches)
+      expect(limits.maxDurationMs).toBeGreaterThanOrEqual(DEFAULT_SITE_CRAWL_LIMITS.maxDurationMs)
+      expect(limits.maxBytes).toBeGreaterThanOrEqual(DEFAULT_SITE_CRAWL_LIMITS.maxBytes)
+    }
+  })
+
   test('a stated budget is never raised or lowered by the derivation', () => {
     const limits = resolveSiteCrawlLimits({maxPages: 5_000, maxBytes: 1_000, maxDurationMs: 25, maxFetches: 7})
     expect(limits.maxBytes).toBe(1_000)
