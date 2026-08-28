@@ -639,7 +639,7 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
 /** A report-shape version owned by the crawl engine, independent from `SCHEMA_VERSION`. */
 export const CRAWL_SCHEMA_VERSION = '2.0'
 /** Version identifiers let persisted checkpoints detect changes in crawl semantics. */
-export const CRAWL_ENGINE_VERSION = '2.1.0'
+export const CRAWL_ENGINE_VERSION = '2.2.0'
 export const CRAWL_URL_NORMALIZATION_VERSION = '1.1.0'
 export const CRAWL_INDEXABILITY_RULESET_VERSION = '1.0.0'
 export const CRAWL_LINK_SCORE_ALGORITHM_VERSION = 'pagerank-1.0.0'

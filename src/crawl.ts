@@ -162,6 +162,15 @@ const SCALED_REQUESTS_PER_PAGE = 2
 const SCALED_PAGES_PER_SECOND = 2.5
 
 /**
+ * Internal-link edges to allow per page when scaling an unset edge budget.
+ * Measured on a production property-portfolio site: 41.8 recorded edges per
+ * page, dominated by navigation and footer templates that repeat on every
+ * page. 50 gives honest headroom; the flat default stays the floor, so a
+ * small crawl keeps the budget it always had.
+ */
+const SCALED_EDGES_PER_PAGE = 50
+
+/**
  * Ceilings every resolved budget is clamped to.
  *
  * `setTimeout` truncates a delay past 2^31-1 ms and fires it immediately, so a
@@ -224,7 +233,15 @@ export function resolveSiteCrawlLimits(options: SiteCrawlOptions): SiteCrawlLimi
 
   return {
     maxPages,
-    maxEdges: integer(options.maxEdges, DEFAULT_SITE_CRAWL_LIMITS.maxEdges),
+    maxEdges: scaled(
+      options.maxEdges,
+      // Left flat in 7.0.0 while the other fetch-side budgets learned to
+      // scale, which recreated the original defect one budget over: a
+      // 5,000-page request stopped admitting pages near 2,400 when the
+      // 100,000-edge default ran out at ~42 template edges per page.
+      maxPages * SCALED_EDGES_PER_PAGE,
+      DEFAULT_SITE_CRAWL_LIMITS.maxEdges,
+    ),
     maxFetches: scaled(
       options.maxFetches,
       // A retry is a real request against this budget, so the ceiling has to

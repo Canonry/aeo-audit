@@ -6,3 +6,5 @@ dist/
 .env.*
 coverage/
 .aeo-audit-history/
+.claude/
+.context/
