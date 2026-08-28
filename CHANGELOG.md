@@ -1,5 +1,15 @@
 # Changelog
 
+## 7.1.0 (2026-08-28)
+
+### Fixed
+
+- **The edge budget now scales with the page count.** 7.0.0 derived `maxFetches`, `maxDurationMs` and `maxBytes` from `maxPages` but left `maxEdges` at its flat 100,000 default, which recreated the original defect one budget over: at the ~42 recorded edges per page measured on a production portfolio site (navigation and footer templates repeat on every page), a 5,000-page request stopped admitting pages near 2,400 with termination `max-edges`. An unset `maxEdges` now derives as `maxPages x 50`, floored at the flat default and clamped to a safe integer; an explicit `maxEdges` is honoured exactly, and a call with no `maxPages` keeps the documented flat default.
+
+### Changed
+
+- **Crawl engine `2.1.0` to `2.2.0`.** Report shape unchanged; the same options can admit more pages on link-dense sites than 7.0.0 did.
+
 ## 7.0.0 (2026-08-26)
 
 ### Fixed

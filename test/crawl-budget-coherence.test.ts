@@ -200,6 +200,20 @@ describe('crawl budget coherence', () => {
     expect(paced.maxDurationMs).toBeGreaterThan(resolveSiteCrawlLimits({maxPages: 5_000}).maxDurationMs)
   })
 
+  test('the edge budget scales with the page count and keeps its floor', () => {
+    // 7.0.0 scaled fetches, duration and bytes but left maxEdges flat, which
+    // recreated the original defect one budget over: at the ~42 template edges
+    // per page measured on a production portfolio site, the flat 100,000 runs
+    // out near page 2,400 of a 5,000-page request and admission stops with
+    // termination 'max-edges'.
+    const asked = resolveSiteCrawlLimits({maxPages: 5_000})
+    expect(asked.maxEdges).toBeGreaterThanOrEqual(5_000 * 42)
+    expect(resolveSiteCrawlLimits({maxPages: 100}).maxEdges).toBe(DEFAULT_SITE_CRAWL_LIMITS.maxEdges)
+    expect(resolveSiteCrawlLimits({}).maxEdges).toBe(DEFAULT_SITE_CRAWL_LIMITS.maxEdges)
+    expect(resolveSiteCrawlLimits({maxPages: 5_000, maxEdges: 1_234}).maxEdges).toBe(1_234)
+    expect(resolveSiteCrawlLimits({maxPages: Number.MAX_VALUE}).maxEdges).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER)
+  })
+
   test('a stated budget is never raised or lowered by the derivation', () => {
     const limits = resolveSiteCrawlLimits({maxPages: 5_000, maxBytes: 1_000, maxDurationMs: 25, maxFetches: 7})
     expect(limits.maxBytes).toBe(1_000)
