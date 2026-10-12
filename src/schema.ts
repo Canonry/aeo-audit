@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
  * Lives in its own module (not `index.ts`) so report builders can read it without
  * importing the audit entry points — which test suites routinely mock.
  */
-export const SCHEMA_VERSION = '3.4'
+export const SCHEMA_VERSION = '3.5'
 
 let cachedEngineVersion: string | null = null
 

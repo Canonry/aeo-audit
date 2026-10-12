@@ -40,6 +40,7 @@ function extractSchemaContacts(structuredData: StructuredDataEntry[]): { emails:
 export function analyzeEntityConsistency(context: AuditContext): AnalysisResult {
   const findings: AnalysisResult['findings'] = []
   const recommendations: string[] = []
+  const advisoryRecommendations: string[] = []
   let score = 0
 
   const schemaNames = getStructuredDataNames(context.structuredData)
@@ -83,7 +84,7 @@ export function analyzeEntityConsistency(context: AuditContext): AnalysisResult 
         code: 'entity-consistency.title.short',
         message: `Page title is short (${rawTitle.length} characters; review threshold: 15): "${rawTitle}". Check whether it clearly identifies this page.`,
       })
-      recommendations.push('Review the short title for a clear, page-specific description. Expand it only if useful context is missing; short titles can be appropriate.')
+      advisoryRecommendations.push('Review the short title for a clear, page-specific description. Expand it only if useful context is missing; short titles can be appropriate.')
     } else {
       findings.push({ type: 'found', code: 'entity-consistency.title.ok', message: `Page title is ${rawTitle.length} characters (within the 15–70 character review range).` })
     }
@@ -128,6 +129,9 @@ export function analyzeEntityConsistency(context: AuditContext): AnalysisResult 
   return {
     score: clampScore(score),
     findings,
-    recommendations,
+    // Single-page renderers also use the first recommendation, so keep
+    // optional advice after any naming, canonical or contact fixes here.
+    recommendations: [...recommendations, ...advisoryRecommendations],
+    ...(advisoryRecommendations.length ? { advisoryRecommendations } : {}),
   }
 }

@@ -149,6 +149,7 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
       score: result.score,
       findings: result.findings,
       recommendations: result.recommendations,
+      ...(result.advisoryRecommendations === undefined ? {} : { advisoryRecommendations: result.advisoryRecommendations }),
       ...(applicable === undefined ? {} : { applicable }),
     }
   }))

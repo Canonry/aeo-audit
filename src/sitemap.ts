@@ -411,6 +411,7 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
       name: string
       scored: { url: string; score: number; applicable: boolean }[]
       recommendations: Map<string, string[]>
+      actionableRecommendations: Set<string>
     }
   >()
 
@@ -418,12 +419,16 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
     for (const factor of page.factors) {
       let entry = factorScores.get(factor.id)
       if (!entry) {
-        entry = { name: factor.name, scored: [], recommendations: new Map() }
+        entry = { name: factor.name, scored: [], recommendations: new Map(), actionableRecommendations: new Set() }
         factorScores.set(factor.id, entry)
       }
       entry.scored.push({ url: page.finalUrl, score: factor.score, applicable: factorApplies(factor) })
 
+      const advisories = new Set(factor.advisoryRecommendations ?? [])
       for (const rec of factor.recommendations) {
+        // A recommendation treated as actionable anywhere stays actionable
+        // across the site, including when an older report lacks this metadata.
+        if (!advisories.has(rec)) entry.actionableRecommendations.add(rec)
         const urls = entry.recommendations.get(rec)
         if (urls) {
           urls.push(page.finalUrl)
@@ -477,9 +482,12 @@ function buildCrossCuttingIssues(successPages: AuditReport[]): CrossCuttingIssue
         ? 'limited'
         : 'opportunity'
 
-    // Sort recommendations by how many URLs they affect (desc), then alphabetically for stability
+    // Actionable fixes precede optional advice, then retain prevalence and
+    // alphabetical ordering within each tier. A widespread heuristic must
+    // not hide a concrete fix in the compact agent recommendation.
     const sortedIssues = [...entry.recommendations.entries()]
-      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+      .sort((a, b) => Number(entry.actionableRecommendations.has(b[0])) - Number(entry.actionableRecommendations.has(a[0]))
+        || b[1].length - a[1].length || a[0].localeCompare(b[0]))
       .map(([recommendation, affectedUrls]) => ({ recommendation, affectedUrls }))
 
     issues.push({

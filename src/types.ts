@@ -21,6 +21,12 @@ export interface AnalysisResult {
   findings: AuditFinding[]
   recommendations: string[]
   /**
+   * Optional review advice, also included in `recommendations`. Aggregation
+   * ranks these after other recommendations regardless of prevalence. Absent
+   * on older reports; untagged recommendations retain their existing priority.
+   */
+  advisoryRecommendations?: string[]
+  /**
    * Whether this factor is one this page was ever meant to satisfy.
    *
    * A product page correctly has no FAQ, so its 0 is not a failure and must not

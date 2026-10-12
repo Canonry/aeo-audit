@@ -73,6 +73,52 @@ describe('cross-page metadata in a full site crawl', () => {
     expect(summaryEvent.summary.siteIssues).toEqual(report.summary.siteIssues)
   })
 
+  it.each(['full', 'summary'] as const)('preserves final graph depths when replaying duplicate updates in %s mode', async (mode) => {
+    const paths = ['/', '/one', '/two', '/orphan']
+    fakeSite((url) => {
+      if (url.pathname === '/crawl-sitemap.xml') {
+        return new Response(`<urlset>${paths.map((path) => `<url><loc>${origin}${path}</loc></url>`).join('')}</urlset>`, {
+          headers: { 'content-type': 'application/xml' },
+        })
+      }
+      const body = url.pathname === '/' ? '<a href="/one">One</a>'
+        : url.pathname === '/one' ? '<a href="/two">Two</a>' : ''
+      return html(body)
+    })
+    const events: CrawlEvent[] = []
+    const report = await runSiteCrawl(origin, {
+      allowPrivateHost: 'example.test', factors, mode,
+      sitemapUrl: `${origin}/crawl-sitemap.xml`,
+      onEvent: (event) => { events.push(event) },
+    })
+    expect(report.summary.complete).toBe(true)
+    const finalPages = new Map<string, CrawlPageObservation>()
+    const persistedDepths = new Map<string, number | null>()
+    for (const event of events) {
+      // Replay the persistence contract: page upserts carry discovery depth;
+      // the terminal metrics replace it with shortest followable anchor depth.
+      if (event.type === 'pages') {
+        for (const page of event.rows) {
+          finalPages.set(page.key, page)
+          persistedDepths.set(page.key, page.depth)
+        }
+      } else if (event.type === 'metrics') {
+        for (const row of event.rows) persistedDepths.set(row.key, row.metrics.shortestFollowableAnchorDepth)
+      }
+    }
+    const expectedDepths = new Map<string, number | null>([
+      [`${origin}/`, 0], [`${origin}/one`, 1], [`${origin}/two`, 2], [`${origin}/orphan`, null],
+    ])
+    expect(finalPages.size).toBe(expectedDepths.size)
+    for (const page of finalPages.values()) {
+      expect(page.depth).toBe(0)
+      expect(persistedDepths.get(page.key), page.requestedUrl).toBe(expectedDepths.get(page.requestedUrl))
+      expect(page.metrics.shortestFollowableAnchorDepth).toBe(expectedDepths.get(page.requestedUrl))
+      expect(page.audit?.factors.flatMap((factor) => factor.findings)
+        .filter((finding) => finding.code.startsWith('site.duplicate-'))).toHaveLength(2)
+    }
+  })
+
   it('excludes noindex, canonical aliases, redirects, failed responses and non-HTML pages', async () => {
     fakeSite((url) => {
       if (url.pathname === '/') return html(['/a', '/noindex', '/alias', '/redirect', '/failed', '/text'].map((path) => `<a href="${path}">Page</a>`).join(''))

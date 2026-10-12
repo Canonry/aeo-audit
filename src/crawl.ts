@@ -1775,10 +1775,6 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   const pageRows = [...pages.values()].sort(pageSort)
   const edgeRows = [...edges.values()].sort(edgeSort)
   deriveMetrics(pageRows, edgeRows, finalRootUrl)
-  const metricRows = pageRows.map((page) => ({ key: page.key, metrics: page.metrics }))
-  for (let index = 0; index < metricRows.length; index += 250) {
-    await emit('metrics', { rows: metricRows.slice(index, index + 250) })
-  }
   const complete = budget.terminationReason === null && frontier.length === 0
   const deadLinks = deriveDeadLinks(options.checkDeadLinks === true, complete, edgeRows, pageByUrl)
   const metadataPages = pageRows.filter((page) => page.state === 'html'
@@ -1808,6 +1804,12 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   // Re-publish only changed pages so retained page audits include these
   // observations too. Scores and metrics are unchanged.
   await flushPages()
+  // Metrics must follow every page upsert: consumers replace discovery depth
+  // with the final shortest followable anchor depth when applying this event.
+  const metricRows = pageRows.map((page) => ({ key: page.key, metrics: page.metrics }))
+  for (let index = 0; index < metricRows.length; index += 250) {
+    await emit('metrics', { rows: metricRows.slice(index, index + 250) })
+  }
   const auditedPages = pageRows.filter((page) => page.audit !== null)
   const factorRollup = new Map<string, { id: string; name: string; count: number; total: number }>()
   for (const page of auditedPages) {

@@ -89,11 +89,15 @@ The field is populated in both full and summary mode; it is optional in the type
 
 After comparison, affected pages are emitted again in ordinary `pages` batches with informational findings and review recommendations in their existing factors (`entity-consistency` for titles, `technical-seo` for descriptions). Consumers must upsert later page observations by key, rather than keeping only the first event. If a caller excluded that factor, the group remains in `summary.siteIssues`; the crawl does not invent a scored factor. All scores remain unchanged. Review the shared template, canonical relationships and page purpose before deciding whether to rewrite metadata.
 
+The duplicate annotation page updates precede the final `metrics` batches. Page records carry discovery depth, while terminal metrics carry shortest followable link depth; consumers that use one stored depth column must let the final metrics win.
+
 Sitemap audits expose the same groups in `report.siteIssues`, text/Markdown output and `--format agent`. Sitemap comparisons use successful audited pages; they do not have the crawl's indexability classification. This is separate from `deadLinks.findings`, which counts confirmed broken links only.
 
 ### Short titles
 
 The `entity-consistency.title.short` informational finding flags a nonempty title shorter than 15 characters. This threshold is a review heuristic, not a search-engine minimum and not a score penalty. A short title can accurately name its page. See [Google's title guidance](https://developers.google.com/search/docs/appearance/title-link) for descriptive, concise and page-specific titles.
+
+Report schema 3.5 adds optional `factors[].advisoryRecommendations`, a subset of the existing recommendation strings. Short-title advice is tagged this way and placed after actionable recommendations. Site-wide aggregation ranks actionable recommendations first, then uses prevalence and alphabetical ordering within each tier. If any page leaves a recommendation untagged, it retains the existing actionable priority; older reports need no new field. An otherwise healthy page still exposes its title advice, and full findings and scores are unchanged.
 
 ### Link placement
 

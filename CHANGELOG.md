@@ -9,6 +9,11 @@
 - Surface cross-page issues in sitemap text, Markdown and agent output, including when factor scores pass.
 - Flag titles shorter than 15 characters with `entity-consistency.title.short`. This is an advisory review threshold with no score penalty; concise titles can be appropriate.
 
+### Fixed
+
+- Emit duplicate annotation page updates before the final graph metrics, so checkpoint consumers retain calculated link depth instead of replacing it with sitemap discovery depth.
+- Keep actionable recommendations ahead of optional short-title advice in single-page and aggregate reports. Report schema 3.5 adds optional `advisoryRecommendations` metadata; advice remains visible when no competing fix exists, and untagged historical recommendations retain their priority.
+
 ## 7.2.0 (2026-09-07)
 
 ### Fixed
