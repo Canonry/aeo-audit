@@ -4,7 +4,7 @@ description: Run AEO audits, preview branch audits, changed-page sitemap audits,
 homepage: https://canonry.ai
 repository: https://github.com/Canonry/aeo-audit
 allowed-tools:
-  - Bash(npx @canonry/aeo-audit@4 *)
+  - Bash(npx @canonry/aeo-audit@7.3.0 *)
   - Read
   - Glob
   - Grep
@@ -24,14 +24,14 @@ One skill for audit, preview-branch review, fixes, schema, llms.txt, and monitor
 Always use the published package:
 
 ```bash
-npx @canonry/aeo-audit@4 "<url>" [flags] --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" [flags] --format json
 ```
 
 ## Argument Safety
 
 **Never interpolate user input directly into shell commands.** Always:
 1. Validate that the target is either a URL matching `https://` / `http://` or a local filesystem path (static-output mode), and that it contains no shell metacharacters.
-2. Quote every argument individually (e.g., `npx @canonry/aeo-audit@4 "https://example.com" --format json`).
+2. Quote every argument individually (e.g., `npx @canonry/aeo-audit@7.3.0 "https://example.com" --format json`).
 3. Pass flags as separate, literal tokens — never construct command strings from raw user text.
 4. Reject arguments containing characters like `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>`, or newlines.
 
@@ -84,7 +84,7 @@ Use for broad requests such as "audit this site" or "why am I not being cited?"
 
 1. Run:
    ```bash
-   npx @canonry/aeo-audit@4 "<url>" [flags] --format json
+   npx @canonry/aeo-audit@7.3.0 "<url>" [flags] --format json
    ```
 2. Return:
    - Overall score
@@ -100,19 +100,22 @@ Pass `--require-meta` (single or sitemap mode) to force exit `1` whenever any au
 
 ### Sitemap Mode
 
+Read `siteIssues` as well as the score-ranked fixes. Duplicate titles and descriptions carry stable codes and affected URLs, including when the overall score passes. Review shared templates and canonical relationships before editing. A title shorter than 15 characters is an advisory check, not a mandatory rewrite. On partial audits, the reported groups cover only observed pages.
+
 Use `--sitemap` to audit all pages discovered from the site's sitemap:
 
 ```bash
-npx @canonry/aeo-audit@4 "<url>" --sitemap --format json
-npx @canonry/aeo-audit@4 "<url>" --sitemap https://example.com/sitemap.xml --format json
-npx @canonry/aeo-audit@4 "<url>" --sitemap --limit 10 --format json
-npx @canonry/aeo-audit@4 "<url>" --sitemap --top-issues --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --sitemap --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --sitemap https://example.com/sitemap.xml --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --sitemap --limit 10 --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --sitemap --top-issues --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --sitemap --top-issues --format markdown
 ```
 
 Flags:
 - `--sitemap [url]` — auto-discover the sitemap (tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`) or provide an explicit URL
 - `--limit <n>` — cap pages audited (default 200, sampled across the site's URL templates rather than taken in sitemap order; `<priority>` orders instances within a template)
-- `--top-issues` — skip per-page output, show only cross-cutting patterns and critical defects
+- `--top-issues` — skip per-page output, show cross-cutting patterns, cross-page metadata issues and critical defects
 - `--rewrite-sitemap-origin` — rewrite every `<loc>`'s origin to the target URL's origin (preserving path/query) before crawling. Use when the sitemap hardcodes the prod/canonical domain but you want to audit a staging host or local dev server.
 - `--changed` — filter sitemap URLs to static routes changed since `--base`; use for PR work
 - `--base <ref>` — git base for `--changed` (default `main`)
@@ -139,7 +142,7 @@ Use this path for PR review, local production builds, preview deployments, and b
 For a local preview server whose sitemap emits production canonicals:
 
 ```bash
-npx @canonry/aeo-audit@4 "http://localhost:3000" \
+npx @canonry/aeo-audit@7.3.0 "http://localhost:3000" \
   --sitemap \
   --rewrite-sitemap-origin \
   --allow-local \
@@ -160,9 +163,9 @@ Guidance:
 For branch-vs-production regression review, produce comparable reports first, then run `compare`:
 
 ```bash
-npx @canonry/aeo-audit@4 "https://production.example" --sitemap --format json > baseline.json
-npx @canonry/aeo-audit@4 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json > current.json
-npx @canonry/aeo-audit@4 compare --baseline baseline.json --current current.json --format markdown
+npx @canonry/aeo-audit@7.3.0 "https://production.example" --sitemap --format json > baseline.json
+npx @canonry/aeo-audit@7.3.0 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json > current.json
+npx @canonry/aeo-audit@7.3.0 compare --baseline baseline.json --current current.json --format markdown
 ```
 
 Report:
@@ -187,8 +190,8 @@ When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitem
 By default the audit blocks any URL that resolves to a private, loopback, or link-local address (SSRF protection). When the user wants to audit **their own** dev or staging server, pass `--allow-local` (alias `--allow-private`):
 
 ```bash
-npx @canonry/aeo-audit@4 "http://localhost:3000" --allow-local --format json
-npx @canonry/aeo-audit@4 "http://10.0.5.20" --allow-private --format json
+npx @canonry/aeo-audit@7.3.0 "http://localhost:3000" --allow-local --format json
+npx @canonry/aeo-audit@7.3.0 "http://10.0.5.20" --allow-private --format json
 ```
 
 - Pass the explicit `http://` scheme for local dev servers — a bare host defaults to `https://`.
@@ -196,7 +199,7 @@ npx @canonry/aeo-audit@4 "http://10.0.5.20" --allow-private --format json
 - To audit a whole local site whose sitemap hardcodes the prod domain, combine with sitemap origin rewriting:
 
 ```bash
-npx @canonry/aeo-audit@4 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json
+npx @canonry/aeo-audit@7.3.0 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json
 ```
 
 ### Static-Output Mode
@@ -205,11 +208,11 @@ When the user wants to audit **built HTML offline** (CI on a `next export` / `di
 
 ```bash
 # A directory of built HTML (aggregated like sitemap mode)
-npx @canonry/aeo-audit@4 "./out" --base-url https://example.com --format json
+npx @canonry/aeo-audit@7.3.0 "./out" --base-url https://example.com --format json
 # A single built file
-npx @canonry/aeo-audit@4 "./dist/index.html" --format json
+npx @canonry/aeo-audit@7.3.0 "./dist/index.html" --format json
 # Gate CI on missing meta descriptions across the build
-npx @canonry/aeo-audit@4 "./out" --require-meta --format json
+npx @canonry/aeo-audit@7.3.0 "./out" --require-meta --format json
 ```
 
 - A `.html`/`.htm` file → single-page report; a directory → aggregated report (`--limit`, `--top-issues`, `--factors`, `--include-geo`, `--include-agent-skills`, `--require-meta` apply).
@@ -223,13 +226,13 @@ When the user wants to **fail CI on an AEO regression** (a PR dropped the score,
 
 ```bash
 # 1. Produce the current report (any mode's --format json output works)
-npx @canonry/aeo-audit@4 "./out" --base-url https://example.com --format json > current.json
+npx @canonry/aeo-audit@7.3.0 "./out" --base-url https://example.com --format json > current.json
 # 2. Diff against a stored baseline — exit 1 if it regressed
-npx @canonry/aeo-audit@4 compare --baseline baseline.json --current current.json
+npx @canonry/aeo-audit@7.3.0 compare --baseline baseline.json --current current.json
 # Write a Markdown summary (for a PR comment) and tighten the overall gate
-npx @canonry/aeo-audit@4 compare --baseline baseline.json --current current.json --overall-tolerance 0 --md-out diff.md
+npx @canonry/aeo-audit@7.3.0 compare --baseline baseline.json --current current.json --overall-tolerance 0 --md-out diff.md
 # Committed/artifact baselines: hard-fail (exit 2) if factor set / engine major differ
-npx @canonry/aeo-audit@4 compare --baseline baseline.json --current current.json --strict-comparability
+npx @canonry/aeo-audit@7.3.0 compare --baseline baseline.json --current current.json --strict-comparability
 ```
 
 - **A regression is any of:** overall/aggregate drop > `--overall-tolerance` (default 2); a single page drop > `--page-tolerance` (default 5); a single factor drop > `--factor-tolerance` (default 8); a page that was auditing successfully now erroring; a new `severity:critical` defect (`--fail-on-new-critical`, default on); or a major report-schema change. Score/page/factor deltas only gate when the two runs are **comparable** (same factor set, no major engine change) — otherwise they're warnings, not failures.
@@ -242,8 +245,8 @@ npx @canonry/aeo-audit@4 compare --baseline baseline.json --current current.json
 Use `--lighthouse` when the user wants page speed, accessibility, or best-practices scoring alongside the AEO factors. It calls Google PageSpeed Insights (mobile strategy) and aggregates Performance + Accessibility + Best Practices into a single optional factor (weight 8).
 
 ```bash
-npx @canonry/aeo-audit@4 "<url>" --lighthouse --format json
-PAGESPEED_API_KEY=xxx npx @canonry/aeo-audit@4 "<url>" --lighthouse --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --lighthouse --format json
+PAGESPEED_API_KEY=xxx npx @canonry/aeo-audit@7.3.0 "<url>" --lighthouse --format json
 ```
 
 Constraints:
@@ -256,8 +259,8 @@ Constraints:
 Use `--detect-platform` when the user wants to know what stack a site is built on (e.g., "is this WordPress?", "what framework does competitor X use?", "is this site custom-built?"). This is much faster than a full audit because it skips analyzer scoring.
 
 ```bash
-npx @canonry/aeo-audit@4 "<url>" --detect-platform --format json
-npx @canonry/aeo-audit@4 "<url>" --detect-platform --min-confidence high --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --detect-platform --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --detect-platform --min-confidence high --format json
 ```
 
 Flags:
@@ -273,9 +276,9 @@ The report groups detections by category (CMS, site builder, e-commerce, framewo
 When the user wants to fingerprint many sites at once (competitor lists, customer cohorts), pass `--urls`:
 
 ```bash
-npx @canonry/aeo-audit@4 --detect-platform --urls urls.txt --format json
-npx @canonry/aeo-audit@4 --detect-platform --urls https://a.com,https://b.com --format json
-cat urls.txt | npx @canonry/aeo-audit@4 --detect-platform --urls - --format json
+npx @canonry/aeo-audit@7.3.0 --detect-platform --urls urls.txt --format json
+npx @canonry/aeo-audit@7.3.0 --detect-platform --urls https://a.com,https://b.com --format json
+cat urls.txt | npx @canonry/aeo-audit@7.3.0 --detect-platform --urls - --format json
 ```
 
 The batch report contains a `results` array; each entry has `status: 'success'` or `'error'`, plus the same shape as a single-URL report on success. Per-URL fetch errors do not abort the run. Exit code is `0` when at least one URL succeeded, `1` otherwise.
@@ -286,7 +289,7 @@ Use when the user wants code changes applied after the audit.
 
 1. Run:
    ```bash
-   npx @canonry/aeo-audit@4 "<url>" [flags] --format json
+   npx @canonry/aeo-audit@7.3.0 "<url>" [flags] --format json
    ```
 2. Find factors scoring below 70 (lowest first).
 3. Apply targeted fixes in the current codebase.
@@ -315,13 +318,14 @@ Validity issues like duplicate singleton `@type`s and JSON parse errors are **pe
 Site-wide (default):
 
 ```bash
-npx @canonry/aeo-audit@4 "<url>" --sitemap --top-issues --format json --factors structured-data,schema-completeness,schema-validity,entity-consistency
+npx @canonry/aeo-audit@7.3.0 "<url>" --sitemap --top-issues --format json
+npx @canonry/aeo-audit@7.3.0 "<url>" --sitemap --top-issues --format markdown --factors structured-data,schema-completeness,schema-validity,entity-consistency
 ```
 
 Single page:
 
 ```bash
-npx @canonry/aeo-audit@4 "<url>" --format json --factors structured-data,schema-completeness,schema-validity,entity-consistency
+npx @canonry/aeo-audit@7.3.0 "<url>" --format json --factors structured-data,schema-completeness,schema-validity,entity-consistency
 ```
 
 Report:
@@ -348,7 +352,7 @@ Use when the user wants `llms.txt` or `llms-full.txt` created or improved.
 If a URL is provided:
 1. Run:
    ```bash
-   npx @canonry/aeo-audit@4 "<url>" [flags] --format json --factors ai-access-files
+   npx @canonry/aeo-audit@7.3.0 "<url>" [flags] --format json --factors ai-access-files
    ```
 2. Inspect existing AI-readable files if present.
 3. Extract key content from the site.

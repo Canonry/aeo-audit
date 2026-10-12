@@ -127,6 +127,12 @@ A **Critical Defects** section lists binary, one-line-fix structural defects (an
 
 The optional in-process factors are honored per page: pass `--include-geo` and/or `--include-agent-skills` to add them to every audited page. `--lighthouse` is the exception: it cannot be combined with `--sitemap` because each PageSpeed Insights call takes 15-30s.
 
+Sitemap reports include a **Cross-page issues** section with duplicate titles and descriptions and their affected URLs, even at a passing score and with `--top-issues`. Agent output retains these as `siteIssues`, separately from the score-ranked `issues`. These groups describe observed pages, including on partial audits. They do not change scores or exit codes. A short-title finding (fewer than 15 characters) is also advisory; review whether the title clearly identifies the page.
+
+```bash
+npx @canonry/aeo-audit https://example.com --sitemap --top-issues --format markdown
+```
+
 ## Static-output mode
 
 Point the CLI at a filesystem path instead of a URL to audit built HTML directly: no network, ideal for CI on a `next export` / `dist` / `out` directory:
@@ -248,7 +254,7 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 | `--lighthouse` | Include the optional Lighthouse factor (Performance + Accessibility + Best Practices, mobile strategy) via Google PageSpeed Insights. Single-URL only; cannot combine with `--sitemap` or `--detect-platform`. Adds ~15-30s. Set `PAGESPEED_API_KEY` env var to lift anonymous rate limits. |
 | `--sitemap [url]` | Audit all pages from the sitemap. Auto-discovery tries `/sitemap.xml`, then `/sitemap-index.xml`, then `Sitemap:` directives in `/robots.txt`. Pass an explicit URL to override. |
 | `--limit <n>` | Max pages to audit in sitemap/static mode (default 200, sampled across URL templates, `<priority>` ordering within each) |
-| `--top-issues` | In sitemap mode, skip per-page output and show only the cross-cutting issues and critical defects |
+| `--top-issues` | In sitemap mode, skip per-page output and show cross-cutting issues, cross-page metadata issues, and critical defects |
 | `--changed` | With `--sitemap`, audit only sitemap URLs whose paths map to static routes changed since `--base` |
 | `--base <ref>` | Git base ref for `--changed` (default `main`) |
 | `--include-critical` | With `--changed`, also audit critical paths |
@@ -281,6 +287,8 @@ When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` t
 | `--format <type>` | stdout format for compare: `json` (default) or `markdown` |
 
 ## Exit codes
+
+Duplicate metadata and short-title review findings are informational and do not independently fail the audit. Inspect their stable codes even when the score passes.
 
 Exit code `0` for score ≥ 70, `1` for < 70 (CI-friendly). In sitemap and static-directory modes the exit code is based on the aggregate score. In `--detect-platform` mode the exit code is `0` if any platform is detected (or, in batch mode, if any URL succeeded), `1` otherwise. When `--require-meta` is passed, exit is forced to `1` if any audited page lacks `<meta name="description">`, regardless of the score-based rule.
 

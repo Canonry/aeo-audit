@@ -80,6 +80,13 @@ function coverageSuffix(coverage: AuditCoverage): string {
   return ` _(${coverage.confidence}: ${coverage.pagesAudited} of ${coverage.pagesDiscovered} auditable pages, ${coverage.coveragePct}%, covering ${coverage.templatesRepresented}/${coverage.templatesDiscovered} URL templates)_`
 }
 
+/** Keep untrusted page metadata literal within one Markdown report line. */
+function issueText(value: string): string {
+  return value.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/gu, ' ').trim()
+    .replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;')
+    .replace(/[\\`*_[\]]/gu, '\\$&')
+}
+
 export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly = false): string {
   const lines = []
 
@@ -153,6 +160,18 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
       }
       lines.push(``)
     }
+  }
+
+  if (report.siteIssues?.length) {
+    lines.push(`## Cross-page issues`)
+    lines.push(``)
+    lines.push(`Observed among the audited pages; these findings do not change the score.`)
+    lines.push(``)
+    for (const issue of report.siteIssues) {
+      lines.push(`- **${issueText(issue.code)}**: ${issueText(issue.message)}`)
+      for (const url of issue.affectedUrls) lines.push(`  - ${issueText(url)}`)
+    }
+    lines.push(``)
   }
 
   if (report.crossCuttingIssues.length > 0) {

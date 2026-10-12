@@ -316,7 +316,7 @@ Options:
   --limit <n>             Max pages to audit in sitemap mode (default 200, sorted by sitemap priority).
                           When the sitemap exceeds the limit, a notice is printed to stderr.
   --top-issues            In sitemap mode, skip per-page output and show only the cross-cutting
-                          issues and critical defects
+                          issues, cross-page metadata issues, and critical defects
   --detect-platform       Detect what platform/CMS/framework the site is built on (WordPress,
                           Webflow, Shopify, Next.js, etc.) instead of running a full audit.
   --urls <src>            In --detect-platform mode, run on multiple URLs. <src> can be a path
@@ -362,6 +362,7 @@ Examples:
   aeo-audit https://example.com --sitemap https://example.com/sitemap.xml
   aeo-audit https://example.com --sitemap --limit 10
   aeo-audit https://example.com --sitemap --top-issues
+  aeo-audit https://example.com --sitemap --top-issues --format markdown
   aeo-audit https://example.com --require-meta
   aeo-audit https://example.com --sitemap --require-meta
   aeo-audit http://localhost:3000 --allow-local

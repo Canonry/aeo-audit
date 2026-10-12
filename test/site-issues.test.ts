@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildSiteIssues } from '../src/sitemap.js'
+import { buildDuplicateMetadataIssues } from '../src/site-issues.js'
 import type { SitemapPageResult } from '../src/types.js'
 
 const page = (path: string, over: { description?: string | null; links?: string[] } = {}) =>
@@ -25,6 +26,47 @@ const page = (path: string, over: { description?: string | null; links?: string[
   }) as unknown as SitemapPageResult
 
 describe('two pages saying the same thing', () => {
+  it('groups exact titles and descriptions with deterministic, distinct URL counts', () => {
+    const pages = [
+      { url: 'https://x.test/b', metadata: { pageTitle: ' Same title ', metaDescription: 'Same description' } },
+      { url: 'https://x.test/a', metadata: { pageTitle: 'Same title', metaDescription: ' Same description ' } },
+      { url: 'https://x.test/a', metadata: { pageTitle: 'Same title', metaDescription: 'Same description' } },
+    ]
+    const issues = buildDuplicateMetadataIssues(pages)
+    expect(issues).toEqual([
+      {
+        code: 'site.duplicate-meta-description',
+        message: '2 pages share the same meta description word for word: "Same description"',
+        affectedUrls: ['https://x.test/a', 'https://x.test/b'],
+      },
+      {
+        code: 'site.duplicate-title',
+        message: '2 pages share the same title word for word: "Same title"',
+        affectedUrls: ['https://x.test/a', 'https://x.test/b'],
+      },
+    ])
+    expect(buildDuplicateMetadataIssues([...pages].reverse())).toEqual(issues)
+    expect(buildDuplicateMetadataIssues([pages[0], pages[0]])).toEqual([])
+  })
+
+  it('does not group empty metadata or similar but different values', () => {
+    expect(buildDuplicateMetadataIssues([
+      { url: 'https://x.test/a', metadata: { pageTitle: '', metaDescription: null } },
+      { url: 'https://x.test/b', metadata: { pageTitle: '  ', metaDescription: ' ' } },
+      { url: 'https://x.test/c', metadata: { pageTitle: 'About', metaDescription: 'About us' } },
+      { url: 'https://x.test/d', metadata: { pageTitle: 'about', metaDescription: 'About us.' } },
+    ])).toEqual([])
+  })
+
+  it('sitemap mode excludes failed rows and deduplicates terminal URLs', () => {
+    const same = page('/a', { description: 'Shared description' })
+    const failed = { ...page('/failed', { description: 'Shared description' }), status: 'error' as const }
+    expect(buildSiteIssues([same, same, failed], 0, 0)).toEqual([])
+    const issues = buildSiteIssues([same, failed, page('/b', { description: 'Shared description' })], 4, 0)
+    expect(issues.map((issue) => issue.code)).toEqual(['site.duplicate-meta-description', 'site.duplicate-title'])
+    expect(issues.every((issue) => issue.affectedUrls.length === 2)).toBe(true)
+  })
+
   it('names every page sharing a description, once', () => {
     const same = 'A boutique hotel at 15 Rose Avenue in Venice, California.'
     const issues = buildSiteIssues(

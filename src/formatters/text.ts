@@ -37,6 +37,11 @@ function bar(score: number, width = 20): string {
   return `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(width - filled)}${RESET}`
 }
 
+/** Page metadata is evidence, not terminal control sequences or extra report rows. */
+function issueText(value: string): string {
+  return value.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/gu, ' ').trim()
+}
+
 export function formatText(report: AuditReport): string {
   const lines = []
 
@@ -147,6 +152,16 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
     }
 
     lines.push(`${'─'.repeat(70)}`)
+    lines.push(``)
+  }
+
+  if (report.siteIssues?.length) {
+    lines.push(`${BOLD}Cross-page issues${RESET}`)
+    lines.push(`${DIM}Observed among the audited pages; these findings do not change the score.${RESET}`)
+    for (const issue of report.siteIssues) {
+      lines.push(`  ${BOLD}${issueText(issue.code)}${RESET}: ${issueText(issue.message)}`)
+      for (const url of issue.affectedUrls) lines.push(`      - ${issueText(url)}`)
+    }
     lines.push(``)
   }
 

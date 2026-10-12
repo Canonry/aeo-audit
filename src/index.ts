@@ -45,6 +45,7 @@ export type {
   SitemapAuditOptions,
   SitemapAuditPartialReason,
   SitemapAuditReport,
+  SiteIssue,
 } from './types.js'
 export type {
   CrawlAnchorSummary,

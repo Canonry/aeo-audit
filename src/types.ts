@@ -21,6 +21,12 @@ export interface AnalysisResult {
   findings: AuditFinding[]
   recommendations: string[]
   /**
+   * Optional review advice, also included in `recommendations`. Aggregation
+   * ranks these after other recommendations regardless of prevalence. Absent
+   * on older reports; untagged recommendations retain their existing priority.
+   */
+  advisoryRecommendations?: string[]
+  /**
    * Whether this factor is one this page was ever meant to satisfy.
    *
    * A product page correctly has no FAQ, so its 0 is not a failure and must not
@@ -416,6 +422,8 @@ export interface AgentSummary {
   criticalDefectCount: number
   /** The ranked to-do list: critical defects first, then cross-cutting by prevalence. */
   issues: PrioritizedFix[]
+  /** Cross-page findings from sitemap audits; absent on older or single-page reports. */
+  siteIssues?: SiteIssue[]
 }
 
 export interface CrossCuttingIssueDetail {
@@ -922,6 +930,12 @@ export interface CrawlSummary {
   elapsedMs: number
   limits: SiteCrawlLimits
   warnings: CrawlWarning[]
+  /**
+   * Exact duplicate metadata among successfully audited, indexable HTML pages.
+   * Counts and affected URLs describe observed pages only; a partial crawl
+   * cannot establish absence elsewhere. Missing on reports from older engines.
+   */
+  siteIssues?: SiteIssue[]
   pacing: {
     requestedDelayMs: number
     robotsCrawlDelayMs: number | null
