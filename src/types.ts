@@ -416,6 +416,8 @@ export interface AgentSummary {
   criticalDefectCount: number
   /** The ranked to-do list: critical defects first, then cross-cutting by prevalence. */
   issues: PrioritizedFix[]
+  /** Cross-page findings from sitemap audits; absent on older or single-page reports. */
+  siteIssues?: SiteIssue[]
 }
 
 export interface CrossCuttingIssueDetail {
@@ -922,6 +924,12 @@ export interface CrawlSummary {
   elapsedMs: number
   limits: SiteCrawlLimits
   warnings: CrawlWarning[]
+  /**
+   * Exact duplicate metadata among successfully audited, indexable HTML pages.
+   * Counts and affected URLs describe observed pages only; a partial crawl
+   * cannot establish absence elsewhere. Missing on reports from older engines.
+   */
+  siteIssues?: SiteIssue[]
   pacing: {
     requestedDelayMs: number
     robotsCrawlDelayMs: number | null

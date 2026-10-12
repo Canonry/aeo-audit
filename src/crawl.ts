@@ -7,6 +7,7 @@ import { RequestPacer } from './request-pacer.js'
 import { engineVersion } from './schema.js'
 import { deepFreeze } from './immutable.js'
 import { parseSitemapXmlDocument } from './sitemap-xml.js'
+import { buildDuplicateMetadataIssues } from './site-issues.js'
 import type { FetchBudget } from './fetch-page.js'
 import type {
   CrawlAnchorSummary,
@@ -1780,6 +1781,33 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   }
   const complete = budget.terminationReason === null && frontier.length === 0
   const deadLinks = deriveDeadLinks(options.checkDeadLinks === true, complete, edgeRows, pageByUrl)
+  const metadataPages = pageRows.filter((page) => page.state === 'html'
+    && page.indexability.state === 'indexable' && page.audit !== null && page.finalUrl !== null)
+  const siteIssues = buildDuplicateMetadataIssues(metadataPages.map((page) => ({
+    url: page.finalUrl!, metadata: page.audit!.metadata,
+  })))
+  const metadataPagesByUrl = new Map(metadataPages.map((page) => [page.finalUrl!, page]))
+  for (const issue of siteIssues) {
+    const title = issue.code === 'site.duplicate-title'
+    const factorId = title ? 'entity-consistency' : 'technical-seo'
+    const recommendation = title
+      ? 'Review the shared title template and canonical intent before assigning page-specific titles.'
+      : 'Review the shared meta-description template and canonical intent before assigning page-specific descriptions.'
+    for (const url of issue.affectedUrls) {
+      const page = metadataPagesByUrl.get(url)!
+      const factor = page.audit!.factors.find((candidate) => candidate.id === factorId)
+      // Explicit factor selection remains authoritative. The summary still
+      // exposes cross-page evidence without inventing an unrequested factor.
+      if (!factor) continue
+      factor.findings.push({ type: 'info', code: issue.code, message: issue.message })
+      if (!factor.recommendations.includes(recommendation)) factor.recommendations.push(recommendation)
+      pendingPages.set(page.key, page)
+    }
+  }
+  // Consumers persist page events before receiving the terminal summary.
+  // Re-publish only changed pages so retained page audits include these
+  // observations too. Scores and metrics are unchanged.
+  await flushPages()
   const auditedPages = pageRows.filter((page) => page.audit !== null)
   const factorRollup = new Map<string, { id: string; name: string; count: number; total: number }>()
   for (const page of auditedPages) {
@@ -1815,6 +1843,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     warnings: [...warnings].sort((left, right) => (
       left.code.localeCompare(right.code) || left.from.localeCompare(right.from) || left.to.localeCompare(right.to)
     )),
+    siteIssues,
     pacing: {
       requestedDelayMs: limits.requestDelayMs,
       robotsCrawlDelayMs,

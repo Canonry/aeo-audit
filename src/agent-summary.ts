@@ -42,5 +42,6 @@ export function agentSummaryFromSitemap(report: SitemapAuditReport): AgentSummar
     pass: report.aggregateScore >= PASS_THRESHOLD,
     criticalDefectCount: report.criticalDefects.filter((g) => g.severity === 'critical').length,
     issues: report.prioritizedFixes,
+    ...(report.siteIssues === undefined ? {} : { siteIssues: report.siteIssues }),
   }
 }

@@ -15,6 +15,7 @@ import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { PAGE_SPECIFIC_FACTOR_IDS, factorApplies } from './scoring.js'
 import { buildTemplateGroups, summarizeFixReach } from './templates.js'
 import { buildCoverage, deriveUrlShapes, selectRepresentativeSample } from './url-templates.js'
+import { buildDuplicateMetadataIssues } from './site-issues.js'
 import type {
   AuditCoverage,
   AuditReport,
@@ -344,25 +345,7 @@ export function buildSiteIssues(
   truncated: number,
   filtered: number,
 ): SiteIssue[] {
-  const issues: SiteIssue[] = []
-
-  // Two pages describing themselves with the same sentence tell a reader, and a
-  // model, that they are the same page. Exact match after trimming: a near-match
-  // is an editorial judgement and this layer does not make those.
-  const byDescription = new Map<string, string[]>()
-  for (const page of pages) {
-    const description = page.metadata?.metaDescription?.trim()
-    if (!description) continue
-    byDescription.set(description, [...(byDescription.get(description) ?? []), page.url])
-  }
-  for (const [description, urls] of byDescription) {
-    if (urls.length < 2) continue
-    issues.push({
-      code: 'site.duplicate-meta-description',
-      message: `${urls.length} pages share the same meta description word for word: "${description.slice(0, 120)}"`,
-      affectedUrls: [...urls].sort(),
-    })
-  }
+  const issues = buildDuplicateMetadataIssues(pages.filter((page) => page.status === 'success'))
 
   // A page nothing links to can only be arrived at through the sitemap.
   //

@@ -8,6 +8,13 @@ Every `AuditFinding` carries a stable `code` so integrations can key on a machin
 
 ## Registry
 
+### Cross-page metadata
+
+- `site.duplicate-title`
+- `site.duplicate-meta-description`
+
+These are comparison findings, namespaced under `site` rather than a single-page analyzer. They appear in sitemap `siteIssues` and crawl `summary.siteIssues`, with every observed affected URL. Crawl page events also carry these informational codes in the corresponding existing factor. They do not change factor scores or prove a ranking impact.
+
 ### Structured Data (JSON-LD)
 
 - `structured-data.json-ld.found`
@@ -135,6 +142,7 @@ Every `AuditFinding` carries a stable `code` so integrations can key on a machin
 - `entity-consistency.name.moderate`
 - `entity-consistency.name.multiple`
 - `entity-consistency.title.ok`
+- `entity-consistency.title.short` — fewer than 15 characters; a review hint, not a scoring penalty or search-engine minimum.
 - `entity-consistency.title.long`
 - `entity-consistency.canonical.present`
 - `entity-consistency.canonical.missing`

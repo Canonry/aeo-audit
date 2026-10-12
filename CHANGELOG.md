@@ -1,5 +1,14 @@
 # Changelog
 
+## 7.3.0 (2026-10-12)
+
+### Added
+
+- Detect exact duplicate titles and descriptions with shared logic in sitemap audits and `runSiteCrawl`. Each group carries a stable code and all observed affected URLs. Empty metadata and repeat observations of the same URL do not form groups; the crawl additionally excludes non-indexable pages and redirect aliases.
+- Retain duplicate groups in `summary.siteIssues`, including summary-only crawls. Updated page events carry informational findings and review recommendations, so checkpoint consumers retain the evidence in their existing page-audit records. Scores are unchanged.
+- Surface cross-page issues in sitemap text, Markdown and agent output, including when factor scores pass.
+- Flag titles shorter than 15 characters with `entity-consistency.title.short`. This is an advisory review threshold with no score penalty; concise titles can be appropriate.
+
 ## 7.2.0 (2026-09-07)
 
 ### Fixed
