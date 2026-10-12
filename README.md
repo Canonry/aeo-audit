@@ -4,8 +4,6 @@
 
 **The most comprehensive open-source technical AEO (Answer Engine Optimization) audit tool.** Scores any website across 16 ranking factors that decide whether AI answer engines (ChatGPT, Perplexity, Gemini, Claude) will cite your content.
 
-`@canonry/aeo-audit` is the preferred package. `@ainyc/aeo-audit` is published at the same version as a compatibility package.
-
 - Score any URL across **16 AEO factors**: structured data, `llms.txt`, E-E-A-T, extractability, snippet eligibility, and more. [Scoring](docs/scoring.md)
 - Audit a **whole site** from its sitemap; per-page findings roll up into ranked fixes. [Sitemap mode](docs/cli.md#sitemap-mode)
 - Crawl all discoverable site pages from the root, recursive sitemaps, and internal links. [Full crawl API](docs/api.md#full-site-crawl)
