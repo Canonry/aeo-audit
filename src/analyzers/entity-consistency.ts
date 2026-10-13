@@ -7,6 +7,7 @@ import {
   normalizeText,
 } from './helpers.js'
 import type { AnalysisResult, AuditContext, StructuredDataEntry } from '../types.js'
+import { analyzeCanonicalLinks } from './canonical-links.js'
 
 function extractSchemaContacts(structuredData: StructuredDataEntry[]): { emails: string[]; phones: string[] } {
   const emails: string[] = []
@@ -93,14 +94,10 @@ export function analyzeEntityConsistency(context: AuditContext): AnalysisResult 
     recommendations.push('Shorten the page title to 70 characters or fewer to avoid truncation in AI citations.')
   }
 
-  const canonicalHref = context.$('link[rel="canonical"]').attr('href')
-  if (canonicalHref) {
-    score += 20
-    findings.push({ type: 'found', code: 'entity-consistency.canonical.present', message: 'Canonical URL tag is present.' })
-  } else {
-    findings.push({ type: 'missing', code: 'entity-consistency.canonical.missing', message: 'Canonical URL tag is missing.' })
-    recommendations.push('Add a canonical link tag to declare the primary page URL.')
-  }
+  const canonical = analyzeCanonicalLinks(context)
+  score += canonical.score
+  findings.push(...canonical.findings)
+  recommendations.push(...canonical.recommendations)
 
   const schemaContacts = extractSchemaContacts(context.structuredData)
   const pageEmails = collectEmails(context.textContent)

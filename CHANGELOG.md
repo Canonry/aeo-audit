@@ -1,5 +1,14 @@
 # Changelog
 
+## 7.4.0 (2026-10-12)
+
+### Added
+- Canonical URL validation detects invalid, duplicate and conflicting declarations in Entity Consistency and Technical SEO. Tags outside the active head, template content and alternate-version annotations are ignored.
+- Network audits verify up to five distinct canonical targets, report redirects and failed HTTP responses, and distinguish timeouts from broken targets. Each probe shares a five-second deadline across DNS and redirects, respects cancellation and fetch budgets, and uses the existing public-IP connection guard. Self canonicals reuse the main response; offline audits check markup without network probes.
+
+### Fixed
+- Recognize bracketed IPv6 URL literals during SSRF preflight validation.
+
 ## 7.3.0 (2026-10-12)
 
 ### Added

@@ -145,6 +145,16 @@ These are comparison findings, namespaced under `site` rather than a single-page
 - `entity-consistency.title.short` — fewer than 15 characters; a review hint, not a scoring penalty or search-engine minimum.
 - `entity-consistency.title.long`
 - `entity-consistency.canonical.present`
+- `entity-consistency.canonical.ignored-location`
+- `entity-consistency.canonical.ignored-attributes`
+- `entity-consistency.canonical.invalid`
+- `entity-consistency.canonical.duplicate`
+- `entity-consistency.canonical.conflicting`
+- `entity-consistency.canonical.target-limit`
+- `entity-consistency.canonical.redirected`
+- `entity-consistency.canonical.timeout`
+- `entity-consistency.canonical.unreachable`
+- `entity-consistency.canonical.reachable`
 - `entity-consistency.canonical.missing`
 - `entity-consistency.contact.ok`
 - `entity-consistency.contact.partial`
@@ -239,6 +249,16 @@ These are comparison findings, namespaced under `site` rather than a single-page
 - `technical-seo.meta-description.present`
 - `technical-seo.canonical.missing`
 - `technical-seo.canonical.present`
+- `technical-seo.canonical.ignored-location`
+- `technical-seo.canonical.ignored-attributes`
+- `technical-seo.canonical.invalid`
+- `technical-seo.canonical.duplicate`
+- `technical-seo.canonical.conflicting`
+- `technical-seo.canonical.target-limit`
+- `technical-seo.canonical.redirected`
+- `technical-seo.canonical.timeout`
+- `technical-seo.canonical.unreachable`
+- `technical-seo.canonical.reachable`
 
 ### Snippet Eligibility
 

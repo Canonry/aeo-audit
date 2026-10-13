@@ -71,6 +71,14 @@ export interface RedirectHop {
   to: string
 }
 
+export interface CanonicalTargetResult {
+  state: 'ok' | 'timeout' | 'unreachable'
+  url: string
+  statusCode?: number | null
+  redirectChain: RedirectHop[]
+  errorCode?: string
+}
+
 export interface AuxiliaryDiagnostics {
   // File responds OK with Accept star-slash-star but 404/redirect under Accept: text/markdown —
   // host does content negotiation that hides the file from AI tools that prefer markdown
@@ -104,6 +112,7 @@ export interface AuditContext {
   url: string
   headers: Record<string, string>
   auxiliary: AuxiliaryResources
+  canonicalTargets?: Record<string, CanonicalTargetResult>
   structuredData: StructuredDataEntry[]
   textContent: string
   pageTitle: string
@@ -115,6 +124,7 @@ export type AeoAuditOutboundAttemptKind =
   | 'sitemap'
   | 'robots'
   | 'diagnostic'
+  | 'canonical'
 
 export interface AeoAuditOutboundAttempt {
   kind: AeoAuditOutboundAttemptKind
@@ -281,6 +291,7 @@ export interface ScoredFactorSummary {
 export interface FetchedPage {
   inputUrl: string
   finalUrl: string
+  statusCode?: number
   html: string
   headers: Record<string, string>
   redirectChain: RedirectHop[]

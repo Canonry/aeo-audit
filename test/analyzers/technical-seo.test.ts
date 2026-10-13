@@ -69,3 +69,29 @@ describe('meta description scoring', () => {
     expect(result.recommendations.some((r) => r.includes('Trim the meta description'))).toBe(true)
   })
 })
+
+describe('canonical validation', () => {
+  it('does not credit ignored or invalid declarations as present', () => {
+    for (const markup of [
+      '<link rel="canonical" href="javascript:alert(1)">',
+      '<link rel="canonical" href="/alternate" hreflang="en">',
+      '<template><link rel="canonical" href="/template"></template>',
+      '</head><body><link rel="canonical" href="/body">',
+    ]) {
+      const result = analyzeTechnicalSeo(buildContext(`<html><head>${markup}</head></html>`))
+      expect(result.findings.some((finding) => finding.code === 'technical-seo.canonical.present')).toBe(false)
+      expect(result.findings.some((finding) => finding.type === 'missing' && finding.code.startsWith('technical-seo.canonical.'))).toBe(true)
+    }
+  })
+
+  it('shares broken target evidence with correctly namespaced findings', () => {
+    const context = buildContext(pageWithMetaDesc('A'.repeat(150)))
+    context.canonicalTargets = {
+      'https://example.com/': { state: 'unreachable', url: 'https://example.com/', statusCode: 404, redirectChain: [] },
+    }
+    const result = analyzeTechnicalSeo(context)
+    expect(result.findings.some((finding) => finding.code === 'technical-seo.canonical.unreachable' && finding.type === 'unreachable')).toBe(true)
+    const unchecked = analyzeTechnicalSeo({ ...context, canonicalTargets: undefined })
+    expect(unchecked.score - result.score).toBe(10)
+  })
+})
