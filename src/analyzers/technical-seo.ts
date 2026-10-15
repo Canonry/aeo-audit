@@ -1,4 +1,5 @@
 import { clampScore } from './helpers.js'
+import { analyzeCanonicalLinks } from './canonical-links.js'
 import type { AnalysisResult, AuditContext } from '../types.js'
 
 export function analyzeTechnicalSeo(context: AuditContext): AnalysisResult {
@@ -111,16 +112,12 @@ export function analyzeTechnicalSeo(context: AuditContext): AnalysisResult {
   }
 
   // ── Canonical tag ─────────────────────────────────────────────────────────
-  const canonicalEl = context.$('link[rel="canonical"]')
-  const canonicalHref = canonicalEl.attr('href')?.trim() ?? ''
-
-  if (!canonicalHref) {
-    findings.push({ type: 'missing', code: 'technical-seo.canonical.missing', message: 'No canonical tag found. Without a canonical, duplicate content issues can dilute crawl signals.' })
-    recommendations.push('Add <link rel="canonical" href="<page-url>"> to prevent duplicate content issues.')
-  } else {
-    score += 10
-    findings.push({ type: 'found', code: 'technical-seo.canonical.present', message: `Canonical tag present: "${canonicalHref}"` })
+  const canonical = analyzeCanonicalLinks(context)
+  score += canonical.score / 2
+  for (const finding of canonical.findings) {
+    findings.push({ ...finding, code: finding.code.replace('entity-consistency.', 'technical-seo.') })
   }
+  recommendations.push(...canonical.recommendations)
 
   return {
     score: clampScore(score),

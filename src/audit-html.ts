@@ -29,6 +29,7 @@ import type {
   AuditContext,
   AuditReport,
   AuxiliaryResources,
+  CanonicalTargetResult,
   RedirectHop,
   RunAeoAuditOptions,
   ScoredFactor,
@@ -83,6 +84,7 @@ export interface AuditHtmlPageInput {
   redirectChain: RedirectHop[]
   auxiliary: AuxiliaryResources
   fetchTimeMs: number
+  canonicalTargets?: Record<string, CanonicalTargetResult>
 }
 
 function readMetaDescription($: CheerioAPI): string | null {
@@ -127,6 +129,7 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAud
     url: page.finalUrl,
     headers: page.headers,
     auxiliary: page.auxiliary,
+    canonicalTargets: page.canonicalTargets,
     structuredData,
     textContent,
     pageTitle: $('title').first().text().trim(),

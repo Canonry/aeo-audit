@@ -55,7 +55,7 @@ function buildMockResponses(): Map<string, MockHttpResponse> {
     [`${FIXTURE_ORIGIN}`, {
       status: 200,
       contentType: 'text/html; charset=utf-8',
-      body: strongHtml,
+      body: strongHtml.replace('https://ainyc.ai/', FIXTURE_ORIGIN),
       headers: {
         'last-modified': 'Wed, 21 Feb 2026 10:00:00 GMT',
       },
@@ -275,6 +275,7 @@ test('compiled CLI returns the expected JSON report for the fixture site', async
 
   assert.equal(report.url, FIXTURE_ORIGIN)
   assert.equal(report.finalUrl, FIXTURE_ORIGIN)
+  assert.ok(report.factors.find((factor) => factor.id === 'entity-consistency')?.findings.some((finding) => finding.code === 'entity-consistency.canonical.reachable'))
   assert.equal(report.auditedAt, FIXED_NOW)
   assert.equal(report.overallScore, 76)
   assert.equal(

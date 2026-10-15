@@ -11,6 +11,7 @@ import type {
   AuxiliaryResource,
   AuxiliaryResourceState,
   AuxiliaryResources,
+  CanonicalTargetResult,
   FetchedPage,
   RedirectHop,
   SitemapAuditPartialReason,
@@ -58,6 +59,10 @@ export interface FetchWithRedirectOptions {
    * redirect target outside their own crawl boundary.
    */
   shouldFollowRedirect?: (nextUrl: URL) => boolean
+  /** Reject URL userinfo on every hop for header-only canonical probes. */
+  disallowCredentials?: boolean
+  /** Record each observed redirect, including a malformed Location. */
+  onRedirect?: (hop: RedirectHop) => void
 }
 
 export interface RedirectFetchResult {
@@ -393,7 +398,7 @@ async function validatePublicRequestTarget(targetUrl: URL, options: ValidateTarg
     throw new AeoAuditError('BLOCKED_HOST', 'URL points to a blocked or private hostname.')
   }
 
-  const ips = await resolveHostAddresses(targetUrl.hostname)
+  const ips = await resolveHostAddresses(stripPort(targetUrl.hostname))
   const privateIp = ips.find((ip) => !isPublicIpAddress(ip))
 
   if (privateIp) {
@@ -405,6 +410,14 @@ async function validatePublicRequestTarget(targetUrl: URL, options: ValidateTarg
 
 function isRedirectStatus(status: number): boolean {
   return status >= 300 && status < 400
+}
+
+function cancelResponseBody(response: Response): void {
+  try {
+    if (response.body) void response.body.cancel().catch(() => {})
+  } catch {
+    // Cancellation is best effort and must never hide the probe result.
+  }
 }
 
 /**
@@ -521,6 +534,8 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     budget,
     shouldFollowRedirect,
     beforeOutboundAttempt,
+    disallowCredentials,
+    onRedirect,
   } = options
 
   let currentUrl = new URL(startUrl.toString())
@@ -529,6 +544,9 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
   for (;;) {
     throwIfAborted(signal)
     budget?.assertWithinDuration()
+    if (disallowCredentials && (currentUrl.username || currentUrl.password)) {
+      throw new AeoAuditError('BAD_INPUT', 'Canonical URLs must not contain credentials.')
+    }
     await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
     throwIfAborted(signal)
     await beforeOutboundAttempt?.()
@@ -564,6 +582,10 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     }
 
     if (redirectChain.length >= maxRedirects) {
+      let destination = location
+      try { destination = new URL(location, currentUrl).toString() } catch { /* Preserve the raw invalid Location. */ }
+      onRedirect?.({ status: response.status, from: currentUrl.toString(), to: destination })
+      cancelResponseBody(response)
       throw new AeoAuditError('REDIRECT_LIMIT', `Too many redirects (>${maxRedirects}).`)
     }
 
@@ -571,6 +593,8 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     try {
       nextUrl = new URL(location, currentUrl)
     } catch {
+      onRedirect?.({ status: response.status, from: currentUrl.toString(), to: location })
+      cancelResponseBody(response)
       throw new AeoAuditError('UNREACHABLE', 'Redirect location is invalid.')
     }
 
@@ -579,6 +603,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
       from: currentUrl.toString(),
       to: nextUrl.toString(),
     })
+    onRedirect?.(redirectChain[redirectChain.length - 1])
 
     if (shouldFollowRedirect && !shouldFollowRedirect(nextUrl)) {
       return {
@@ -589,7 +614,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
       }
     }
 
-    if (response.body) void response.body.cancel().catch(() => {})
+    cancelResponseBody(response)
     currentUrl = nextUrl
   }
 }
@@ -994,6 +1019,73 @@ export interface FetchPageOptions {
   budget?: FetchBudgetController
 }
 
+/** Probe only canonical response headers, sharing one deadline across DNS and redirects. */
+export async function fetchCanonicalTarget(rawUrl: string, options: FetchPageOptions = {}): Promise<CanonicalTargetResult> {
+  throwIfAborted(options.signal)
+  const redirectChain: RedirectHop[] = []
+  const controller = new AbortController()
+  let observerFailed = false
+  let observerError: unknown
+  const timeoutError = new AeoAuditError('TIMEOUT', 'Canonical target check timed out after 5000ms.')
+  const timer = setTimeout(() => controller.abort(timeoutError), AUX_TIMEOUT_MS)
+  const callerAbort = (): void => controller.abort(abortReason(options.signal!))
+  options.signal?.addEventListener('abort', callerAbort, { once: true })
+  const interruption = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener('abort', () => reject(abortReason(controller.signal)), { once: true })
+  })
+  try {
+    let targetUrl: URL
+    try {
+      targetUrl = new URL(rawUrl)
+      targetUrl.hash = ''
+    } catch {
+      throw new AeoAuditError('INVALID_URL', 'Canonical URL cannot be parsed.')
+    }
+    const { response, finalUrl } = await Promise.race([
+      fetchWithValidatedRedirects(targetUrl, {
+        timeoutMs: AUX_TIMEOUT_MS,
+        maxRedirects: MAX_REDIRECTS,
+        allowPrivateHost: options.allowPrivateHost,
+        signal: controller.signal,
+        onOutboundAttempt: options.onOutboundAttempt ? async (attempt) => {
+          try {
+            await options.onOutboundAttempt!(attempt)
+          } catch (error) {
+            observerFailed = true
+            observerError = error
+            throw error
+          }
+        } : undefined,
+        budget: options.budget,
+        outboundAttemptKind: 'canonical',
+        disallowCredentials: true,
+        onRedirect: (hop) => { redirectChain.push(hop) },
+      }),
+      interruption,
+    ])
+    cancelResponseBody(response)
+    return {
+      state: response.ok ? 'ok' : 'unreachable',
+      url: finalUrl,
+      statusCode: response.status,
+      redirectChain,
+    }
+  } catch (error) {
+    if (observerFailed && Object.is(error, observerError)) throw error
+    if (isCallerAbort(error, options.signal) || isFetchBudgetExceededError(error)) throw error
+    return {
+      state: isAeoAuditError(error) && error.code === 'TIMEOUT' ? 'timeout' : 'unreachable',
+      url: redirectChain.length ? redirectChain[redirectChain.length - 1].to : rawUrl,
+      statusCode: null,
+      redirectChain: [...redirectChain],
+      errorCode: isAeoAuditError(error) ? error.code : 'UNREACHABLE',
+    }
+  } finally {
+    clearTimeout(timer)
+    options.signal?.removeEventListener('abort', callerAbort)
+  }
+}
+
 export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}): Promise<FetchedPage> {
   const startedAt = Date.now()
   throwIfAborted(options.signal)
@@ -1057,6 +1149,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
   return {
     inputUrl: normalizedUrl.toString(),
     finalUrl,
+    statusCode: response.status,
     html,
     headers: Object.fromEntries(response.headers.entries()),
     redirectChain,

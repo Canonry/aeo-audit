@@ -29,7 +29,14 @@ const ANALYZERS: Record<string, string> = {
 const CODE_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/
 
 function readAnalyzer(file: string): string {
-  return readFileSync(new URL(`../src/analyzers/${file}`, import.meta.url), 'utf8')
+  const source = readFileSync(new URL(`../src/analyzers/${file}`, import.meta.url), 'utf8')
+  if (file === 'entity-consistency.ts' || file === 'technical-seo.ts') {
+    const canonical = readFileSync(new URL('../src/analyzers/canonical-links.ts', import.meta.url), 'utf8')
+    return source.replace(/findings\.push\(\.\.\.canonical\.findings\)/g, '')
+      .replace(/findings\.push\(\{ \.\.\.finding, code: finding\.code\.replace\([^\n]+/g, '')
+      + canonical.replaceAll('entity-consistency.', file === 'technical-seo.ts' ? 'technical-seo.' : 'entity-consistency.')
+  }
+  return source
 }
 
 function extractCodes(source: string): string[] {
