@@ -8,6 +8,7 @@
 
 ### Fixed
 - Recognize bracketed IPv6 URL literals during SSRF preflight validation.
+- Preserve Unicode whitespace in canonical URLs and use only HTML ASCII whitespace to separate canonical relation tokens, preventing incorrect target probes and missed conflicts.
 
 ## 7.3.0 (2026-10-12)
 

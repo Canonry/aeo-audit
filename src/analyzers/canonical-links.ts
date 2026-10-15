@@ -11,7 +11,7 @@ export function inspectCanonicalLinks(context: AuditContext): CanonicalLinks {
   const recommendations: string[] = []
   const links = context.$('link[rel]').toArray().filter((link) => {
     const element = context.$(link)
-    if (!(element.attr('rel') || '').toLowerCase().split(/\s+/).includes('canonical')) return false
+    if (!(element.attr('rel') || '').toLowerCase().split(/[\t\n\f\r ]+/).includes('canonical')) return false
 
     if (element.parents('template').length || !element.parents('head').length) {
       findings.push({ type: 'info', code: 'entity-consistency.canonical.ignored-location', message: 'Canonical tag is ignored because it is outside the document head or inside template content.' })
@@ -61,10 +61,11 @@ export function inspectCanonicalLinks(context: AuditContext): CanonicalLinks {
   let score = 20
   const urls: string[] = []
   for (const link of links) {
-    const href = (context.$(link).attr('href') || '').trim()
+    const href = context.$(link).attr('href') || ''
     let url: URL
     try {
-      if (!href) throw new Error('the href is empty')
+      // URL parsing strips only C0 controls and ASCII space, not Unicode whitespace.
+      if ([...href].every((character) => character.charCodeAt(0) <= 0x20)) throw new Error('the href is empty')
       url = new URL(href, baseUrl)
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error('only HTTP and HTTPS are supported')
       if (url.username || url.password) throw new Error('credentials are not allowed')

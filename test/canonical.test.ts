@@ -183,6 +183,69 @@ for (const href of ['', 'http://[', 'ftp://1.1.1.1/file', 'javascript:alert(1)',
   })
 }
 
+for (const [href, targetUrl] of [
+  ['/target&nbsp;', `${ORIGIN}/target%C2%A0`],
+  ['&nbsp;/target', `${ORIGIN}/%C2%A0/target`],
+  ['&nbsp;https://8.8.8.8/target', `${ORIGIN}/%C2%A0https://8.8.8.8/target`],
+]) {
+  test(`audit probes the URL with preserved non-ASCII whitespace in ${href}`, async () => {
+    const requested = mockRequests({
+      [PAGE_URL]: () => htmlResponse(`<link rel="canonical" href="${href}">`),
+      [targetUrl]: () => new Response('', { status: 200 }),
+    })
+    const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+
+    assert.equal(factor.score, 100)
+    assertFinding(factor, 'found', /Canonical target .*HTTP 200/)
+    assert.equal(requested.filter((url) => url === targetUrl).length, 1)
+    assert.equal(requested.length, 7)
+  })
+}
+
+test('audit reports Unicode-whitespace canonical variants as conflicts and probes both distinct targets', async () => {
+  const targetUrl = `${ORIGIN}/target`
+  const whitespaceTargetUrl = `${ORIGIN}/target%C2%A0`
+  const requested = mockRequests({
+    [PAGE_URL]: () => htmlResponse('<link rel="canonical" href="/target"><link rel="canonical" href="/target&nbsp;">'),
+    [targetUrl]: () => new Response('', { status: 200 }),
+    [whitespaceTargetUrl]: () => new Response('', { status: 200 }),
+  })
+  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+
+  assert.equal(factor.score, 80)
+  assertFinding(factor, 'missing', /Conflicting canonical tags/)
+  assert.ok(!factor.findings.some((finding) => /Duplicate canonical tags/.test(finding.message)))
+  assert.equal(requested.filter((url) => url === targetUrl).length, 1)
+  assert.equal(requested.filter((url) => url === whitespaceTargetUrl).length, 1)
+  assert.equal(requested.length, 8)
+})
+
+test('audit neither credits nor probes a rel value separated by non-ASCII whitespace', async () => {
+  const requested = mockRequests({
+    [PAGE_URL]: () => htmlResponse('<link rel="canonical&nbsp;alternate" href="/target">'),
+  })
+  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+
+  assert.equal(factor.score, 80)
+  assertFinding(factor, 'missing', /Canonical URL tag is missing/)
+  assert.equal(requested.length, 6)
+})
+
+test('audit accepts ASCII-separated rel tokens alongside an unrelated non-ASCII rel value', async () => {
+  const targetUrl = `${ORIGIN}/target`
+  const requested = mockRequests({
+    [PAGE_URL]: () => htmlResponse('<link rel="canonical&nbsp;alternate" href="/ignored"><link rel="alternate\t\n\f\r CANONICAL" href="/target">'),
+    [targetUrl]: () => new Response('', { status: 200 }),
+  })
+  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+
+  assert.equal(factor.score, 100)
+  assertFinding(factor, 'found', /Canonical target .*HTTP 200/)
+  assert.ok(!factor.findings.some((finding) => /Duplicate|Conflicting/.test(finding.message)))
+  assert.equal(requested.filter((url) => url === targetUrl).length, 1)
+  assert.equal(requested.length, 7)
+})
+
 test('audit reports duplicate canonical declarations and requests each distinct URL once', async () => {
   const targetUrl = `${ORIGIN}/target`
   const requested = mockRequests({

@@ -38,6 +38,55 @@ test('canonical rel uses case-insensitive whitespace-separated tokens', () => {
   assert.equal(inspectCanonicalLinks(context('<link rel="notcanonical" href="https://example.com/">')).score, 0)
 })
 
+test('canonical rel recognizes every HTML ASCII whitespace separator', () => {
+  for (const separator of [' ', '\t', '\n', '\f', '\r']) {
+    const result = inspectCanonicalLinks(context(`<link rel="alternate${separator}CANONICAL" href="/primary">`))
+    assert.equal(result.score, 20)
+    assert.deepEqual(result.urls, ['https://example.com/primary'])
+  }
+})
+
+test('canonical rel does not split on non-HTML whitespace', () => {
+  for (const separator of ['&nbsp;', '\u000b', '\u2003', '\u2028', '\u2029', '\ufeff']) {
+    const result = inspectCanonicalLinks(context(`<link rel="canonical${separator}alternate" href="/primary">`))
+    assert.equal(result.score, 0, JSON.stringify(separator))
+    assert.deepEqual(result.urls, [])
+    assert.ok(result.findings.some((finding) => finding.code === 'entity-consistency.canonical.missing'))
+  }
+})
+
+test('canonical href preserves Unicode whitespace in URL identity and origin', () => {
+  for (const [href, expected] of [
+    ['/primary&nbsp;', 'https://example.com/primary%C2%A0'],
+    ['/primary\u2003', 'https://example.com/primary%E2%80%83'],
+    ['/primary\ufeff', 'https://example.com/primary%EF%BB%BF'],
+    ['&nbsp;https://other.example/primary', 'https://example.com/pages/%C2%A0https://other.example/primary'],
+    ['&nbsp;', 'https://example.com/pages/%C2%A0'],
+  ]) {
+    const result = inspectCanonicalLinks(context(`<link rel="canonical" href="${href}">`))
+    assert.equal(result.score, 20, href)
+    assert.deepEqual(result.urls, [expected])
+  }
+})
+
+test('canonical conflicts retain Unicode whitespace differences', () => {
+  const result = inspectCanonicalLinks(context('<link rel="canonical" href="/primary&nbsp;"><link rel="canonical" href="/primary">'))
+  assert.equal(result.score, 0)
+  assert.deepEqual(result.urls, ['https://example.com/primary%C2%A0', 'https://example.com/primary'])
+  assert.ok(result.findings.some((finding) => finding.code === 'entity-consistency.canonical.conflicting'))
+  assert.ok(!result.findings.some((finding) => finding.code === 'entity-consistency.canonical.duplicate'))
+})
+
+test('canonical href delegates C0 and ASCII space normalization to URL parsing', () => {
+  const valid = inspectCanonicalLinks(context('<link rel="canonical" href="&#x1f; &#x09;https://example.com/primary &#x0d;&#x0a;">'))
+  assert.equal(valid.score, 20)
+  assert.deepEqual(valid.urls, ['https://example.com/primary'])
+  const blank = inspectCanonicalLinks(context('<link rel="canonical" href="&#x1f; &#x09; &#x0d;&#x0a;">'))
+  assert.equal(blank.score, 0)
+  assert.deepEqual(blank.urls, [])
+  assert.ok(blank.findings.some((finding) => finding.code === 'entity-consistency.canonical.invalid'))
+})
+
 test('canonical declarations in the body or templates do not conflict with an active head declaration', () => {
   const result = inspectCanonicalLinks(context(
     '<link rel="canonical" href="/primary"><template><template><link rel="canonical" href="/template"></template></template>',
