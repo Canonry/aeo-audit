@@ -72,25 +72,14 @@ jobs:
         if: steps.version.outputs.changed == 'true'
         run: |
           rm -rf release
-          mkdir -p release/compat
+          mkdir -p release
           npm pack --ignore-scripts --pack-destination release
           mv release/*.tgz release/canonry-package.tgz
-          tar -xzf release/canonry-package.tgz -C release/compat
-          node -e "const fs = require('node:fs'); const path = 'release/compat/package/package.json'; const p = JSON.parse(fs.readFileSync(path, 'utf8')); p.name = '@ainyc/aeo-audit'; fs.writeFileSync(path, JSON.stringify(p, null, 2) + '\\n')"
-          (cd release/compat/package && npm pack --ignore-scripts --pack-destination ../..)
-          mv release/ainyc-aeo-audit-*.tgz release/ainyc-package.tgz
-          mkdir -p release/canonry-unpacked release/ainyc-unpacked
-          tar -xzf release/canonry-package.tgz -C release/canonry-unpacked
-          tar -xzf release/ainyc-package.tgz -C release/ainyc-unpacked
-          diff -qr --exclude=package.json release/canonry-unpacked/package release/ainyc-unpacked/package
-          node -e "const assert = require('node:assert/strict'); const fs = require('node:fs'); const canonry = JSON.parse(fs.readFileSync('release/canonry-unpacked/package/package.json', 'utf8')); const ainyc = JSON.parse(fs.readFileSync('release/ainyc-unpacked/package/package.json', 'utf8')); const { name: canonryName, ...canonryRest } = canonry; const { name: ainycName, ...ainycRest } = ainyc; assert.equal(canonryName, '@canonry/aeo-audit'); assert.equal(ainycName, '@ainyc/aeo-audit'); assert.deepStrictEqual(canonryRest, ainycRest)"
       - uses: actions/upload-artifact@v4
         if: steps.version.outputs.changed == 'true'
         with:
           name: release-packages
-          path: |
-            release/canonry-package.tgz
-            release/ainyc-package.tgz
+          path: release/canonry-package.tgz
           if-no-files-found: error
 
   publish-npm:
@@ -159,7 +148,6 @@ jobs:
             npm publish "./$TARBALL" --registry=https://registry.npmjs.org --access public --provenance
           }
           publish_package "@canonry/aeo-audit" "release/canonry-package.tgz"
-          publish_package "@ainyc/aeo-audit" "release/ainyc-package.tgz"
 
   publish-clawhub:
     needs: [prepare, publish-npm]
