@@ -1,4 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const packageJson = JSON.parse(
@@ -19,7 +22,7 @@ const changelog = readFileSync(
 )
 
 describe('release workflow', () => {
-  it('publishes the preferred package and compatibility package to public npm', () => {
+  it('publishes only the Canonry package to public npm', () => {
     expect(packageJson.name).toBe('@canonry/aeo-audit')
     expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+$/)
     expect(changelog).toContain(`## ${packageJson.version} (`)
@@ -32,9 +35,6 @@ describe('release workflow', () => {
     expect(workflow).toContain(
       'publish_package "@canonry/aeo-audit" "release/canonry-package.tgz"',
     )
-    expect(workflow).toContain(
-      'publish_package "@ainyc/aeo-audit" "release/ainyc-package.tgz"',
-    )
     expect(workflow.match(/npm publish "\.\/\$TARBALL" --registry=https:\/\/registry\.npmjs\.org --access public --provenance/g)).toHaveLength(1)
     expect(workflow).toContain('npm install --global npm@11.5.1')
     expect(workflow).not.toContain('npm.pkg.github.com')
@@ -42,7 +42,7 @@ describe('release workflow', () => {
     expect(workflow).not.toContain('NODE_AUTH_TOKEN')
   })
 
-  it('pins npm before packing one build into the exact two package artifacts', () => {
+  it('pins npm before packing the release artifact', () => {
     const npmPin = 'npm install --global npm@11.5.1'
     const packStep = 'name: Pack release artifacts'
 
@@ -51,11 +51,6 @@ describe('release workflow', () => {
     expect(workflow).toContain('npm pack --ignore-scripts --pack-destination release')
     expect(workflow).toContain('mv release/*.tgz release/canonry-package.tgz')
     expect(workflow).toContain('release/canonry-package.tgz')
-    expect(workflow).toContain('release/ainyc-package.tgz')
-    expect(workflow).toContain("p.name = '@ainyc/aeo-audit'")
-    expect(workflow).toContain('mv release/ainyc-aeo-audit-*.tgz release/ainyc-package.tgz')
-    expect(workflow).toContain('diff -qr --exclude=package.json')
-    expect(workflow).toContain('assert.deepStrictEqual(canonryRest, ainycRest)')
     expect(workflow).toContain('name: release-packages')
     expect(workflow).toContain('needs: prepare')
     expect(workflow).toContain('needs: [prepare, publish-npm]')
@@ -102,13 +97,48 @@ describe('release workflow', () => {
     expect(workflow).not.toMatch(/npm view .*\|\| true/)
   })
 
-  it('makes each retry fail closed against the matching artifact and publishes Canonry first', () => {
+  it('makes each retry fail closed against the matching artifact', () => {
     expect(workflow).toContain('ACTUAL_VERSION=$(tar -xOf "$TARBALL" package/package.json')
     expect(workflow).toContain('expected $PACKAGE_NAME@$VERSION')
-    expect(workflow.indexOf('publish_package "@canonry/aeo-audit"')).toBeLessThan(
-      workflow.indexOf('publish_package "@ainyc/aeo-audit"'),
-    )
     expect(workflow).toContain('Registry artifact does not match $TARBALL')
     expect(workflow).toContain('return')
   })
+
+  it('packs and publishes only the Canonry artifact through the workflow shell steps', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'audit-release-'))
+    const runStep = (name: string, env: NodeJS.ProcessEnv) => {
+      const step = workflow.split(`      - name: ${name}\n`)[1]
+      const block = step?.match(/ {8}run: \|\n((?: {10}[^\n]*\n|\n)+)/)?.[1]
+      if (!block) throw new Error(`Missing release step: ${name}`)
+      execFileSync('bash', ['-e', '-o', 'pipefail', '-c', block.replace(/^ {10}/gm, '')], { cwd: root, env, stdio: 'pipe' })
+    }
+    try {
+      mkdirSync(path.join(root, 'dist'))
+      mkdirSync(path.join(root, 'bin'))
+      writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: packageJson.name, version: packageJson.version, files: ['dist/'] }))
+      writeFileSync(path.join(root, 'dist/index.js'), 'export const packaged = true\n')
+      const env: NodeJS.ProcessEnv = { ...process.env, npm_config_cache: path.join(root, 'cache'), npm_config_offline: 'true', VERSION: packageJson.version }
+      runStep('Pack release artifacts', env)
+      expect(readdirSync(path.join(root, 'release'))).toEqual(['canonry-package.tgz'])
+      const artifact = path.join(root, 'release/canonry-package.tgz')
+      const original = readFileSync(artifact)
+      const callsPath = path.join(root, 'calls.jsonl')
+      writeFileSync(path.join(root, 'bin/npm'), `#!/usr/bin/env node
+const { appendFileSync } = require('node:fs')
+const args = process.argv.slice(2)
+appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(args) + '\\n')
+if (args[0] === 'view') { console.error('E404 package not found'); process.exit(1) }
+if (args[0] !== 'publish') process.exit(99)
+`, { mode: 0o755 })
+      runStep('Publish publicly to npm', { ...env, PATH: `${path.join(root, 'bin')}${path.delimiter}${env.PATH}` })
+      const calls = readFileSync(callsPath, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[])
+      expect(calls).toEqual([
+        ['view', `${packageJson.name}@${packageJson.version}`, 'dist.integrity', '--registry=https://registry.npmjs.org'],
+        ['publish', './release/canonry-package.tgz', '--registry=https://registry.npmjs.org', '--access', 'public', '--provenance'],
+      ])
+      expect(readFileSync(artifact)).toEqual(original)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 30_000)
 })
