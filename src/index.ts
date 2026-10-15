@@ -1,9 +1,8 @@
 import { auditHtmlPage, assertValidFactorIds } from './audit-html.js'
-import { load } from 'cheerio'
-import { fetchCanonicalTarget, fetchPage, normalizeTargetUrl, throwIfAborted } from './fetch-page.js'
-import { inspectCanonicalLinks, MAX_CANONICAL_TARGETS } from './analyzers/canonical-links.js'
+import { fetchPage, normalizeTargetUrl, throwIfAborted } from './fetch-page.js'
+import { collectCanonicalTargets } from './canonical-targets.js'
 import type { FetchBudgetController } from './fetch-page.js'
-import type { AuditReport, CanonicalTargetResult, RunAeoAuditOptions } from './types.js'
+import type { AuditReport, RunAeoAuditOptions } from './types.js'
 
 export {
   AeoAuditError,
@@ -130,38 +129,12 @@ export async function runAeoAudit(rawUrl: string, options: RunAeoAuditOptions = 
     onOutboundAttempt: options.onOutboundAttempt,
     budget: internalOptions.budget,
   })
-  let canonicalTargets: Record<string, CanonicalTargetResult> | undefined
-  if (!options.factors?.length || options.factors.includes('entity-consistency')) {
-    const startedAt = Date.now()
-    const { urls } = inspectCanonicalLinks({
-      $: load(fetchedPage.html),
-      html: fetchedPage.html,
-      url: fetchedPage.finalUrl,
-      headers: fetchedPage.headers,
-      auxiliary: fetchedPage.auxiliary,
-      structuredData: [],
-      textContent: '',
-      pageTitle: '',
-    })
-    const entries = await Promise.all(urls.slice(0, MAX_CANONICAL_TARGETS).map(async (url): Promise<[string, CanonicalTargetResult]> => {
-      if (url === fetchedPage.finalUrl && fetchedPage.statusCode !== undefined) {
-        return [url, {
-          state: fetchedPage.statusCode >= 200 && fetchedPage.statusCode < 300 ? 'ok' : 'unreachable',
-          url,
-          statusCode: fetchedPage.statusCode,
-          redirectChain: [],
-        }]
-      }
-      return [url, await fetchCanonicalTarget(url, {
-        allowPrivateHost: options.allowPrivateHost,
-        signal: options.signal,
-        onOutboundAttempt: options.onOutboundAttempt,
-        budget: internalOptions.budget,
-      })]
-    }))
-    canonicalTargets = Object.fromEntries(entries)
-    fetchedPage.timings.fetchTimeMs += Date.now() - startedAt
-  }
+  const startedAt = Date.now()
+  const canonicalTargets = await collectCanonicalTargets(fetchedPage, {
+    ...options,
+    budget: internalOptions.budget,
+  })
+  fetchedPage.timings.fetchTimeMs += Date.now() - startedAt
   throwIfAborted(options.signal)
   return auditHtmlPage({
     inputUrl: fetchedPage.inputUrl,

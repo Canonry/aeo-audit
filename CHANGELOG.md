@@ -1,5 +1,10 @@
 # Changelog
 
+## 7.4.1 (2026-10-15)
+
+### Fixed
+- Check canonical target redirects and reachability in site crawls as well as single-page audits, including Technical SEO-only audits. Probes reuse self-canonical responses, validate at most five targets per page, and share the crawler's fetch budget, pacing, deadline, cancellation, and SSRF protections. Budget exhaustion preserves the fetched page audit with target reachability left unknown.
+
 ## 7.4.0 (2026-10-12)
 
 ### Added

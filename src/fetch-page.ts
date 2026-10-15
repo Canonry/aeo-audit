@@ -1019,15 +1019,29 @@ export interface FetchPageOptions {
   budget?: FetchBudgetController
 }
 
+export interface CanonicalTargetFetchOptions {
+  allowPrivateHost?: string
+  signal?: AbortSignal
+  onOutboundAttempt?: AeoAuditOutboundAttemptObserver
+  budget?: FetchBudget
+  beforeOutboundAttempt?: () => Promise<void>
+  deadlineAt?: number
+  deadlineError?: () => Error
+}
+
 /** Probe only canonical response headers, sharing one deadline across DNS and redirects. */
-export async function fetchCanonicalTarget(rawUrl: string, options: FetchPageOptions = {}): Promise<CanonicalTargetResult> {
+export async function fetchCanonicalTarget(rawUrl: string, options: CanonicalTargetFetchOptions = {}): Promise<CanonicalTargetResult> {
   throwIfAborted(options.signal)
   const redirectChain: RedirectHop[] = []
   const controller = new AbortController()
   let observerFailed = false
   let observerError: unknown
-  const timeoutError = new AeoAuditError('TIMEOUT', 'Canonical target check timed out after 5000ms.')
-  const timer = setTimeout(() => controller.abort(timeoutError), AUX_TIMEOUT_MS)
+  const remainingMs = options.deadlineAt === undefined ? AUX_TIMEOUT_MS : options.deadlineAt - Date.now()
+  const deadlineExpired = (): Error => remainingMs <= AUX_TIMEOUT_MS && options.deadlineError
+    ? options.deadlineError()
+    : new AeoAuditError('TIMEOUT', 'Canonical target check timed out after 5000ms.')
+  if (remainingMs <= 0) throw deadlineExpired()
+  const timer = setTimeout(() => controller.abort(deadlineExpired()), Math.min(AUX_TIMEOUT_MS, remainingMs))
   const callerAbort = (): void => controller.abort(abortReason(options.signal!))
   options.signal?.addEventListener('abort', callerAbort, { once: true })
   const interruption = new Promise<never>((_, reject) => {
@@ -1057,6 +1071,7 @@ export async function fetchCanonicalTarget(rawUrl: string, options: FetchPageOpt
           }
         } : undefined,
         budget: options.budget,
+        beforeOutboundAttempt: options.beforeOutboundAttempt,
         outboundAttemptKind: 'canonical',
         disallowCredentials: true,
         onRedirect: (hop) => { redirectChain.push(hop) },

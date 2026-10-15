@@ -3,6 +3,7 @@ import { load } from 'cheerio'
 import { AeoAuditError, getAeoAuditErrorCode, isAeoAuditError } from './errors.js'
 import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, normalizeTargetUrl, readResponseBodyAsText, throwIfAborted } from './fetch-page.js'
 import { assertValidFactorIds, auditHtmlPage } from './audit-html.js'
+import { collectCanonicalTargets } from './canonical-targets.js'
 import { RequestPacer } from './request-pacer.js'
 import { engineVersion } from './schema.js'
 import { deepFreeze } from './immutable.js'
@@ -10,6 +11,7 @@ import { parseSitemapXmlDocument } from './sitemap-xml.js'
 import { buildDuplicateMetadataIssues } from './site-issues.js'
 import type { FetchBudget } from './fetch-page.js'
 import type {
+  CanonicalTargetResult,
   CrawlAnchorSummary,
   CrawlDeadLinkFinding,
   CrawlDeadLinkResult,
@@ -1541,6 +1543,23 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     let audit = null
     let analyzerError: string | null = null
     try {
+      let canonicalTargets: Record<string, CanonicalTargetResult> | undefined
+      try {
+        canonicalTargets = await collectCanonicalTargets({
+          html: fetched.body, finalUrl: requestedFinal, statusCode: fetched.response.status,
+          headers: fetched.headers, auxiliary: globalAuxiliary,
+        }, {
+          factors: options.factors, allowPrivateHost: options.allowPrivateHost,
+          signal: options.signal, onOutboundAttempt: options.onOutboundAttempt,
+          budget, beforeOutboundAttempt: paceRequest,
+          deadlineAt: budget.startedAt + limits.maxDurationMs,
+          deadlineError: () => budget.durationExceededError(),
+        })
+      } catch (error) {
+        // A spent probe budget leaves target reachability unknown, but the
+        // fetched HTML still supplies valid markup and other audit evidence.
+        if (!isBudgetError(error)) throw error
+      }
       audit = await auditHtmlPage({
         inputUrl: requestedFinal,
         finalUrl: requestedFinal,
@@ -1549,6 +1568,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         redirectChain: fetched.redirectChain,
         auxiliary: globalAuxiliary,
         fetchTimeMs: 0,
+        canonicalTargets,
       }, {
         factors: options.factors,
         includeGeo: options.includeGeo,
