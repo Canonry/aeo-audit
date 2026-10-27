@@ -8,6 +8,9 @@
 - An FAQPage or HowTo inside `@graph` was evaluated twice, which duplicated its finding and counted it twice in the Schema Completeness average. It is now evaluated once, which lowers that score on pages where it was inflated.
 - `/llms.txt`, `/llms-full.txt`, `/robots.txt` and `/sitemap.xml` were reported present when the URL answered 2xx with an HTML page, such as a redirect to the 404 page or an SPA shell, and an HTML 404 page could earn the llms-full.txt depth bonus. These soft 404s are now reported missing in single-page audits, sitemap audits and site crawls, and the finding names the URL that served the page and any redirect that led there. A soft-404 `/sitemap.xml` falls back to `/sitemap-index.xml`.
 
+### Changed
+- The `aeo` skill runs `npx @canonry/aeo-audit@7` instead of an exact version, so it picks up every 7.x release without a skill update. The exact pin had left it on 7.4.0 after 7.4.1 shipped.
+
 ## 7.4.1 (2026-10-15)
 
 ### Fixed

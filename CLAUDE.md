@@ -122,9 +122,9 @@ clawhub publish skills/aeo --version 1.3.3 --changelog "Fix nested schema detect
 
 ClawHub flags skills as suspicious when they request excessive capabilities. Follow these rules to stay under the threshold:
 
-- **Pin npx versions** — use `@4` (major pin) instead of `@latest`. The `@latest` tag is a supply chain risk because a compromised publish can hijack all users immediately.
+- **Pin npx versions** — use the current major (`@7`) instead of `@latest`. The `@latest` tag is a supply chain risk because a compromised publish can hijack all users immediately. Never pin an exact version (`@7.4.0`): the major pin already gives users every patch and minor release without a skill update. Bump it only in the release that changes the major.
 - **Minimize Bash patterns** — only declare the single npx command end users need. Do not include local dev commands (`pnpm run build`, `node bin/...`) in the published skill; those are for contributors, not consumers.
-- **Avoid generic Bash patterns** — `Bash(aeo-audit *)` is too broad and could match other binaries. Always use the fully qualified `npx @canonry/aeo-audit@4 *` form.
+- **Avoid generic Bash patterns** — `Bash(aeo-audit *)` is too broad and could match other binaries. Always use the fully qualified `npx @canonry/aeo-audit@7 *` form.
 - **Scope file permissions narrowly** — only request Edit/Write for file types the skill actually modifies. Use `Write(filename)` for specific files (e.g., `llms.txt`, `robots.txt`) instead of broad `Edit(*.txt)` patterns.
 - **Keep shell injection guards** — the Argument Safety section in SKILL.md is required. Never remove it.
 
