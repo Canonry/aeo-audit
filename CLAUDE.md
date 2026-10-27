@@ -92,31 +92,18 @@ The ClawHub skill version must match `package.json`.
 
 ## ClawHub Publishing
 
-Publish the skill to ClawHub after updating `skills/aeo/SKILL.md`.
+CI publishes the skill; there is no manual step. When a push to `main` changes the `version` in `package.json`, `.github/workflows/publish.yml` publishes the npm package and then runs `clawhub publish skills/aeo` with that version and the commit subject as the changelog. A `skills/aeo/SKILL.md` change therefore ships with the next version bump.
 
-### Verify login
+### Publishing by hand
 
-```bash
-clawhub whoami   # should print your handle (e.g. arberx)
-```
-
-If not logged in: `clawhub login`
-
-### Publish
+Only needed if the workflow failed, and rerunning it (`workflow_dispatch` on `main`) is usually the better fix. To publish by hand anyway, from the repo root:
 
 ```bash
+clawhub whoami   # should print your handle (e.g. arberx); if not, run `clawhub login`
 clawhub publish skills/aeo --version <semver> --changelog "<description of changes>"
 ```
 
-- `--version` must be valid semver and **must match `package.json`**
-- Include a short changelog summarizing what changed
-- Run from the repo root (the `skills/` directory is resolved relative to cwd)
-
-### Example
-
-```bash
-clawhub publish skills/aeo --version 1.3.3 --changelog "Fix nested schema detection and E-E-A-T signal scoping"
-```
+`--version` must be valid semver and **must match `package.json`**.
 
 ### ClawHub Security Guidelines
 
