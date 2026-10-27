@@ -35,6 +35,20 @@ function pushDiagnosticFindings(
   }
 }
 
+/**
+ * "/llms.txt is missing." A soft 404 also names the URL that answered with an
+ * HTML page, and any redirect that led there, because its 200 response
+ * otherwise reads as the file being present. The URLs come from the fetch, not
+ * `path`: a crawl may have found the soft 404 at /sitemap-index.xml instead.
+ */
+function missingFileMessage(path: string, auxEntry: AuxiliaryResource | undefined): string {
+  if (!auxEntry?.diagnostics?.soft404 || !auxEntry.url) return `${path} is missing.`
+  const requestedUrl = auxEntry.redirectChain?.[0]?.from
+  return requestedUrl
+    ? `${path} is missing: ${requestedUrl} redirects to ${auxEntry.url}, an HTML page (soft 404).`
+    : `${path} is missing: ${auxEntry.url} returns an HTML page (soft 404).`
+}
+
 function scoreAuxState(
   auxEntry: AuxiliaryResource | undefined,
   missingMessage: string,
@@ -76,7 +90,7 @@ export function analyzeAiAccessFiles(context: AuditContext): AnalysisResult {
   // llms.txt presence and quality
   score += scoreAuxState(
     auxiliary.llmsTxt,
-    '/llms.txt is missing.',
+    missingFileMessage('/llms.txt', auxiliary.llmsTxt),
     'Could not reliably fetch /llms.txt.',
     findings,
     recommendations,
@@ -97,7 +111,7 @@ export function analyzeAiAccessFiles(context: AuditContext): AnalysisResult {
   // llms-full.txt presence and quality
   score += scoreAuxState(
     auxiliary.llmsFullTxt,
-    '/llms-full.txt is missing.',
+    missingFileMessage('/llms-full.txt', auxiliary.llmsFullTxt),
     'Could not reliably fetch /llms-full.txt.',
     findings,
     recommendations,
@@ -124,7 +138,7 @@ export function analyzeAiAccessFiles(context: AuditContext): AnalysisResult {
     score += 6
     findings.push({ type: robotsState, code: 'ai-access-files.robots-txt.unreachable', message: 'Could not reliably fetch /robots.txt.' })
   } else {
-    findings.push({ type: 'missing', code: 'ai-access-files.robots-txt.missing', message: '/robots.txt is missing.' })
+    findings.push({ type: 'missing', code: 'ai-access-files.robots-txt.missing', message: missingFileMessage('/robots.txt', auxiliary.robotsTxt) })
     recommendations.push('Add a robots.txt file.')
   }
   pushDiagnosticFindings('/robots.txt', auxiliary.robotsTxt, findings, recommendations)
@@ -138,7 +152,7 @@ export function analyzeAiAccessFiles(context: AuditContext): AnalysisResult {
     score += 6
     findings.push({ type: sitemapState, code: 'ai-access-files.sitemap.unreachable', message: 'Could not reliably fetch /sitemap.xml.' })
   } else {
-    findings.push({ type: 'missing', code: 'ai-access-files.sitemap.missing', message: '/sitemap.xml is missing.' })
+    findings.push({ type: 'missing', code: 'ai-access-files.sitemap.missing', message: missingFileMessage('/sitemap.xml', auxiliary.sitemapXml) })
     recommendations.push('Add a sitemap.xml file.')
   }
   pushDiagnosticFindings('/sitemap.xml', auxiliary.sitemapXml, findings, recommendations)

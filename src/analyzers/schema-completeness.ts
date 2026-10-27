@@ -35,6 +35,84 @@ const ORGANIZATION_PROPS = [
 const FAQ_MIN_PAIRS = 3
 const HOWTO_MIN_STEPS = 3
 
+/** Whether a JSON-LD node lists `typeName` in its `@type`. */
+function hasSchemaType(node: unknown, typeName: string): boolean {
+  if (!node || typeof node !== 'object') {
+    return false
+  }
+
+  const rawType = (node as StructuredDataEntry)['@type']
+  return Array.isArray(rawType) ? rawType.includes(typeName) : rawType === typeName
+}
+
+/** A reference names a node without describing it: it holds only `@id`, and perhaps `@type`. */
+function isNodeReference(node: StructuredDataEntry): boolean {
+  return Object.keys(node).every((key) => key === '@id' || key === '@type')
+}
+
+/**
+ * Follows JSON-LD node references. A schema graph often names a node in one
+ * place and defines it in another: Yoast, for one, writes an FAQ as
+ * `"mainEntity": [{"@id": ".../#faq-question-1"}]` and puts each Question
+ * elsewhere in the graph. The returned function maps such a reference to the
+ * node it names, in any JSON-LD block on the page. Ids are compared after
+ * resolving them against the page URL, as JSON-LD does, so "#q1" matches
+ * "https://example.com/faq#q1". Blank node ids ("_:b0") are not followed: each
+ * block scopes its own, and the parsed list no longer says which block a node
+ * came from. Anything else comes back unchanged, as does a reference to a node
+ * the page does not define. Non-objects come back as null.
+ */
+function createSchemaRefResolver(
+  structuredData: StructuredDataEntry[],
+  pageUrl: string,
+): (value: unknown) => StructuredDataEntry | null {
+  const resolveId = (id: string): string | null => {
+    if (id.startsWith('_:')) {
+      return null
+    }
+
+    try {
+      return new URL(id, pageUrl).href
+    } catch {
+      return id
+    }
+  }
+
+  const nodesById = new Map<string, StructuredDataEntry>()
+  const seen = new WeakSet<object>()
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== 'object' || seen.has(value)) {
+      return
+    }
+    seen.add(value)
+
+    if (Array.isArray(value)) {
+      value.forEach(visit)
+      return
+    }
+
+    const node = value as StructuredDataEntry
+    const id = node['@id']
+    const key = typeof id === 'string' && !isNodeReference(node) ? resolveId(id) : null
+    if (key !== null && !nodesById.has(key)) {
+      nodesById.set(key, node)
+    }
+    Object.values(node).forEach(visit)
+  }
+  visit(structuredData)
+
+  return (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null
+    }
+
+    const node = value as StructuredDataEntry
+    const id = node['@id']
+    const key = typeof id === 'string' && isNodeReference(node) ? resolveId(id) : null
+    return (key !== null && nodesById.get(key)) || node
+  }
+}
+
 export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult {
   const findings: AnalysisResult['findings'] = []
   const recommendations: string[] = []
@@ -55,6 +133,8 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
 
   let checksRun = 0
   let checksScore = 0
+  // Questions, answers and steps may be written inline or as `@id` references.
+  const resolveRef = createSchemaRefResolver(structuredData, context.url)
 
   // LocalBusiness completeness
   const localBiz = [
@@ -92,12 +172,15 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
 
     for (const faq of faqPages) {
       const mainEntity = (Array.isArray(faq.mainEntity) ? faq.mainEntity : faq.mainEntity ? [faq.mainEntity] : []) as StructuredDataEntry[]
-      const questions = mainEntity.filter((question) => question?.['@type'] === 'Question')
+      const questions = mainEntity
+        .map(resolveRef)
+        .filter((question): question is StructuredDataEntry => hasSchemaType(question, 'Question'))
 
       if (questions.length >= FAQ_MIN_PAIRS) {
         // Check answer quality
         const substantiveAnswers = questions.filter((question) => {
-          const answer = typeof question.acceptedAnswer?.text === 'string' ? question.acceptedAnswer.text : ''
+          const acceptedAnswer = resolveRef(question.acceptedAnswer)
+          const answer = typeof acceptedAnswer?.text === 'string' ? acceptedAnswer.text : ''
           return answer.split(/\s+/).length >= 15
         })
 
@@ -124,7 +207,7 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
 
     for (const howTo of howTos) {
       const steps = (Array.isArray(howTo.step) ? howTo.step : howTo.step ? [howTo.step] : []) as StructuredDataEntry[]
-      const stepsWithText = steps.filter((step) => step?.name || step?.text)
+      const stepsWithText = steps.map(resolveRef).filter((step) => step?.name || step?.text)
 
       if (stepsWithText.length >= HOWTO_MIN_STEPS) {
         checksScore += 100

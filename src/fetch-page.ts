@@ -792,6 +792,23 @@ async function readBodyAsText(response: Response, options: ReadBodyOptions): Pro
   return text
 }
 
+// How an HTML document opens: whitespace (a BOM included), comments or an XML
+// declaration, then a doctype or the <html> tag. A text or XML file does not
+// open this way, even one that quotes markup, like code samples in an llms-full.txt.
+// A comment's body cannot contain "-->", so a run of comments splits only one
+// way; a lazy `[\s\S]*?` body could span several, and backtracking through every
+// split took seconds to minutes on a few hundred bytes.
+const HTML_DOCUMENT_START = /^(?:\s|<!--(?:[^-]|-(?!->))*-->|<\?xml[^>]*>)*<(?:!doctype\s+html|html)\b/i
+
+/**
+ * True for a 2xx response that is an HTML page where a text or XML file
+ * belongs: a soft 404, such as a redirect to the site's error page or an SPA
+ * serving its shell for every path. The file does not exist.
+ */
+export function isSoft404(status: number, body: string): boolean {
+  return status >= 200 && status < 300 && HTML_DOCUMENT_START.test(body.slice(0, 4096))
+}
+
 function classifyAuxiliaryState(spec: AuxiliarySpec, response: Response, bodyText: string): AuxiliaryResourceState {
   const contentType = response.headers.get('content-type') || ''
 
@@ -820,7 +837,7 @@ function classifyAuxiliaryState(spec: AuxiliarySpec, response: Response, bodyTex
 
 interface AuxiliaryFetchAttempt {
   resource: AuxiliaryResource
-  /** True when the primary fetch returned 404 — used to decide whether to try fallback paths. */
+  /** True when the file is missing (a 404 or a soft 404) — used to decide whether to try fallback paths. */
   wasMissing: boolean
 }
 
@@ -855,7 +872,8 @@ async function attemptAuxiliaryFetch(
         })
       : ''
 
-    const state = classifyAuxiliaryState(spec, response, body)
+    const soft404 = isSoft404(response.status, body)
+    const state = soft404 ? 'missing' : classifyAuxiliaryState(spec, response, body)
 
     return {
       resource: {
@@ -866,8 +884,9 @@ async function attemptAuxiliaryFetch(
         body,
         redirectChain,
         timingMs: Date.now() - startedAt,
+        ...(soft404 ? { diagnostics: { soft404: true } } : {}),
       },
-      wasMissing: response.status === 404,
+      wasMissing: state === 'missing',
     }
   } catch (error) {
     if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) {
@@ -973,8 +992,8 @@ async function probeStatusWithHeaders(
 async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, options: FetchPageOptions = {}): Promise<AuxiliaryResource> {
   let attempt = await attemptAuxiliaryFetch(origin, spec.path, spec, options)
 
-  // Issue #32: if the primary path 404s, try the documented fallbacks (e.g.
-  // /sitemap-index.xml). The first successful fallback wins.
+  // Issue #32: if the primary path is missing (a 404 or a soft 404), try the
+  // documented fallbacks (e.g. /sitemap-index.xml). The first successful fallback wins.
   if (attempt.wasMissing && spec.fallbackPaths?.length) {
     for (const fallback of spec.fallbackPaths) {
       const fallbackAttempt = await attemptAuxiliaryFetch(origin, fallback, spec, options)

@@ -84,6 +84,10 @@ export interface AuxiliaryDiagnostics {
   // host does content negotiation that hides the file from AI tools that prefer markdown
   // (Astro/Vercel sites that redirect .txt to a non-existent .md variant).
   contentNegotiation?: boolean
+  // The URL answered 2xx with an HTML page instead of the file (a soft 404): a
+  // redirect to the site's error page, or an SPA shell served for every path.
+  // The resource is reported missing.
+  soft404?: boolean
 }
 
 export interface AuxiliaryResource {

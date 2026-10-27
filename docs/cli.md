@@ -243,6 +243,8 @@ The relaxation is **scoped to the single host you named on the CLI, and only tha
 
 When fetching `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitemap.xml` the audit runs a **content-negotiation probe** that surfaces as a finding on the **AI Access Files (llms.txt, sitemap)** factor: if a file returns OK to a bare request but a non-2xx response under `Accept: text/markdown`, the audit reports a content-negotiation trap. This catches Astro / Vercel / Starlight setups that redirect `.txt` → non-existent `.md` for markdown-accepting clients, which makes the file invisible to AI content-extraction tools, even though the file is "present" by every other measure.
 
+A file that answers 2xx with an HTML page instead of the file is a **soft 404**: a redirect to the site's error page, or an SPA serving its shell for every path. The audit reports it as missing, and the finding names where any redirect led. A soft-404 `/sitemap.xml` falls back to `/sitemap-index.xml`, as a real 404 does.
+
 ## Flag reference
 
 | Flag | Description |

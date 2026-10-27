@@ -231,9 +231,13 @@ export function findTopLevelSchemaByType(structuredData: StructuredDataEntry[], 
 
 export function findSchemaByType(structuredData: StructuredDataEntry[], typeName: string): StructuredDataEntry[] {
   const results: StructuredDataEntry[] = []
+  // One visited set for the whole list. `parseJsonLdScripts` lists a graph's
+  // nodes and also the container that holds them, so a set per item reached
+  // every graph node twice and returned it twice.
+  const seen = new WeakSet<object>()
 
   for (const item of structuredData) {
-    collectNestedByType(item, typeName, results, new WeakSet())
+    collectNestedByType(item, typeName, results, seen)
   }
 
   return results

@@ -1,5 +1,46 @@
-import { clampScore, parseIsoDate } from './helpers.js'
+import { clampScore, normalizeText, parseIsoDate } from './helpers.js'
 import type { AnalysisResult, AuditContext } from '../types.js'
+
+// The year after a copyright mark: "© 2026", "Copyright © 2018–2026",
+// "© Acme Inc. 2026", "(c) 2026". The mark is ©, "copyright" (not
+// "copyrighted"), or "(c)" just before a number, so a list item "(c)" is not
+// one. Only non-digits may sit between mark and year, so a notice without a
+// year does not borrow a later number. No word boundaries: page text joins
+// adjacent elements without a space ("TermsCopyright 2026", "Copyright2026").
+const YEAR_AFTER_MARK = /(?:©|copyright(?!ed)|\(c\)(?=\s*\d))\D{0,60}?((?:19|20)\d{2})(?!\d)(?:\s*[-–—]\s*((?:19|20)\d{2})(?!\d))?/gi
+// The year just before the mark: "2026 © Acme".
+const YEAR_BEFORE_MARK = /(?<!\d)((?:19|20)\d{2})\s*(?:©|\(c\))/gi
+
+/** Latest year across the copyright notices in `text`. A range counts by its end year. */
+function latestCopyrightYear(text: string): number | null {
+  let latest: number | null = null
+  for (const pattern of [YEAR_AFTER_MARK, YEAR_BEFORE_MARK]) {
+    for (const match of text.matchAll(pattern)) {
+      for (const captured of match.slice(1)) {
+        if (captured === undefined) continue
+        const year = Number(captured)
+        if (latest === null || year > latest) latest = year
+      }
+    }
+  }
+  return latest
+}
+
+/**
+ * The page's copyright year, read from a copyright notice in the site footer,
+ * where a site keeps its own, or anywhere on the page when that footer has
+ * none. A year outside a notice ("founded in 2018") is not a copyright year.
+ */
+function findCopyrightYear(context: AuditContext): number | null {
+  const { $ } = context
+  // A <footer> inside sectioning content is that article's or section's own
+  // footer, not the site's (HTML-AAM maps only the others to contentinfo).
+  const siteFooter = $('footer, [role="contentinfo"]')
+    .filter((_, element) => $(element).is('[role="contentinfo"]') || $(element).closest('article, aside, main, nav, section').length === 0)
+    .clone()
+  siteFooter.find('script, style, noscript').remove()
+  return latestCopyrightYear(normalizeText(siteFooter.text())) ?? latestCopyrightYear(context.textContent)
+}
 
 function monthsAgo(date: Date): number {
   const now = new Date()
@@ -107,9 +148,8 @@ export function analyzeContentFreshness(context: AuditContext): AnalysisResult {
     findings.push({ type: 'missing', code: 'content-freshness.sitemap.missing', message: 'sitemap.xml is missing or inaccessible.' })
   }
 
-  const yearMatch = context.textContent.match(/(?:©|copyright)?\s*(20\d{2})/i)
-  if (yearMatch) {
-    const year = Number(yearMatch[1])
+  const year = findCopyrightYear(context)
+  if (year !== null) {
     const currentYear = new Date().getUTCFullYear()
     if (year >= currentYear - 1) {
       score += 23
