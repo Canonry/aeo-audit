@@ -1,5 +1,13 @@
 # Changelog
 
+## 7.4.2 (2026-10-26)
+
+### Fixed
+- Content Freshness read the copyright year from the first year anywhere on the page, so "founded in 2018" outranked a footer's "© 2026". It now reads only years in a copyright notice: a year after `©`, "copyright" or "(c)" ("© 2026", "Copyright 2018–2026", "© Acme Inc. 2026"), or just before `©` ("2026 © Acme"). A range counts by its end year, and the site footer is checked before the rest of the page.
+- Schema Completeness counted only FAQ questions written inline in `mainEntity`, so an FAQPage that links its questions by `@id` (the way Yoast SEO writes them) reported 0 Q&A pairs. It now follows `@id` references across the page's JSON-LD blocks for FAQ questions, accepted answers and HowTo steps. Blank node ids (`_:b0`) are not joined across blocks.
+- An FAQPage or HowTo inside `@graph` was evaluated twice, which duplicated its finding and counted it twice in the Schema Completeness average. It is now evaluated once, which lowers that score on pages where it was inflated.
+- `/llms.txt`, `/llms-full.txt`, `/robots.txt` and `/sitemap.xml` were reported present when the URL answered 2xx with an HTML page, such as a redirect to the 404 page or an SPA shell, and an HTML 404 page could earn the llms-full.txt depth bonus. These soft 404s are now reported missing in single-page audits, sitemap audits and site crawls, and the finding names the URL that served the page and any redirect that led there. A soft-404 `/sitemap.xml` falls back to `/sitemap-index.xml`.
+
 ## 7.4.1 (2026-10-15)
 
 ### Fixed

@@ -137,6 +137,29 @@ describe('/robots.txt state handling', () => {
   })
 })
 
+// ─── Soft 404s ───────────────────────────────────────────────────────────────
+describe('files that answer with an HTML page', () => {
+  it('says why /robots.txt and /sitemap.xml count as missing despite a 200', () => {
+    const soft404 = (url: string, redirected: boolean): AuxiliaryResource => ({
+      state: 'missing',
+      body: '<!doctype html><html></html>',
+      url,
+      statusCode: 200,
+      redirectChain: redirected ? [{ status: 301, from: 'https://example.com/sitemap.xml', to: url }] : [],
+      diagnostics: { soft404: true },
+    })
+    const result = analyzeAiAccessFiles(buildContext(bareHtml, aux({
+      robotsTxt: soft404('https://example.com/robots.txt', false),
+      sitemapXml: soft404('https://example.com/', true),
+    })))
+    expect(result.score).toBe(0)
+    expect(result.findings.find((f) => f.code === 'ai-access-files.robots-txt.missing')?.message)
+      .toBe('/robots.txt is missing: https://example.com/robots.txt returns an HTML page (soft 404).')
+    expect(result.findings.find((f) => f.code === 'ai-access-files.sitemap.missing')?.message)
+      .toBe('/sitemap.xml is missing: https://example.com/sitemap.xml redirects to https://example.com/, an HTML page (soft 404).')
+  })
+})
+
 // ─── /sitemap.xml state handling ─────────────────────────────────────────────
 describe('/sitemap.xml state handling', () => {
   it('credits +16 when sitemap is ok', () => {

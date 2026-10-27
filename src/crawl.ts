@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { load } from 'cheerio'
 import { AeoAuditError, getAeoAuditErrorCode, isAeoAuditError } from './errors.js'
-import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, normalizeTargetUrl, readResponseBodyAsText, throwIfAborted } from './fetch-page.js'
+import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, isSoft404, normalizeTargetUrl, readResponseBodyAsText, throwIfAborted } from './fetch-page.js'
 import { assertValidFactorIds, auditHtmlPage } from './audit-html.js'
 import { collectCanonicalTargets } from './canonical-targets.js'
 import { RequestPacer } from './request-pacer.js'
@@ -1347,7 +1347,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
 
   const auxiliaryResource = (result: CrawlFetchResult | null, fallbackUrl: string): AuxiliaryResource => {
     if (!result) return { state: 'unreachable', url: fallbackUrl, statusCode: null, contentType: '', body: '' }
-    const state = result.response.ok ? 'ok' : result.response.status === 404 ? 'missing' : 'unreachable'
+    const soft404 = isSoft404(result.response.status, result.body)
+    const state = soft404 || result.response.status === 404 ? 'missing' : result.response.ok ? 'ok' : 'unreachable'
     return {
       state,
       url: result.finalUrl,
@@ -1355,6 +1356,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       contentType: result.contentType,
       body: result.body,
       redirectChain: result.redirectChain,
+      ...(soft404 ? { diagnostics: { soft404: true } } : {}),
     }
   }
   const globalAuxiliary: AuxiliaryResources = {}

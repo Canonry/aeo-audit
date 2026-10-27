@@ -560,6 +560,28 @@ describe('runSiteCrawl', () => {
     expect(requested.filter((path) => path === '/llms-full.txt')).toHaveLength(1)
   })
 
+  test('reports an auxiliary file that answers with an HTML page as missing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(input)
+      if (url.pathname === '/robots.txt' || url.pathname === '/sitemap.xml') return new Response('', { status: 404 })
+      if (url.pathname === '/sitemap-index.xml') return html('<div id="app"></div>')
+      if (url.pathname === '/llms.txt') return new Response('# llms')
+      if (url.pathname === '/llms-full.txt') return new Response('', { status: 302, headers: { location: '/not-found' } })
+      if (url.pathname === '/not-found') return html('<h1>Page not found</h1>')
+      if (url.pathname === '/') return html('<p>root</p>')
+      return new Response('missing', { status: 404 })
+    }))
+    const report = await runSiteCrawl('https://example.test/', { allowPrivateHost: 'example.test', maxPages: 1 })
+    if (report.mode !== 'full') throw new Error('expected full report')
+    const root = report.pages.find((page) => page.provenance.root)
+    expect(root?.audit?.metadata.auxiliary).toMatchObject({ llmsTxt: 'ok', llmsFullTxt: 'missing', sitemapXml: 'missing' })
+    const aiAccessFiles = root?.audit?.factors.find((factor) => factor.id === 'ai-access-files')
+    expect(aiAccessFiles?.findings.map((finding) => finding.message)).toEqual(expect.arrayContaining([
+      '/llms-full.txt is missing: https://example.test/llms-full.txt redirects to https://example.test/not-found, an HTML page (soft 404).',
+      '/sitemap.xml is missing: https://example.test/sitemap-index.xml returns an HTML page (soft 404).',
+    ]))
+  })
+
   test('admits sitemap seeds before link-only discoveries when the page budget is capped', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string) => {
       const url = new URL(input)
