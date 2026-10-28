@@ -1,5 +1,11 @@
 # Changelog
 
+## 7.5.0 (2026-10-28)
+
+### Added
+- `runSiteCrawl` takes `skipUrlVersionsAfter`. A URL version is a query URL whose canonical names the same path with a different query or none, such as `/unit/7/?forcecache=1` declaring `/unit/7/`. Only a canonical the canonical audit accepts counts (one valid tag in the head). With `skipUrlVersionsAfter: 3`, the crawl stops fetching a pattern (a site section plus a set of query parameter names) once 3 of its URLs have proven to be URL versions, and gives their page slots to other pages. Skipped URLs get no page row and are not counted in `pagesDiscovered`. A single page of the pattern that is not a URL version keeps the pattern fetched, and the root, sitemap entries and URLs already reached as a redirect target are always fetched. `summary.urlVersions` lists each skipped pattern with its counts and an example URL. Off by default, so existing crawls are unchanged.
+- `CRAWL_ENGINE_VERSION` is 2.4.0.
+
 ## 7.4.2 (2026-10-26)
 
 ### Fixed
