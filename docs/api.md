@@ -43,6 +43,7 @@ const report = await runSiteCrawl('https://example.com', {
   maxDepth: 20,
   requestDelayMs: 0,        // Minimum spacing between request starts
   maxFetchRetries: 2,       // Extra attempts after a transient fetch failure
+  skipUrlVersionsAfter: 0,  // Stop fetching a URL-version pattern after this many copies (0 = off)
   checkDeadLinks: false,
   onEvent: async (event) => {
     await saveCheckpoint(event)
@@ -80,6 +81,36 @@ The engine never fetches an external link for dead-link analysis. Robots rules m
 A false `summary.complete` value means that a declared crawl limit or the exact-host root boundary stopped discovery.
 
 Use `mode: 'full'` for a returned `pages` and `edges` graph. Use summary mode when the event handler stores the graph.
+
+### Skipping URL versions
+
+A URL version is a URL with a query string whose HTML declares a canonical on the same site and path with a different query or none, such as `/unit/7/?forcecache=1` declaring `/unit/7/`. It is a copy of that page. Sites that add filter, view or cache parameters to their links can have thousands of them, and fetching each one spends the crawl's time and page budget on duplicates.
+
+`skipUrlVersionsAfter: n` stops fetching a pattern once `n` of its URLs have proven to be URL versions. A pattern is a site section, the first path segment such as `/units`, plus a set of query parameter names. Values are ignored, so `?forcecache=1` on every unit page is one pattern. The default, `0`, fetches every URL; `3` is a reasonable setting.
+
+- **One counterexample keeps a pattern fetched.** If any fetched page of the pattern is not a URL version (it declares itself canonical, declares another path, or declares no canonical), the pattern is never skipped. If such a page arrives after skipping started, for example as a redirect target, the skipped URLs are fetched after all.
+- **Sections learn separately.** What `?page=` means under `/news` does not decide what it means under `/blog`.
+- **The root URL and sitemap entries are always fetched.** The caller or the site named them as pages.
+- **The result does not depend on response timing.** Skip decisions change only between fetch batches.
+- **A skipped URL is not a page.** It takes no page slot and trips no page, depth or query-variant budget, so the page budget goes to pages. It produces no page row and is not counted in `pagesDiscovered`, so a progress event's `pagesDiscovered` can drop when queued URLs turn out to be URL versions. Links that appear only on skipped URLs are not discovered, and links to skipped URLs are not checked for dead links.
+
+`summary.urlVersions` reports what was skipped. It is present from crawl engine 2.4.0, with `skipAfter: 0` when the option is off:
+
+```ts
+{
+  skipAfter: 3,
+  skipped: 2400,
+  patterns: [
+    {
+      section: '/units',
+      parameters: ['forcecache'],
+      copies: 3,       // Fetched URLs that proved the pattern
+      skipped: 2400,   // URLs not fetched
+      exampleUrl: 'https://example.com/units/1/?forcecache=1',
+    },
+  ],
+}
+```
 
 ### Duplicate titles and descriptions
 

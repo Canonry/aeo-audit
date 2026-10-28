@@ -662,7 +662,7 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
 /** A report-shape version owned by the crawl engine, independent from `SCHEMA_VERSION`. */
 export const CRAWL_SCHEMA_VERSION = '2.0'
 /** Version identifiers let persisted checkpoints detect changes in crawl semantics. */
-export const CRAWL_ENGINE_VERSION = '2.3.0'
+export const CRAWL_ENGINE_VERSION = '2.4.0'
 export const CRAWL_URL_NORMALIZATION_VERSION = '1.1.0'
 export const CRAWL_INDEXABILITY_RULESET_VERSION = '1.0.0'
 export const CRAWL_LINK_SCORE_ALGORITHM_VERSION = 'pagerank-1.0.0'
@@ -972,6 +972,40 @@ export interface CrawlSummary {
     attempted: number
     recovered: number
   }
+  /**
+   * What `skipUrlVersionsAfter` left unfetched. Always present from crawl
+   * engine 2.4.0, with `skipAfter: 0` when skipping was off. Optional because a
+   * summary captured before the option existed genuinely has no such record.
+   */
+  urlVersions?: CrawlUrlVersionSummary
+}
+
+/**
+ * A URL version is an address with a query string whose fetched HTML declares
+ * a canonical on the same site and path with a different query, or none:
+ * `/unit/7/?forcecache=1` declaring `/unit/7/`. It is a copy of that page, not
+ * a page of its own.
+ */
+export interface CrawlUrlVersionPattern {
+  /** First path segment the pattern was learned in, e.g. `/units`; `/` for the root path. */
+  section: string
+  /** Sorted query parameter names, e.g. `['forcecache']`. Values are not part of the pattern. */
+  parameters: string[]
+  /** Fetched URLs with this pattern that proved to be URL versions. */
+  copies: number
+  /** URLs with this pattern the crawl did not fetch. */
+  skipped: number
+  /** The first fetched URL, in sort order, that proved the pattern. */
+  exampleUrl: string
+}
+
+export interface CrawlUrlVersionSummary {
+  /** The resolved `skipUrlVersionsAfter`; 0 means every URL was fetched. */
+  skipAfter: number
+  /** Distinct URLs not fetched. A URL version is not a page, so these are not in `pagesDiscovered`. */
+  skipped: number
+  /** Every pattern that skipped at least one URL, sorted by section then parameters. */
+  patterns: CrawlUrlVersionPattern[]
 }
 
 export interface CrawlProgress {
@@ -1027,6 +1061,16 @@ export interface SiteCrawlOptions extends RunAeoAuditOptions {
   requestDelayMs?: number
   /** Extra attempts per page URL after a transient fetch failure. Defaults to 2; 0 disables retrying. */
   maxFetchRetries?: number
+  /**
+   * Stop fetching a URL pattern once this many of its URLs have proven to be
+   * URL versions (see `CrawlUrlVersionPattern`). A pattern is one site section
+   * plus one set of query parameter names, and a single fetched page of the
+   * pattern that is NOT a URL version keeps the whole pattern fetched. The root
+   * URL and sitemap entries are always fetched. Skipped URLs produce no page
+   * rows; `summary.urlVersions` counts them. Defaults to 0, which fetches every
+   * URL.
+   */
+  skipUrlVersionsAfter?: number
   /** Awaited after each checkpoint-safe observed/derived batch. */
   onEvent?: SiteCrawlEventHandler
 }

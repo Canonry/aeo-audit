@@ -30,6 +30,7 @@ import type {
   CrawlTerminationReason,
   CrawlUnverifiedLinkFinding,
   CrawlUnverifiedReason,
+  CrawlUrlVersionPattern,
   CrawlWarning,
   FullSiteCrawlReport,
   RedirectHop,
@@ -139,6 +140,72 @@ export function normalizeCrawlUrl(rawUrl: string, baseUrl?: string): string {
   parsed.search = ''
   for (const [key, value] of kept) parsed.searchParams.append(key, value)
   return parsed.toString()
+}
+
+/** Hostname for comparing a page with its canonical: lowercase, port and leading `www.` dropped. */
+function siteHostname(url: URL): string {
+  return url.hostname.toLowerCase().replace(/^www\./, '')
+}
+
+/**
+ * The page a fetched URL declares itself a copy of, or null.
+ *
+ * A URL version has a query string, and its canonical names the same site and
+ * the same path with a different query or none. Both inputs are
+ * crawl-normalized, so tracking parameters and parameter order never make two
+ * queries differ. Canonry applies the same rule to stored pages, so a pattern
+ * the crawl stops fetching is one Canonry would not have scored.
+ */
+function urlVersionOf(pageUrl: string, canonicalUrl: string | null): string | null {
+  if (!canonicalUrl) return null
+  let page: URL
+  let canonical: URL
+  try {
+    page = new URL(pageUrl)
+    canonical = new URL(canonicalUrl)
+  } catch {
+    return null
+  }
+  if (page.search === '' || page.search === canonical.search) return null
+  if (siteHostname(page) !== siteHostname(canonical) || page.pathname !== canonical.pathname) return null
+  return canonical.href
+}
+
+/**
+ * The pattern a query URL is learned under: its first path segment plus its
+ * sorted parameter names. Values stay out, so `?forcecache=1` on every unit
+ * page is one pattern, and the section keeps a lesson learned under `/units`
+ * from deciding what `?page=` means under `/blog`.
+ */
+function urlVersionPatternOf(url: string): { key: string; section: string; parameters: string[] } | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (parsed.search === '') return null
+  const parameters = [...new Set(parsed.searchParams.keys())].sort()
+  const firstSegment = parsed.pathname.split('/').find(Boolean)
+  const section = firstSegment === undefined ? '/' : `/${firstSegment}`
+  return { key: JSON.stringify([section, parameters]), section, parameters }
+}
+
+interface UrlVersionPatternState {
+  section: string
+  parameters: string[]
+  /** Fetched pages with the pattern that were URL versions. */
+  copies: number
+  /** Fetched pages with the pattern that were not. One is enough to stop skipping. */
+  distinct: number
+  exampleUrl: string | null
+  skipping: boolean
+  /**
+   * Each unfetched URL, the shallowest depth it was found at, and where it was
+   * found. Kept here rather than in the crawl's discoveries, so a URL version
+   * never counts as a discovered page, and restored if the pattern is revoked.
+   */
+  skipped: Map<string, { depth: number; provenance: CrawlDiscoveryProvenance }>
 }
 
 /**
@@ -291,6 +358,11 @@ export function resolveSiteCrawlLimits(options: SiteCrawlOptions): SiteCrawlLimi
     requestDelayMs,
     maxFetchRetries,
   }
+}
+
+/** `skipUrlVersionsAfter` as the crawl applies it: a whole number, 0 (off) when unset or invalid. */
+function resolveSkipUrlVersionsAfter(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.min(MAX_COUNT, Math.max(0, Math.floor(value!))) : 0
 }
 
 class CrawlBudget implements FetchBudget {
@@ -1014,6 +1086,15 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   const queued = new Set<string>()
   const processed = new Set<string>()
   const queryVariants = new Map<string, Set<string>>()
+  /**
+   * URL-version learning, one entry per pattern (section plus parameter
+   * names). Pages update `copies` and `distinct` while a batch runs, in
+   * whatever order they finish; `skipping` only changes between batches, in
+   * `settleUrlVersionPatterns`, so which URLs get skipped never depends on
+   * response timing.
+   */
+  const skipUrlVersionsAfter = resolveSkipUrlVersionsAfter(options.skipUrlVersionsAfter)
+  const urlVersionPatterns = new Map<string, UrlVersionPatternState>()
   const warnings: CrawlWarning[] = []
   let robotsCrawlDelayMs: number | null = null
   let deferredLinkDiscoveries: Array<{
@@ -1248,6 +1329,74 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     }
     return provenance
   }
+  /**
+   * The learned pattern that keeps this URL from being fetched, or null. The
+   * root and sitemap entries are pages the caller or the site named outright,
+   * so a pattern never skips them.
+   */
+  const urlVersionPatternToSkip = (url: string): UrlVersionPatternState | null => {
+    if (skipUrlVersionsAfter === 0) return null
+    const provenance = discoveries.get(url)
+    if (provenance && (provenance.root || provenance.sitemapSources.length > 0)) return null
+    const identity = urlVersionPatternOf(url)
+    const pattern = identity ? urlVersionPatterns.get(identity.key) : undefined
+    return pattern?.skipping ? pattern : null
+  }
+  const skipUrlVersion = (
+    pattern: UrlVersionPatternState,
+    url: string,
+    depth: number,
+    found: Pick<CrawlDiscoveryProvenance, 'discoveredFrom' | 'sitemapSources'>,
+  ): void => {
+    const entry = pattern.skipped.get(url) ?? { depth, provenance: { discoveredFrom: [], sitemapSources: [], root: false } }
+    entry.depth = Math.min(entry.depth, depth)
+    for (const from of found.discoveredFrom) {
+      if (!entry.provenance.discoveredFrom.includes(from)) entry.provenance.discoveredFrom.push(from)
+    }
+    for (const sitemap of found.sitemapSources) {
+      if (!entry.provenance.sitemapSources.includes(sitemap)) entry.provenance.sitemapSources.push(sitemap)
+    }
+    pattern.skipped.set(url, entry)
+  }
+  /**
+   * Remove a URL from its pattern's skipped set and return where it was found.
+   * A redirect can deliver a skipped URL as a page after all, and that page
+   * keeps the links that pointed at it.
+   */
+  const takeSkippedUrlVersion = (url: string): CrawlDiscoveryProvenance | null => {
+    if (skipUrlVersionsAfter === 0) return null
+    const identity = urlVersionPatternOf(url)
+    const pattern = identity ? urlVersionPatterns.get(identity.key) : undefined
+    const entry = pattern?.skipped.get(url)
+    if (!pattern || !entry) return null
+    pattern.skipped.delete(url)
+    return entry.provenance
+  }
+  /** Learn from one fetched HTML page whether its pattern makes copies. */
+  const observeUrlVersion = (pageUrl: string, canonicalUrl: string | null): void => {
+    if (skipUrlVersionsAfter === 0) return
+    const identity = urlVersionPatternOf(pageUrl)
+    if (!identity) return
+    let pattern = urlVersionPatterns.get(identity.key)
+    if (!pattern) {
+      pattern = {
+        section: identity.section,
+        parameters: identity.parameters,
+        copies: 0,
+        distinct: 0,
+        exampleUrl: null,
+        skipping: false,
+        skipped: new Map(),
+      }
+      urlVersionPatterns.set(identity.key, pattern)
+    }
+    if (urlVersionOf(pageUrl, canonicalUrl) === null) {
+      pattern.distinct += 1
+      return
+    }
+    pattern.copies += 1
+    if (pattern.exampleUrl === null || pageUrl.localeCompare(pattern.exampleUrl) < 0) pattern.exampleUrl = pageUrl
+  }
   const markDiscovered = async (url: string, depth: number, source?: { from?: string; sitemap?: string; root?: boolean }): Promise<void> => {
     // Network work within one breadth layer may finish in any order. Defer
     // link-frontier admission until the whole batch completes so caps and
@@ -1264,6 +1413,16 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     if (processed.has(url) || queued.has(url) || admittedPageUrls.has(url)) {
       mergeProvenance(url, provenanceUpdate)
       return
+    }
+    // A learned URL version will never be fetched and is not a page, so it
+    // takes no page slot, trips no page, depth or query-variant budget, and is
+    // not a discovered page. Where it was found is kept with the pattern.
+    if (!source?.root && !source?.sitemap) {
+      const pattern = urlVersionPatternToSkip(url)
+      if (pattern) {
+        skipUrlVersion(pattern, url, depth, provenanceUpdate)
+        return
+      }
     }
     if (admittedPageUrls.size >= limits.maxPages) {
       budget.stop('max-pages')
@@ -1305,6 +1464,60 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     admittedPageUrls.add(url)
     queued.add(url)
     frontier.push({ url, depth })
+  }
+  /**
+   * Turn finished observations into skip decisions. Runs only between
+   * batches, when every page of the last batch has been observed, so the
+   * decision is the same whatever order the responses arrived in.
+   */
+  const settleUrlVersionPatterns = async (): Promise<void> => {
+    if (skipUrlVersionsAfter === 0) return
+    const readmit: Array<{ url: string; depth: number; provenance: CrawlDiscoveryProvenance }> = []
+    for (const pattern of urlVersionPatterns.values()) {
+      if (pattern.distinct === 0 && pattern.copies >= skipUrlVersionsAfter) {
+        pattern.skipping = true
+      } else if (pattern.skipping) {
+        // A fetched page with this pattern was a page of its own, so the
+        // lesson was wrong: stop skipping and fetch what it skipped.
+        pattern.skipping = false
+        for (const [url, entry] of pattern.skipped) readmit.push({ url, ...entry })
+        pattern.skipped.clear()
+      }
+    }
+    readmit.sort((left, right) => left.depth - right.depth || left.url.localeCompare(right.url))
+    for (const item of readmit) {
+      await markDiscovered(item.url, item.depth)
+      // The URL is a discovered page again unless the page cap turned it
+      // away; only then does it get back the links that found it.
+      if (discoveries.has(item.url)) mergeProvenance(item.url, item.provenance)
+    }
+  }
+  /**
+   * The next frontier items to fetch, up to `concurrency`. An item whose
+   * pattern was learned after it was queued is skipped here instead, and gives
+   * back its page and query-variant slots, since it will never be a page.
+   */
+  const nextFetchBatch = (): FrontierItem[] => {
+    const batch: FrontierItem[] = []
+    let taken = 0
+    while (taken < frontier.length && batch.length < limits.concurrency) {
+      const item = frontier[taken]!
+      taken += 1
+      const pattern = urlVersionPatternToSkip(item.url)
+      if (!pattern) {
+        batch.push(item)
+        continue
+      }
+      queued.delete(item.url)
+      admittedPageUrls.delete(item.url)
+      const parsed = new URL(item.url)
+      queryVariants.get(`${parsed.origin}${parsed.pathname}`)?.delete(parsed.search)
+      const found = discoveries.get(item.url) ?? { discoveredFrom: [], sitemapSources: [], root: false }
+      discoveries.delete(item.url)
+      skipUrlVersion(pattern, item.url, item.depth, found)
+    }
+    frontier.splice(0, taken)
+    return batch.sort((left, right) => left.url.localeCompare(right.url))
   }
 
   const safeAuxFetch = async (url: string, kind: 'robots' | 'sitemap' | 'auxiliary'): Promise<CrawlFetchResult | null> => {
@@ -1491,6 +1704,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       budget.stop('max-pages')
       return
     }
+    const skippedProvenance = takeSkippedUrlVersion(requestedFinal)
+    if (skippedProvenance) mergeProvenance(requestedFinal, skippedProvenance)
     const finalProvenance = mergeProvenance(requestedFinal, provenance)
     admittedPageUrls.add(requestedFinal)
     processed.add(requestedFinal)
@@ -1608,6 +1823,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       // An analyzer failure is not a fetch failure: the page was retrieved.
       errorCode: null,
     }))
+    observeUrlVersion(requestedFinal, parsed.canonicalUrl)
     const pageNofollow = parsed.metaRobots.includes('nofollow')
       || parsed.metaRobots.includes('none')
       || headersRobots.includes('nofollow')
@@ -1755,7 +1971,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       throwIfAborted(options.signal)
       const batch = isHardFetchStop(budget.terminationReason)
         ? [frontier.splice(frontier.findIndex((item) => provenanceFor(item.url).root), 1)[0]!]
-        : frontier.splice(0, limits.concurrency).sort((left, right) => left.url.localeCompare(right.url))
+        : nextFetchBatch()
       for (const item of batch) queued.delete(item.url)
       deferredLinkDiscoveries = []
       deferredRedirectTerminals = []
@@ -1771,6 +1987,9 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       }
       const discoveredInBatch = deferredLinkDiscoveries
       deferredLinkDiscoveries = null
+      // Before this batch's links are admitted, so a link to a pattern this
+      // batch proved is skipped rather than queued.
+      await settleUrlVersionPatterns()
       discoveredInBatch.sort((left, right) => (
         left.depth - right.depth
         || left.url.localeCompare(right.url)
@@ -1842,6 +2061,21 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       factorRollup.set(factor.id, current)
     }
   }
+  // A pattern skips only after `skipUrlVersionsAfter` (at least 1) copies, so
+  // every pattern with a skipped URL has an example.
+  const urlVersionRows: CrawlUrlVersionPattern[] = [...urlVersionPatterns.values()]
+    .filter((pattern) => pattern.skipped.size > 0)
+    .map((pattern) => ({
+      section: pattern.section,
+      parameters: [...pattern.parameters],
+      copies: pattern.copies,
+      skipped: pattern.skipped.size,
+      exampleUrl: pattern.exampleUrl!,
+    }))
+    .sort((left, right) => (
+      left.section.localeCompare(right.section)
+      || left.parameters.join('\u0000').localeCompare(right.parameters.join('\u0000'))
+    ))
   const summary: CrawlSummary = {
     crawlSchemaVersion: CRAWL_SCHEMA_VERSION,
     engineVersion: engineVersion(),
@@ -1890,6 +2124,11 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     fetchRetries: {
       attempted: fetchRetriesAttempted,
       recovered: fetchRetriesRecovered,
+    },
+    urlVersions: {
+      skipAfter: skipUrlVersionsAfter,
+      skipped: urlVersionRows.reduce((total, row) => total + row.skipped, 0),
+      patterns: urlVersionRows,
     },
   }
   await emit('summary', { summary })
