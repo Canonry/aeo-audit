@@ -984,7 +984,8 @@ export interface CrawlSummary {
  * A URL version is an address with a query string whose fetched HTML declares
  * a canonical on the same site and path with a different query, or none:
  * `/unit/7/?forcecache=1` declaring `/unit/7/`. It is a copy of that page, not
- * a page of its own.
+ * a page of its own. Only a canonical the canonical audit accepts counts: one
+ * valid link tag in the head.
  */
 export interface CrawlUrlVersionPattern {
   /** First path segment the pattern was learned in, e.g. `/units`; `/` for the root path. */
@@ -1066,9 +1067,10 @@ export interface SiteCrawlOptions extends RunAeoAuditOptions {
    * URL versions (see `CrawlUrlVersionPattern`). A pattern is one site section
    * plus one set of query parameter names, and a single fetched page of the
    * pattern that is NOT a URL version keeps the whole pattern fetched. The root
-   * URL and sitemap entries are always fetched. Skipped URLs produce no page
-   * rows; `summary.urlVersions` counts them. Defaults to 0, which fetches every
-   * URL.
+   * URL, sitemap entries and URLs already reached as a redirect target are
+   * always fetched. Skipped URLs produce no page rows and are not counted in
+   * `pagesDiscovered`; `summary.urlVersions` counts them. Defaults to 0, which
+   * fetches every URL.
    */
   skipUrlVersionsAfter?: number
   /** Awaited after each checkpoint-safe observed/derived batch. */

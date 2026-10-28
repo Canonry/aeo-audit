@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto'
 import { load } from 'cheerio'
+import type { CheerioAPI } from 'cheerio'
 import { AeoAuditError, getAeoAuditErrorCode, isAeoAuditError } from './errors.js'
 import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, isSoft404, normalizeTargetUrl, readResponseBodyAsText, throwIfAborted } from './fetch-page.js'
 import { assertValidFactorIds, auditHtmlPage } from './audit-html.js'
+import { inspectCanonicalLinks } from './analyzers/canonical-links.js'
 import { collectCanonicalTargets } from './canonical-targets.js'
 import { RequestPacer } from './request-pacer.js'
 import { engineVersion } from './schema.js'
@@ -148,13 +150,54 @@ function siteHostname(url: URL): string {
 }
 
 /**
+ * Code-unit order. Unlike `localeCompare`, this is a total order: collation
+ * treats some characters as ignorable, so two different strings can compare
+ * equal and leave their order to whichever was inserted first.
+ */
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+/** Section, then parameter names one by one, then the shorter list first. */
+function compareUrlVersionPatterns(
+  left: { section: string; parameters: string[] },
+  right: { section: string; parameters: string[] },
+): number {
+  const bySection = compareCodeUnits(left.section, right.section)
+  if (bySection !== 0) return bySection
+  const shared = Math.min(left.parameters.length, right.parameters.length)
+  for (let index = 0; index < shared; index += 1) {
+    const byName = compareCodeUnits(left.parameters[index]!, right.parameters[index]!)
+    if (byName !== 0) return byName
+  }
+  return left.parameters.length - right.parameters.length
+}
+
+/**
+ * The page's canonical as the canonical audit reads it, crawl-normalized: one
+ * valid link tag in the head, outside template content, without alternate
+ * attributes. A body tag, conflicting tags or an invalid URL is no evidence a
+ * page is a copy, however the raw markup reads.
+ */
+function acceptedCanonicalUrl($: CheerioAPI, html: string, pageUrl: string): string | null {
+  const { urls } = inspectCanonicalLinks({
+    $, html, url: pageUrl, headers: {}, auxiliary: {}, structuredData: [], textContent: '', pageTitle: '',
+  })
+  if (urls.length !== 1) return null
+  try {
+    return normalizeCrawlUrl(urls[0]!, pageUrl)
+  } catch {
+    return null
+  }
+}
+
+/**
  * The page a fetched URL declares itself a copy of, or null.
  *
  * A URL version has a query string, and its canonical names the same site and
  * the same path with a different query or none. Both inputs are
  * crawl-normalized, so tracking parameters and parameter order never make two
- * queries differ. Canonry applies the same rule to stored pages, so a pattern
- * the crawl stops fetching is one Canonry would not have scored.
+ * queries differ.
  */
 function urlVersionOf(pageUrl: string, canonicalUrl: string | null): string | null {
   if (!canonicalUrl) return null
@@ -933,9 +976,12 @@ function emptyPlacementOccurrences(): CrawlPlacementOccurrences {
   return { navigation: 0, content: 0, unknown: 0 }
 }
 
-function collectLinks(html: string, from: string, limit: number): {
+function collectLinks(html: string, from: string, limit: number, readAcceptedCanonical = false): {
   links: Array<{ to: string; text: string; nofollow: boolean; placement: CrawlLinkPlacement }>
+  /** The first canonical tag anywhere in the markup, as the graph records it. */
   canonicalUrl: string | null
+  /** The canonical the canonical audit accepts, read only when asked for; see `acceptedCanonicalUrl`. */
+  acceptedCanonicalUrl: string | null
   metaRobots: string[]
   truncated: boolean
 } {
@@ -972,6 +1018,7 @@ function collectLinks(html: string, from: string, limit: number): {
   return {
     links,
     canonicalUrl,
+    acceptedCanonicalUrl: readAcceptedCanonical ? acceptedCanonicalUrl($, html, from) : null,
     metaRobots: normalizeRobotsTokens($('meta[name="robots" i]').first().attr('content') ?? null),
     truncated: total > limit,
   }
@@ -1095,6 +1142,13 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
    */
   const skipUrlVersionsAfter = resolveSkipUrlVersionsAfter(options.skipUrlVersionsAfter)
   const urlVersionPatterns = new Map<string, UrlVersionPatternState>()
+  /**
+   * Queued URLs the crawl already reached as a redirect target. That response
+   * was discarded in favour of the URL's own frontier item, which is where its
+   * evidence (an error status, a canonical of its own) gets recorded, so a
+   * learned pattern must never skip it.
+   */
+  const fetchedRedirectTargets = new Set<string>()
   const warnings: CrawlWarning[] = []
   let robotsCrawlDelayMs: number | null = null
   let deferredLinkDiscoveries: Array<{
@@ -1335,13 +1389,18 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
    * so a pattern never skips them.
    */
   const urlVersionPatternToSkip = (url: string): UrlVersionPatternState | null => {
-    if (skipUrlVersionsAfter === 0) return null
+    if (skipUrlVersionsAfter === 0 || fetchedRedirectTargets.has(url)) return null
     const provenance = discoveries.get(url)
     if (provenance && (provenance.root || provenance.sitemapSources.length > 0)) return null
     const identity = urlVersionPatternOf(url)
     const pattern = identity ? urlVersionPatterns.get(identity.key) : undefined
     return pattern?.skipping ? pattern : null
   }
+  /**
+   * Record a URL as skipped. Any discovery record it already has moves with
+   * it, e.g. from a link the query-variant cap turned away, so a skipped URL
+   * is never also a discovered page.
+   */
   const skipUrlVersion = (
     pattern: UrlVersionPatternState,
     url: string,
@@ -1350,13 +1409,28 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   ): void => {
     const entry = pattern.skipped.get(url) ?? { depth, provenance: { discoveredFrom: [], sitemapSources: [], root: false } }
     entry.depth = Math.min(entry.depth, depth)
-    for (const from of found.discoveredFrom) {
-      if (!entry.provenance.discoveredFrom.includes(from)) entry.provenance.discoveredFrom.push(from)
-    }
-    for (const sitemap of found.sitemapSources) {
-      if (!entry.provenance.sitemapSources.includes(sitemap)) entry.provenance.sitemapSources.push(sitemap)
+    const earlier = discoveries.get(url)
+    discoveries.delete(url)
+    for (const source of earlier ? [earlier, found] : [found]) {
+      for (const from of source.discoveredFrom) {
+        if (!entry.provenance.discoveredFrom.includes(from)) entry.provenance.discoveredFrom.push(from)
+      }
+      for (const sitemap of source.sitemapSources) {
+        if (!entry.provenance.sitemapSources.includes(sitemap)) entry.provenance.sitemapSources.push(sitemap)
+      }
     }
     pattern.skipped.set(url, entry)
+  }
+  /**
+   * Take a queued URL out of the crawl: it gives back its page and
+   * query-variant slots, since it will never be a page.
+   */
+  const evictUrlVersion = (pattern: UrlVersionPatternState, item: FrontierItem): void => {
+    queued.delete(item.url)
+    admittedPageUrls.delete(item.url)
+    const parsed = new URL(item.url)
+    queryVariants.get(`${parsed.origin}${parsed.pathname}`)?.delete(parsed.search)
+    skipUrlVersion(pattern, item.url, item.depth, { discoveredFrom: [], sitemapSources: [] })
   }
   /**
    * Remove a URL from its pattern's skipped set and return where it was found.
@@ -1395,7 +1469,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       return
     }
     pattern.copies += 1
-    if (pattern.exampleUrl === null || pageUrl.localeCompare(pattern.exampleUrl) < 0) pattern.exampleUrl = pageUrl
+    if (pattern.exampleUrl === null || compareCodeUnits(pageUrl, pattern.exampleUrl) < 0) pattern.exampleUrl = pageUrl
   }
   const markDiscovered = async (url: string, depth: number, source?: { from?: string; sitemap?: string; root?: boolean }): Promise<void> => {
     // Network work within one breadth layer may finish in any order. Defer
@@ -1468,13 +1542,17 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   /**
    * Turn finished observations into skip decisions. Runs only between
    * batches, when every page of the last batch has been observed, so the
-   * decision is the same whatever order the responses arrived in.
+   * decision is the same whatever order the responses arrived in, and before
+   * that batch's links are admitted, so the slots of newly skipped copies are
+   * free for them.
    */
   const settleUrlVersionPatterns = async (): Promise<void> => {
     if (skipUrlVersionsAfter === 0) return
+    let learned = false
     const readmit: Array<{ url: string; depth: number; provenance: CrawlDiscoveryProvenance }> = []
     for (const pattern of urlVersionPatterns.values()) {
       if (pattern.distinct === 0 && pattern.copies >= skipUrlVersionsAfter) {
+        learned ||= !pattern.skipping
         pattern.skipping = true
       } else if (pattern.skipping) {
         // A fetched page with this pattern was a page of its own, so the
@@ -1484,40 +1562,25 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         pattern.skipped.clear()
       }
     }
-    readmit.sort((left, right) => left.depth - right.depth || left.url.localeCompare(right.url))
+    // Queued copies of a newly learned pattern leave the frontier now. A
+    // pattern is learned once, so this scan runs at most once per pattern, and
+    // admission keeps any later copy out of the frontier.
+    if (learned) {
+      let kept = 0
+      for (const item of frontier) {
+        const pattern = urlVersionPatternToSkip(item.url)
+        if (pattern) evictUrlVersion(pattern, item)
+        else frontier[kept++] = item
+      }
+      frontier.length = kept
+    }
+    readmit.sort((left, right) => left.depth - right.depth || compareCodeUnits(left.url, right.url))
     for (const item of readmit) {
       await markDiscovered(item.url, item.depth)
       // The URL is a discovered page again unless the page cap turned it
       // away; only then does it get back the links that found it.
       if (discoveries.has(item.url)) mergeProvenance(item.url, item.provenance)
     }
-  }
-  /**
-   * The next frontier items to fetch, up to `concurrency`. An item whose
-   * pattern was learned after it was queued is skipped here instead, and gives
-   * back its page and query-variant slots, since it will never be a page.
-   */
-  const nextFetchBatch = (): FrontierItem[] => {
-    const batch: FrontierItem[] = []
-    let taken = 0
-    while (taken < frontier.length && batch.length < limits.concurrency) {
-      const item = frontier[taken]!
-      taken += 1
-      const pattern = urlVersionPatternToSkip(item.url)
-      if (!pattern) {
-        batch.push(item)
-        continue
-      }
-      queued.delete(item.url)
-      admittedPageUrls.delete(item.url)
-      const parsed = new URL(item.url)
-      queryVariants.get(`${parsed.origin}${parsed.pathname}`)?.delete(parsed.search)
-      const found = discoveries.get(item.url) ?? { discoveredFrom: [], sitemapSources: [], root: false }
-      discoveries.delete(item.url)
-      skipUrlVersion(pattern, item.url, item.depth, found)
-    }
-    frontier.splice(0, taken)
-    return batch.sort((left, right) => left.url.localeCompare(right.url))
   }
 
   const safeAuxFetch = async (url: string, kind: 'robots' | 'sitemap' | 'auxiliary'): Promise<CrawlFetchResult | null> => {
@@ -1698,6 +1761,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     // parsing it again would duplicate every target edge and analyzer result.
     if (terminalAlreadyScheduled) {
       mergeProvenance(requestedFinal, provenance)
+      if (skipUrlVersionsAfter > 0 && queued.has(requestedFinal)) fetchedRedirectTargets.add(requestedFinal)
       return
     }
     if (requestedFinal !== item.url && admittedPageUrls.size >= limits.maxPages) {
@@ -1755,7 +1819,13 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       return
     }
 
-    const parsed = collectLinks(fetched.body, requestedFinal, limits.maxLinksPerPage)
+    // Only a query URL can teach a pattern, so only its accepted canonical is read.
+    const parsed = collectLinks(
+      fetched.body,
+      requestedFinal,
+      limits.maxLinksPerPage,
+      skipUrlVersionsAfter > 0 && urlVersionPatternOf(requestedFinal) !== null,
+    )
     if (parsed.truncated) budget.stop('max-links-per-page')
     let audit = null
     let analyzerError: string | null = null
@@ -1823,7 +1893,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       // An analyzer failure is not a fetch failure: the page was retrieved.
       errorCode: null,
     }))
-    observeUrlVersion(requestedFinal, parsed.canonicalUrl)
+    observeUrlVersion(requestedFinal, parsed.acceptedCanonicalUrl)
     const pageNofollow = parsed.metaRobots.includes('nofollow')
       || parsed.metaRobots.includes('none')
       || headersRobots.includes('nofollow')
@@ -1971,7 +2041,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       throwIfAborted(options.signal)
       const batch = isHardFetchStop(budget.terminationReason)
         ? [frontier.splice(frontier.findIndex((item) => provenanceFor(item.url).root), 1)[0]!]
-        : nextFetchBatch()
+        : frontier.splice(0, limits.concurrency).sort((left, right) => left.url.localeCompare(right.url))
       for (const item of batch) queued.delete(item.url)
       deferredLinkDiscoveries = []
       deferredRedirectTerminals = []
@@ -2072,10 +2142,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       skipped: pattern.skipped.size,
       exampleUrl: pattern.exampleUrl!,
     }))
-    .sort((left, right) => (
-      left.section.localeCompare(right.section)
-      || left.parameters.join('\u0000').localeCompare(right.parameters.join('\u0000'))
-    ))
+    .sort(compareUrlVersionPatterns)
   const summary: CrawlSummary = {
     crawlSchemaVersion: CRAWL_SCHEMA_VERSION,
     engineVersion: engineVersion(),

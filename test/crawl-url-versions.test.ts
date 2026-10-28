@@ -3,12 +3,15 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { runSiteCrawl } from '../src/index.js'
 import type { SiteCrawlOptions } from '../src/index.js'
 
-const html = (body: string) => new Response(`<!doctype html><html><head></head><body>${body}</body></html>`, {
-  status: 200,
-  headers: { 'content-type': 'text/html' },
-})
+const html = (body: string, head = '', status = 200) => new Response(
+  `<!doctype html><html><head>${head}</head><body>${body}</body></html>`,
+  { status, headers: { 'content-type': 'text/html' } },
+)
 
 const canonical = (href: string) => `<link rel="canonical" href="${href}">`
+
+/** A URL version: a page whose head declares `path` canonical. */
+const copyOf = (path: string) => html('<p>copy</p>', canonical(path))
 
 const MISSING_AUXILIARY = new Set(['/robots.txt', '/llms.txt', '/llms-full.txt', '/map.xml'])
 
@@ -42,7 +45,7 @@ const unitSite = (url: URL): Response | null => {
   if (url.pathname === '/') {
     return html([1, 2, 3, 4, 5, 6].map((unit) => `<a href="/units/${unit}/">unit ${unit}</a>`).join(''))
   }
-  if (url.searchParams.has('forcecache')) return html(`${canonical(url.pathname)}<p>copy</p>`)
+  if (url.searchParams.has('forcecache')) return copyOf(url.pathname)
   if (url.pathname.startsWith('/units/')) return html(`<a href="${url.pathname}?forcecache=1">refresh</a>`)
   return null
 }
@@ -90,8 +93,8 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
         return html([2, 3, 4, 5].map((page) => `<a href="/blog/?page=${page}">page ${page}</a>`).join(''))
       }
       // Page 3 declares itself canonical: `?page=` makes real pages here.
-      if (url.searchParams.get('page') === '3') return html(`${canonical('/blog/?page=3')}<p>older posts</p>`)
-      if (url.searchParams.has('page')) return html(`${canonical('/blog/')}<p>copy</p>`)
+      if (url.searchParams.get('page') === '3') return html('<p>older posts</p>', canonical('/blog/?page=3'))
+      if (url.searchParams.has('page')) return copyOf('/blog/')
       return null
     }, { skipUrlVersionsAfter: 2 })
 
@@ -109,7 +112,7 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
           '<a href="/zz/?view=map">zz</a>',
         ].join(''))
       }
-      if (url.searchParams.has('view')) return html(`${canonical(url.pathname)}<p>copy</p>`)
+      if (url.searchParams.has('view')) return copyOf(url.pathname)
       return null
     }, { skipUrlVersionsAfter: 2 })
 
@@ -124,6 +127,23 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
     ])
   })
 
+  test('learns only from a canonical the canonical audit accepts', async () => {
+    const { report, requested } = await crawl((url) => {
+      if (url.pathname === '/') {
+        return html([1, 2, 3].map((unit) => `<a href="/units/${unit}/?forcecache=1">${unit}</a>`).join(''))
+      }
+      // Search engines ignore a canonical tag in the body, and so does the audit.
+      if (url.searchParams.has('forcecache')) return html(`${canonical(url.pathname)}<p>copy</p>`)
+      return null
+    }, { skipUrlVersionsAfter: 1 })
+
+    expect(forcecacheRequests(requested)).toHaveLength(3)
+    expect(report.summary.urlVersions).toEqual({ skipAfter: 1, skipped: 0, patterns: [] })
+    const first = report.pages.find((page) => page.requestedUrl === 'https://example.test/units/1/?forcecache=1')
+    const findingCodes = first?.audit?.factors.flatMap((factor) => factor.findings.map((finding) => finding.code))
+    expect(findingCodes).toContain('entity-consistency.canonical.missing')
+  })
+
   test('never skips a sitemap entry', async () => {
     const { report, requested } = await crawl((url) => {
       if (url.pathname === '/sitemap-units.xml') {
@@ -134,7 +154,7 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
         ].join(''), { headers: { 'content-type': 'application/xml' } })
       }
       if (url.pathname === '/') return html('<a href="/units/4/?forcecache=1">linked only</a>')
-      if (url.searchParams.has('forcecache')) return html(`${canonical(url.pathname)}<p>copy</p>`)
+      if (url.searchParams.has('forcecache')) return copyOf(url.pathname)
       return null
     }, { skipUrlVersionsAfter: 1, sitemapUrl: 'https://example.test/sitemap-units.xml' })
 
@@ -154,7 +174,7 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
       if (url.pathname === '/') {
         return html('<a href="/a/?v=1">1</a><a href="/a/?v=2">2</a><a href="/a/?v=3">3</a><a href="/b/">b</a>')
       }
-      if (url.searchParams.has('v')) return html(`${canonical('/a/')}<p>copy</p>`)
+      if (url.searchParams.has('v')) return copyOf('/a/')
       if (url.pathname === '/b/') return html('<a href="/c/">c</a><a href="/d/">d</a>')
       return null
     }
@@ -170,6 +190,23 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
     expect(report.summary.urlVersions).toMatchObject({ skipped: 2 })
   })
 
+  test('frees the slots of newly learned copies before admitting the links of the batch that taught them', async () => {
+    const { report } = await crawl((url) => {
+      if (url.pathname === '/') return html('<a href="/a/?v=1">1</a><a href="/a/?v=2">2</a><a href="/a/?v=3">3</a>')
+      // The page that teaches the pattern is also the only page that links /c/.
+      if (url.searchParams.get('v') === '1') return html('<a href="/c/">c</a>', canonical('/a/'))
+      if (url.searchParams.has('v')) return copyOf('/a/')
+      return null
+    }, { maxPages: 4, skipUrlVersionsAfter: 1 })
+
+    expect(report.pages.map((page) => page.requestedUrl).sort()).toEqual([
+      'https://example.test/',
+      'https://example.test/a/?v=1',
+      'https://example.test/c/',
+    ])
+    expect(report.summary).toMatchObject({ complete: true, terminationReason: null })
+  })
+
   test('fetches what a pattern skipped once a redirect target proves the pattern wrong', async () => {
     const { report, requested } = await crawl((url) => {
       if (url.pathname === '/') {
@@ -177,8 +214,8 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
       }
       if (url.pathname === '/zgo') return new Response('', { status: 302, headers: { location: '/units/9/?forcecache=1' } })
       // Unit 9 declares its own query URL canonical: not a copy.
-      if (url.pathname === '/units/9/') return html(`${canonical('/units/9/?forcecache=1')}<p>own page</p>`)
-      if (url.searchParams.has('forcecache')) return html(`${canonical(url.pathname)}<p>copy</p>`)
+      if (url.pathname === '/units/9/') return html('<p>own page</p>', canonical('/units/9/?forcecache=1'))
+      if (url.searchParams.has('forcecache')) return copyOf(url.pathname)
       return null
     }, { skipUrlVersionsAfter: 1 })
 
@@ -204,6 +241,45 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
       .toEqual({ discoveredFrom: ['https://example.test/'], sitemapSources: [], root: false })
   })
 
+  test('still fetches a queued redirect target that answered with an error', async () => {
+    const { report } = await crawl((url) => {
+      if (url.pathname === '/') {
+        return html('<a href="/a-go">go</a><a href="/units/1/?forcecache=1">1</a><a href="/units/9/?forcecache=1">9</a>')
+      }
+      if (url.pathname === '/a-go') return new Response('', { status: 302, headers: { location: '/units/9/?forcecache=1' } })
+      if (url.pathname === '/units/9/') return html('<p>gone</p>', '', 404)
+      if (url.searchParams.has('forcecache')) return copyOf(url.pathname)
+      return null
+    }, { skipUrlVersionsAfter: 1, checkDeadLinks: true })
+
+    expect(report.pages.find((page) => page.requestedUrl === 'https://example.test/units/9/?forcecache=1'))
+      .toMatchObject({ state: 'fetch-error', statusCode: 404 })
+    expect(report.deadLinks.findings.map((finding) => [finding.to, finding.statusCode])).toEqual(expect.arrayContaining([
+      ['https://example.test/a-go', 404],
+      ['https://example.test/units/9/?forcecache=1', 404],
+    ]))
+  })
+
+  test('still fetches a queued redirect target that proves the pattern wrong', async () => {
+    const { report, requested } = await crawl((url) => {
+      if (url.pathname === '/') {
+        return html([
+          '<a href="/a-go">go</a>',
+          '<a href="/units/1/?forcecache=1">1</a>',
+          '<a href="/units/2/?forcecache=1">2</a>',
+          '<a href="/units/9/?forcecache=1">9</a>',
+        ].join(''))
+      }
+      if (url.pathname === '/a-go') return new Response('', { status: 302, headers: { location: '/units/9/?forcecache=1' } })
+      if (url.pathname === '/units/9/') return html('<p>own page</p>', canonical('/units/9/?forcecache=1'))
+      if (url.searchParams.has('forcecache')) return copyOf(url.pathname)
+      return null
+    }, { skipUrlVersionsAfter: 1 })
+
+    expect(forcecacheRequests(requested)).toEqual(expect.arrayContaining(['https://example.test/units/2/?forcecache=1']))
+    expect(report.summary.urlVersions).toEqual({ skipAfter: 1, skipped: 0, patterns: [] })
+  })
+
   test('gives a skipped URL that a redirect reaches its page row and the links that found it', async () => {
     const { report } = await crawl((url) => {
       if (url.pathname === '/') {
@@ -212,7 +288,7 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
       // Fetched before unit 2 is skipped; its link to /zgo waits one layer deeper.
       if (url.pathname === '/hub/') return html('<a href="/zgo">go</a>')
       if (url.pathname === '/zgo') return new Response('', { status: 302, headers: { location: '/units/2/?forcecache=1' } })
-      if (url.searchParams.has('forcecache')) return html(`${canonical(url.pathname)}<p>copy</p>`)
+      if (url.searchParams.has('forcecache')) return copyOf(url.pathname)
       return null
     }, { skipUrlVersionsAfter: 1 })
 
@@ -222,6 +298,17 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
     expect(reached?.provenance.discoveredFrom).toEqual(['https://example.test/', 'https://example.test/hub/'])
     expect(report.summary.urlVersions).toMatchObject({ skipped: 0, patterns: [] })
     expect(report.summary.pagesDiscovered).toBe(report.summary.pagesObserved)
+  })
+
+  test('does not count a URL the query-variant cap turned away as discovered once it is skipped', async () => {
+    const { report } = await crawl((url) => {
+      if (url.pathname === '/') return html('<a href="/p/?v=1">1</a><a href="/p/?v=2">2</a>')
+      if (url.searchParams.get('v') === '1') return html('<a href="/p/?v=2">2</a>', canonical('/p/'))
+      return null
+    }, { maxQueryVariants: 1, skipUrlVersionsAfter: 1 })
+
+    expect(report.summary.urlVersions).toMatchObject({ skipped: 1 })
+    expect(report.summary).toMatchObject({ pagesDiscovered: 2, pagesObserved: 2 })
   })
 
   test('skips the same URLs whatever order concurrent responses arrive in', async () => {
@@ -242,6 +329,33 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
     const second = await run({ '/units/1/?forcecache=1': 10, '/units/2/?forcecache=1': 20, '/units/3/?forcecache=1': 30 })
     expect(first).toEqual(second)
     expect(first.fetched).toHaveLength(3)
+  })
+
+  test('orders skipped patterns the same way whatever order responses arrive in', async () => {
+    const run = async (delays: Record<string, number>) => {
+      const batches: Array<[string, string, string]> = []
+      const { report } = await crawl(async (url) => {
+        if (url.pathname === '/') {
+          return html([1, 2].flatMap((n) => [
+            `<a href="/x/${n}/?mode=a&amp;view=b">a</a>`,
+            `<a href="/x/${n}/?modeview=c">b</a>`,
+          ]).join(''))
+        }
+        await new Promise((resolve) => setTimeout(resolve, delays[`${url.pathname}${url.search}`] ?? 0))
+        if (url.search) return copyOf(url.pathname)
+        return null
+      }, {
+        concurrency: 2,
+        skipUrlVersionsAfter: 1,
+        onEvent: (event) => { batches.push([event.type, event.batchId, event.checksum]) },
+      })
+      return { batches, patterns: report.summary.urlVersions?.patterns.map((pattern) => pattern.parameters) }
+    }
+
+    const first = await run({ '/x/1/?mode=a&view=b': 30, '/x/1/?modeview=c': 1 })
+    const second = await run({ '/x/1/?mode=a&view=b': 1, '/x/1/?modeview=c': 30 })
+    expect(first.patterns).toEqual([['mode', 'view'], ['modeview']])
+    expect(first).toEqual(second)
   })
 
   test('treats an unset, negative or non-finite value as off and floors fractions', async () => {
