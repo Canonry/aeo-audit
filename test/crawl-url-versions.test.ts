@@ -127,6 +127,48 @@ describe('runSiteCrawl skipUrlVersionsAfter', () => {
     ])
   })
 
+  test('learns each section under a locale prefix separately', async () => {
+    const { report, requested } = await crawl((url) => {
+      if (url.pathname === '/') {
+        return html('<a href="/en/hub/">hub</a><a href="/en/news/?page=2">news 2</a><a href="/en/news/?page=3">news 3</a>')
+      }
+      // Found one layer deeper, so the news copies are learned before any blog page is fetched.
+      if (url.pathname === '/en/hub/') return html('<a href="/en/blog/?page=2">blog 2</a><a href="/en/blog/?page=3">blog 3</a>')
+      if (url.pathname === '/en/news/') return copyOf('/en/news/')
+      // Each later blog page declares itself canonical: `?page=` makes real pages here.
+      if (url.pathname === '/en/blog/') return html('<p>older posts</p>', canonical(`/en/blog/${url.search}`))
+      return null
+    }, { skipUrlVersionsAfter: 1 })
+
+    expect(requested.filter((url) => new URL(url).searchParams.has('page')).sort()).toEqual([
+      'https://example.test/en/blog/?page=2',
+      'https://example.test/en/blog/?page=3',
+      'https://example.test/en/news/?page=2',
+    ])
+    expect(report.summary.urlVersions?.patterns).toEqual([
+      { section: '/en/news', parameters: ['page'], copies: 1, skipped: 1, exampleUrl: 'https://example.test/en/news/?page=2' },
+    ])
+  })
+
+  test('keeps language, region and country prefixes with the section', async () => {
+    const { report } = await crawl((url) => {
+      if (url.pathname === '/') {
+        return html(['/ch/de', '/pt-BR', '/zh-Hans'].flatMap((prefix) => [
+          `<a href="${prefix}/units/1/?view=map">1</a>`,
+          `<a href="${prefix}/units/2/?view=map">2</a>`,
+        ]).join(''))
+      }
+      if (url.searchParams.has('view')) return copyOf(url.pathname)
+      return null
+    }, { skipUrlVersionsAfter: 1 })
+
+    expect(report.summary.urlVersions?.patterns.map((pattern) => pattern.section)).toEqual([
+      '/ch/de/units',
+      '/pt-BR/units',
+      '/zh-Hans/units',
+    ])
+  })
+
   test('learns only from a canonical the canonical audit accepts', async () => {
     const { report, requested } = await crawl((url) => {
       if (url.pathname === '/') {

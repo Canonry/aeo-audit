@@ -1,5 +1,11 @@
 # Changelog
 
+## 7.5.1 (2026-11-03)
+
+### Fixed
+- `skipUrlVersionsAfter` took a locale prefix for the site section, so on a site under `/en/` every section shared its patterns. Copies at `/en/news/?page=2` could skip the real pages at `/en/blog/?page=2` before any of them was fetched, and posts linked only from those pages were never found. A leading segment that names a locale (two letters, optionally with a script or region: `/en`, `/en-us`, `/pt_BR`, `/zh-Hans`) now stays with the segment after it, so `/en/news` and `/en/blog` learn separately, as `/news` and `/blog` already did. A site under a locale prefix now learns as the same site without the prefix would, so query copies of pages directly under the prefix, such as `/en/unit-7?forcecache=1`, are learned per page, like `/unit-7?forcecache=1`. `summary.urlVersions` reports such a section as `/en/news`.
+- `CRAWL_ENGINE_VERSION` is 2.4.1.
+
 ## 7.5.0 (2026-10-28)
 
 ### Added
