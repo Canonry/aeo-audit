@@ -215,10 +215,19 @@ function urlVersionOf(pageUrl: string, canonicalUrl: string | null): string | nu
 }
 
 /**
- * The pattern a query URL is learned under: its first path segment plus its
- * sorted parameter names. Values stay out, so `?forcecache=1` on every unit
- * page is one pattern, and the section keeps a lesson learned under `/units`
- * from deciding what `?page=` means under `/blog`.
+ * A path segment that names a language or country, such as `en`, `de`,
+ * `en-us`, `pt_BR`, `zh-Hans` or `es-419`: two letters, then optionally a
+ * script (four letters) and a region (two letters or three digits).
+ */
+const LOCALE_SEGMENT = /^[a-z]{2}(?:[-_][a-z]{4})?(?:[-_](?:[a-z]{2}|\d{3}))?$/i
+
+/**
+ * The pattern a query URL is learned under: its section plus its sorted
+ * parameter names. The section is the first path segment, kept with any locale
+ * prefix before it (`/en/blog`, `/ch/de/blog`). Values stay out, so
+ * `?forcecache=1` on every unit page is one pattern, and the section keeps a
+ * lesson learned under `/units` from deciding what `?page=` means under
+ * `/blog`, and one learned under `/en/news` from deciding it under `/en/blog`.
  */
 function urlVersionPatternOf(url: string): { key: string; section: string; parameters: string[] } | null {
   let parsed: URL
@@ -229,8 +238,10 @@ function urlVersionPatternOf(url: string): { key: string; section: string; param
   }
   if (parsed.search === '') return null
   const parameters = [...new Set(parsed.searchParams.keys())].sort()
-  const firstSegment = parsed.pathname.split('/').find(Boolean)
-  const section = firstSegment === undefined ? '/' : `/${firstSegment}`
+  const segments = parsed.pathname.split('/').filter(Boolean)
+  let localePrefix = 0
+  while (localePrefix < segments.length && LOCALE_SEGMENT.test(segments[localePrefix]!)) localePrefix += 1
+  const section = segments.length === 0 ? '/' : `/${segments.slice(0, localePrefix + 1).join('/')}`
   return { key: JSON.stringify([section, parameters]), section, parameters }
 }
 

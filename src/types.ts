@@ -662,7 +662,7 @@ export interface SitemapAuditOptions extends RunAeoAuditOptions {
 /** A report-shape version owned by the crawl engine, independent from `SCHEMA_VERSION`. */
 export const CRAWL_SCHEMA_VERSION = '2.0'
 /** Version identifiers let persisted checkpoints detect changes in crawl semantics. */
-export const CRAWL_ENGINE_VERSION = '2.4.0'
+export const CRAWL_ENGINE_VERSION = '2.4.1'
 export const CRAWL_URL_NORMALIZATION_VERSION = '1.1.0'
 export const CRAWL_INDEXABILITY_RULESET_VERSION = '1.0.0'
 export const CRAWL_LINK_SCORE_ALGORITHM_VERSION = 'pagerank-1.0.0'
@@ -988,7 +988,11 @@ export interface CrawlSummary {
  * valid link tag in the head.
  */
 export interface CrawlUrlVersionPattern {
-  /** First path segment the pattern was learned in, e.g. `/units`; `/` for the root path. */
+  /**
+   * Site section the pattern was learned in: the first path segment, e.g.
+   * `/units`, kept with any locale prefix before it, e.g. `/en/units`; `/` for
+   * the root path.
+   */
   section: string
   /** Sorted query parameter names, e.g. `['forcecache']`. Values are not part of the pattern. */
   parameters: string[]
