@@ -7,7 +7,10 @@ const html = (body: string) => new Response(`<!doctype html><html><body>${body}<
   headers: { 'content-type': 'text/html' },
 })
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 describe('full-crawl request pacing', () => {
   test('applies Crawl-delay before the first request after robots.txt', async () => {
@@ -73,25 +76,30 @@ describe('full-crawl request pacing', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const bounded = await Promise.race([
-      runSiteCrawl('https://example.test/', {
-        allowPrivateHost: 'example.test', sitemapUrl: 'https://example.test/map.xml', maxDurationMs: 30,
-      }),
-      new Promise<'stalled'>((resolve) => setTimeout(() => resolve('stalled'), 250)),
-    ])
-    expect(bounded).not.toBe('stalled')
-    if (bounded === 'stalled') throw new Error('crawl delay ignored the crawl deadline')
+    // The crawl reads Date.now() and waits with setTimeout. On a fake clock only
+    // this test spends the 30 ms budget, so robots.txt is always read first, however
+    // loaded the machine. A crawl that ignored the deadline would sit out the 60 s
+    // delay and time this test out.
+    vi.useFakeTimers()
+    const pending = runSiteCrawl('https://example.test/', {
+      allowPrivateHost: 'example.test', sitemapUrl: 'https://example.test/map.xml', maxDurationMs: 30,
+    })
+    await vi.advanceTimersByTimeAsync(31)
+    const bounded = await pending
+    vi.useRealTimers()
     expect(bounded.summary).toMatchObject({
       complete: false,
       terminationReason: 'max-duration',
       pacing: { robotsCrawlDelayMs: 60_000, effectiveDelayMs: 60_000 },
     })
 
+    // Room for a whole crawl on a loaded machine. Honoring the 60 s delay
+    // would still run out the budget, and effectiveDelayMs pins it below.
     const ignored = await runSiteCrawl('https://example.test/', {
       allowPrivateHost: 'example.test',
       sitemapUrl: 'https://example.test/map.xml',
       respectRobots: false,
-      maxDurationMs: 100,
+      maxDurationMs: 2_000,
     })
     expect(ignored.summary.complete).toBe(true)
     expect(ignored.summary.pacing).toMatchObject({ robotsCrawlDelayMs: 60_000, effectiveDelayMs: 0 })

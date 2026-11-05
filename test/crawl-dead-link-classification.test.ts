@@ -9,7 +9,10 @@ const html = (body: string) => new Response(`<!doctype html><html><body>${body}<
 
 const missing = () => new Response('', { status: 404 })
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 /**
  * The invariant: a dead link is a link whose target ANSWERED with 4xx/5xx. A
@@ -360,15 +363,21 @@ describe('a request may not outlive the crawl that owns it', () => {
       return missing()
     }))
 
-    const report = await runSiteCrawl('https://example.test/', {
+    // On a fake clock the root and the child's first failure happen at 0 ms,
+    // and the 500 ms backoff clipped to the 300 ms budget ends exactly at the
+    // deadline. On the real clock a loaded machine could spend the budget before
+    // the child, or the timer could fire a millisecond before Date.now() reached
+    // the deadline and let the retry out.
+    vi.useFakeTimers()
+    const pending = runSiteCrawl('https://example.test/', {
       allowPrivateHost: 'example.test',
       checkDeadLinks: true,
       mode: 'full',
-      // Enough to fetch the root and fail the child once, then expire during
-      // the 500ms backoff before the retry can be dispatched.
       maxDurationMs: 300,
       maxFetchRetries: 2,
     })
+    await vi.advanceTimersByTimeAsync(301)
+    const report = await pending
     if (report.mode !== 'full') throw new Error('expected full report')
 
     const target = report.pages.find((page) => page.requestedUrl.endsWith('/gone-quiet'))
