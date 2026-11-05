@@ -80,7 +80,9 @@ const POSTAL_ADDRESSES: ReadonlyArray<{ country: string; label: string; pattern:
 ]
 
 interface DomNode { type: string; name?: string; data?: string; children?: DomNode[] }
-const UNRENDERED = new Set(['script', 'style', 'noscript', 'template'])
+// Not page text. Form choices are left out too: a booking widget that lists
+// every sister property in a <select> does not name them as the page's own.
+const UNRENDERED = new Set(['script', 'style', 'noscript', 'template', 'select', 'option', 'optgroup', 'datalist'])
 
 /**
  * The body's text with a space between elements. The shared `textContent`
@@ -135,13 +137,14 @@ function isIdentifying(token: string): boolean {
   return !NON_IDENTIFYING.has(token) && (token.length > 1 || /\d/.test(token))
 }
 
-/** The first run of identifying words: "Hotel Playa Azul & Spa" -> "playa azul". */
-function leadingPhrase(tokens: string[]): string {
-  let start = 0
-  while (start < tokens.length && !isIdentifying(tokens[start]!)) start += 1
-  let end = start
-  while (end < tokens.length && isIdentifying(tokens[end]!)) end += 1
-  return tokens.slice(start, end).join(' ')
+/** Runs of identifying words: "Hotel Playa Azul & Spa at Bahia" -> ["playa azul"], ["bahia"]. */
+function identifyingRuns(tokens: string[]): string[][] {
+  const runs: string[][] = [[]]
+  for (const token of tokens) {
+    if (isIdentifying(token)) runs.at(-1)!.push(token)
+    else if (runs.at(-1)!.length) runs.push([])
+  }
+  return runs.filter((run) => run.length > 0)
 }
 
 let regionNames: Intl.DisplayNames[] | null | undefined
@@ -288,8 +291,10 @@ interface PageIdentity {
   h1s: string[]
   /** Folded and padded: the places a page states its own name. */
   anchors: string[]
-  /** Host name without the TLD, letters and digits only. */
+  /** Host name without the TLD, letters and digits only. Part of the site's brand. */
   host: string
+  /** Identifying words of og:site_name: the site's brand, on every page of it. */
+  brand: Set<string>
   /** Folded and padded: everything the page says, for mentions. */
   corpus: string
   raw: string
@@ -337,8 +342,9 @@ function readPage(context: AuditContext): PageIdentity {
   return {
     title,
     h1s,
-    anchors: [title, ...h1s, ogTitle, siteName].filter(Boolean).map((value) => ` ${fold(value)} `),
+    anchors: [title, ...h1s, ogTitle].filter(Boolean).map((value) => ` ${fold(value)} `),
     host,
+    brand: new Set(fold(siteName).split(' ').filter(isIdentifying)),
     corpus: ` ${fold(raw)} `,
     raw,
     words: countWords(visible),
@@ -346,14 +352,25 @@ function readPage(context: AuditContext): PageIdentity {
   }
 }
 
-/** True when the page names it, undefined when the name has nothing distinctive to look for. */
+/** A word the site's own brand explains: in og:site_name, or part of the host name. */
+function isBrandWord(token: string, page: PageIdentity): boolean {
+  return page.brand.has(token) || (token.length >= 4 && /^[a-z0-9]+$/.test(token) && page.host.includes(token))
+}
+
+/**
+ * True when the page names it, undefined when the name has nothing distinctive
+ * to look for. A brand word sits on every page of the site, sister properties
+ * included, so it cannot show which business a page is about: "Example Lakes
+ * Resort" is judged by "lakes" on a page of example.com. A name made only of
+ * the brand is left unjudged.
+ */
 function nameOnPage(name: string, page: PageIdentity): boolean | undefined {
   const tokens = fold(name).split(' ').filter(Boolean)
-  const distinctive = tokens.filter(isIdentifying)
-  if (!distinctive.length) return undefined
-  return page.anchors.some((anchor) => distinctive.some((token) => containsWords(anchor, token)))
-    || distinctive.some((token) => token.length >= 4 && /^[a-z0-9]+$/.test(token) && page.host.includes(token))
-    || containsWords(page.corpus, leadingPhrase(tokens))
+  const specific = new Set(tokens.filter((token) => isIdentifying(token) && !isBrandWord(token, page)))
+  if (!specific.size) return undefined
+  const phrase = identifyingRuns(tokens).find((run) => run.some((token) => specific.has(token)))
+  return page.anchors.some((anchor) => [...specific].some((token) => containsWords(anchor, token)))
+    || Boolean(phrase && containsWords(page.corpus, phrase.join(' ')))
 }
 
 function placeOnPage(place: Place, page: PageIdentity): boolean {
@@ -438,9 +455,10 @@ function describeMismatch(check: BusinessCheck, page: PageIdentity, nameMissing:
  * itself shows. A mismatch means one of two things the page contradicts:
  *
  * - The business name appears nowhere on the page: not in the title, an H1,
- *   og:title, og:site_name, the host name or the page text. Words like "The",
- *   "&", legal forms and "Resort" or "Hotel" are ignored, so variants of one
- *   name match.
+ *   og:title or the page text. Words like "The", "&", legal forms and "Resort"
+ *   or "Hotel" are ignored, so variants of one name match. So are words the
+ *   site's brand explains (og:site_name, the host name), which every sister
+ *   property shares. Form choices, such as a booking `<select>`, are not text.
  * - The address is in another country than the page shows (a `geo.region` tag,
  *   or a US or Canadian postal address in the page text), and the page never
  *   mentions the address's town, region, country or postal code.
