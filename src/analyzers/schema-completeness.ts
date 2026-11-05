@@ -1,4 +1,5 @@
 import { clampScore, describeRecommendedSchemas, detectSiteCategory, findSchemaByType } from './helpers.js'
+import { pageBusinessNodes } from '../local-business.js'
 import type { AnalysisResult, AuditContext, StructuredDataEntry } from '../types.js'
 
 interface BestSchemaMatch {
@@ -136,11 +137,16 @@ export function analyzeSchemaCompleteness(context: AuditContext): AnalysisResult
   // Questions, answers and steps may be written inline or as `@id` references.
   const resolveRef = createSchemaRefResolver(structuredData, context.url)
 
-  // LocalBusiness completeness
-  const localBiz = [
+  // LocalBusiness completeness. Subtypes such as Hotel or Restaurant count when
+  // the page declares them; deeper ones (an Offer's seller) are references to
+  // another business. An `@id` reference counts as the node it names.
+  const localBiz = [...new Set([
     ...findSchemaByType(structuredData, 'LocalBusiness'),
     ...findSchemaByType(structuredData, 'ProfessionalService'),
-  ]
+    ...pageBusinessNodes(structuredData)
+      .map(({ node }) => resolveRef(node) ?? node)
+      .filter((node) => !isNodeReference(node)),
+  ])]
 
   if (localBiz.length > 0) {
     checksRun += 1

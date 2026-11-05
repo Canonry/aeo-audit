@@ -132,3 +132,57 @@ describe('HowTo steps', () => {
     expect(findingsFor(result, 'howto').map((finding) => finding.message)).toEqual(['HowTo schema has 3 detailed steps.'])
   })
 })
+
+describe('LocalBusiness subtypes', () => {
+  // Synthetic business; 7 of the 8 LocalBusiness properties (no geo).
+  const inn = {
+    '@context': 'https://schema.org',
+    '@type': 'Hotel',
+    name: 'Juniper Cove Inn',
+    address: { '@type': 'PostalAddress', streetAddress: '12 Harbor Road', addressLocality: 'Port Alder', addressRegion: 'ME', postalCode: '04001', addressCountry: 'US' },
+    telephone: '+1-207-555-0142',
+    openingHours: 'Mo-Su 00:00-23:59',
+    priceRange: '$$',
+    image: 'https://example.com/inn.jpg',
+    url: 'https://example.com/',
+  }
+  const STRONG_LOCAL = {
+    type: 'found',
+    code: 'schema-completeness.local-business.strong',
+    message: 'LocalBusiness schema is 88% complete.',
+  }
+
+  it('checks a Hotel as LocalBusiness rather than as unrecognized schema', () => {
+    const result = analyze(inn)
+    expect(findingsFor(result, 'local-business')).toEqual([STRONG_LOCAL])
+    expect(findingsFor(result, 'schema-depth')).toEqual([])
+    expect(result.score).toBe(100)
+  })
+
+  it.each<[string, unknown[]]>([
+    ['in @graph', [{ '@context': 'https://schema.org', '@graph': [{ '@type': 'WebSite', name: 'Juniper Cove Inn' }, inn] }]],
+    ['with a schema.org type URL', [{ ...inn, '@type': 'https://schema.org/Resort' }]],
+    ['as a page mainEntity', [{ '@type': 'WebPage', mainEntity: inn }]],
+    ['as an @id reference to a node defined elsewhere', [
+      { '@type': 'WebPage', mainEntity: { '@type': 'Hotel', '@id': 'https://example.com/#inn' } },
+      { '@type': 'Organization', name: 'Harborlight Group', subOrganization: { ...inn, '@id': 'https://example.com/#inn' } },
+    ]],
+  ])('counts a subtype declared %s', (_where, blocks) => {
+    expect(findingsFor(analyze(...blocks), 'local-business')).toEqual([STRONG_LOCAL])
+  })
+
+  it('lists the properties a partial Restaurant is missing', () => {
+    const result = analyze({ '@type': 'Restaurant', name: 'Cantina Faro Rojo', address: '8 Wharf Lane, Port Alder', telephone: '+1-207-555-0199', url: 'https://example.com/' })
+    expect(findingsFor(result, 'local-business')).toEqual([
+      { type: 'info', code: 'schema-completeness.local-business.partial', message: 'LocalBusiness schema is 50% complete.' },
+    ])
+    expect(result.recommendations).toContain('Add missing LocalBusiness properties: openingHours, priceRange, image, geo.')
+  })
+
+  it.each<[string, unknown]>([
+    ['an Offer seller', { '@type': 'Product', name: 'Trail Map', offers: { '@type': 'Offer', price: '5.00', seller: { '@type': 'Store', name: 'Harbor Outfitters' } } }],
+    ['a reference the page never defines', { '@type': 'WebPage', mainEntity: { '@type': 'Hotel', '@id': 'https://example.com/#missing' } }],
+  ])('does not check %s as the page business', (_what, block) => {
+    expect(findingsFor(analyze(block), 'local-business')).toEqual([])
+  })
+})
