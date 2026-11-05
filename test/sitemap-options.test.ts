@@ -57,6 +57,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -187,6 +188,10 @@ describe('runSitemapAudit option forwarding', () => {
   })
 
   it('stops starting pages when the cumulative duration budget expires', async () => {
+    // The budget reads Date.now(). Freezing it lets only the page audits below
+    // move time, so a slow or loaded machine cannot spend the 10 ms budget
+    // before the sitemap fetch or before the five workers start.
+    vi.useFakeTimers({ toFake: ['Date'] })
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(sitemapXml(Array.from({ length: 10 }, (_, i) => `http://1.1.1.1/page-${i}`)), {
         status: 200,
@@ -194,7 +199,10 @@ describe('runSitemapAudit option forwarding', () => {
       }),
     ))
     runAeoAuditMock.mockImplementation(async (url: string) => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
+      // Yield first so every worker starts its page at elapsed 0, then let
+      // this page take 20 ms.
+      await Promise.resolve()
+      vi.advanceTimersByTime(20)
       return fakeReport(url)
     })
 
@@ -208,6 +216,7 @@ describe('runSitemapAudit option forwarding', () => {
     expect(report.metadata?.partial).toBe(true)
     expect(report.metadata?.budget).toMatchObject({
       maxDurationMs: 10,
+      elapsedMs: 100,
       pagesQueued: 10,
       pagesCompleted: 5,
       pagesRemaining: 5,
