@@ -1,5 +1,11 @@
 # Changelog
 
+## 7.6.1 (2026-11-05)
+
+### Fixed
+- The schema identity check read the options of a `<select>` or `<datalist>` as page text, so a booking widget listing every sister property let a page carrying another property's markup report `entity-consistency.schema-identity.ok`. Form choices no longer count as the page naming a business or a place.
+- A brand word shared by sister properties made their names match each other: one property's markup on another property's page matched because the brand word was in the title and host name. Words the site's brand explains (`og:site_name` and the host name) no longer count as a match on their own, and a name made only of the brand is not judged. A page whose business name is just its `og:site_name` or host name now gets no `schema-identity` finding instead of `ok`.
+
 ## 7.6.0 (2026-11-05)
 
 ### Added

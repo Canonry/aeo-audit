@@ -80,14 +80,13 @@ describe('schema identity', () => {
     ["Ollie's Harbor Grill", 'Ollies Harbor Grill - Port Alder'],
     ['JUNIPER COVE INN', 'juniper cove inn'],
   ])('treats "%s" and the title "%s" as one name', (name, title) => {
-    const result = identity({ title, h1: 'Rooms and rates', body: FILLER, schema: { '@type': 'LocalBusiness', name } })
+    // A host that shares no word with the names, so none of them is the site's brand.
+    const result = identity({ url: 'https://www.stays.test/rooms/', title, h1: 'Rooms and rates', body: FILLER, schema: { '@type': 'LocalBusiness', name } })
     expect(result).toEqual([expect.objectContaining({ type: 'found', code: 'entity-consistency.schema-identity.ok' })])
   })
 
   it.each<[string, Page]>([
     ['the H1', { h1: 'Juniper Cove Inn' }],
-    ['og:site_name', { head: '<meta property="og:site_name" content="Juniper Cove Inn">' }],
-    ['the host name', { url: 'https://www.junipercoveinn.example/rooms/deluxe-king/' }],
     ['the page text', { body: `${FILLER}<footer><p>© 2026 Juniper Cove Inn</p></footer>` }],
     ['an alternateName', { h1: 'Juniper Cove Inn', schema: { '@type': 'Hotel', name: 'Harborlight Holdings', alternateName: 'Juniper Cove Inn' } }],
   ])('accepts a name found only in %s', (_where, page) => {
@@ -95,14 +94,56 @@ describe('schema identity', () => {
       .toEqual(['entity-consistency.schema-identity.ok'])
   })
 
-  it('flags a sister property that shares the brand but sits in another country', () => {
+  it.each<[string, Page]>([
+    ['og:site_name', { head: '<meta property="og:site_name" content="Juniper Cove Inn">' }],
+    ['the host name', { url: 'https://www.junipercoveinn.example/rooms/deluxe-king/' }],
+  ])('leaves a name made only of the site brand in %s unjudged', (_where, page) => {
+    // Every page of the site shares its brand, so it cannot tell this page's
+    // business from a sister property's. Nothing is flagged.
+    expect(identity({ title: 'Deluxe King Room', h1: 'Deluxe King Room', body: FILLER, schema: { '@type': 'Hotel', name: 'Juniper Cove Inn' }, ...page }))
+      .toEqual([])
+  })
+
+  it('flags a sister property that shares only the brand and sits in another country', () => {
     const [finding, ...rest] = identity({
       title: 'Example Resort Port Alder', h1: 'Example Resort Port Alder',
       schema: { '@type': 'Resort', name: 'Example Resort Bahía Clara', address: abroad },
     })
     expect(rest).toEqual([])
     expect(finding?.code).toBe('entity-consistency.schema-identity.mismatch')
-    expect(finding?.message).not.toContain('Name:')
+    expect(finding?.message).toContain('Name: not found in the title "Example Resort Port Alder"')
+    expect(finding?.message).toContain('Address: Bahía Clara, Costa Norte, Mexico, but the page shows a US postal address')
+  })
+
+  it('flags a sister property that shares only the brand word, in the same country', () => {
+    const page = {
+      url: 'https://www.example.com/resorts/town-center/',
+      title: 'Example Town Center Resort | Example Resorts',
+      h1: 'Example Town Center Resort',
+      head: '<meta property="og:site_name" content="Example Resorts">',
+    }
+    const sister = {
+      '@type': 'Resort', name: 'Example Lakes Resort & Spa',
+      address: { '@type': 'PostalAddress', addressLocality: 'Port Alder', addressRegion: 'ME', addressCountry: 'US' },
+    }
+    const [finding, ...rest] = identity({ ...page, schema: sister })
+    expect(rest).toEqual([])
+    expect(finding?.code).toBe('entity-consistency.schema-identity.mismatch')
+    expect(finding?.message).toContain('Name: not found in the title "Example Town Center Resort | Example Resorts"')
+    expect(finding?.message).not.toContain('Address:')
+    // The same markup on the page that names that property matches.
+    expect(codes({ ...page, title: 'Example Lakes Resort & Spa | Example Resorts', h1: 'Example Lakes Resort & Spa', schema: sister }))
+      .toEqual(['entity-consistency.schema-identity.ok'])
+  })
+
+  it('does not read booking-form choices as the page naming a business or place', () => {
+    const booking = '<form><label>Choose a resort <select name="resort">'
+      + '<option>Juniper Cove Inn, Port Alder, Maine</option><option>Hotel Mirador Azul, Bahía Clara, Mexico</option>'
+      + '<optgroup label="Lodges"><option>Saltmarsh Lodge</option></optgroup>'
+      + '</select></label><input list="towns"><datalist id="towns"><option value="Bahía Clara">Bahía Clara</option></datalist></form>'
+    const [finding] = identity({ ...ownPage, body: `${FILLER}${booking}${OWN_FOOTER}`, schema: strayResort })
+    expect(finding?.code).toBe('entity-consistency.schema-identity.mismatch')
+    expect(finding?.message).toContain('Name: not found in the title')
     expect(finding?.message).toContain('Address: Bahía Clara, Costa Norte, Mexico, but the page shows a US postal address')
   })
 
