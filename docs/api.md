@@ -132,6 +132,17 @@ The `entity-consistency.title.short` informational finding flags a nonempty titl
 
 Report schema 3.5 adds optional `factors[].advisoryRecommendations`, a subset of the existing recommendation strings. Short-title advice is tagged this way and placed after actionable recommendations. Site-wide aggregation ranks actionable recommendations first, then uses prevalence and alphabetical ordering within each tier. If any page leaves a recommendation untagged, it retains the existing actionable priority; older reports need no new field. An otherwise healthy page still exposes its title advice, and full findings and scores are unchanged.
 
+### Schema identity
+
+From 7.6.0, Entity Consistency compares the page's LocalBusiness JSON-LD with the business the page itself shows. Any LocalBusiness subtype counts (`Hotel`, `LodgingBusiness`, `Restaurant` and so on), at the top level, in `@graph`, or as a page's `mainEntity` or `about`. `entity-consistency.schema-identity.mismatch` (type `missing`) fires when either holds:
+
+- **Name.** The business name appears nowhere on the page: not in the title, an H1, `og:title`, `og:site_name`, the host name or the page text (including image alt text and meta descriptions). Case, accents, punctuation, articles, legal forms and business words such as "Resort", "Hotel" and "Spa" are ignored, so "The Example Resort" and "Example Resort & Spa" are one name. `alternateName` and `legalName` count as the business's names too.
+- **Country.** The address is in a different country than the page shows, and the page never mentions the address's town, region, country, street or postal code. The page's country comes from a `geo.region` meta tag or a US or Canadian postal address in its text. With neither, countries are not compared.
+
+The check prefers silence to a false alarm. It skips `Organization` markup, which usually names a publisher or parent brand, and names with nothing distinctive ("The Inn"). It never calls a name missing on a page without a title or H1, or with fewer than 50 words of text. On a page with several businesses, such as a listing, an unnamed one is flagged only when the page names another of them. A page that names the other business anywhere, for example in a footer list of sister properties, is not flagged on the name.
+
+When the page names at least one of its businesses and nothing mismatches, the page gets `entity-consistency.schema-identity.ok` instead. A page carries at most one of the two codes. The mismatch message names the first business that does not match, says what conflicts, and counts any others. Neither code changes the score, and the mismatch recommendation leads the factor's list.
+
 ### Link placement
 
 Every anchor edge carries `placementOccurrences?: { navigation, content, unknown }`, which is where the occurrences of that link sat in the page. Placement is read from HTML landmarks, so a nav link and an in-prose link to the same URL with the same anchor text are distinguishable without inferring anything from how often the link repeats across the site.

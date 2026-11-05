@@ -1,5 +1,10 @@
 # Changelog
 
+## 7.6.0 (2026-11-05)
+
+### Added
+- Entity Consistency flags LocalBusiness JSON-LD (`Hotel`, `LodgingBusiness`, `Restaurant` and the other subtypes) that describes a different business than its page, with `entity-consistency.schema-identity.mismatch`. It fires when the page never names the business (title, H1, `og:title`, `og:site_name`, host name or page text, ignoring case, accents, punctuation, articles, legal forms and words like "Resort" or "Hotel"), or when the address is in a different country than the page shows (a `geo.region` tag, or a US or Canadian postal address in the text) and the page never mentions the address's town, region, country or postal code. Organization markup and generic names are not judged, a name is never called missing on a page with too little text, and on a page with several businesses an unnamed one is flagged only when the page names another. A page whose business matches gets `entity-consistency.schema-identity.ok`. Scores are unchanged.
+
 ## 7.5.0 (2026-10-28)
 
 ### Added

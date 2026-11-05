@@ -8,6 +8,7 @@ import {
 } from './helpers.js'
 import type { AnalysisResult, AuditContext, StructuredDataEntry } from '../types.js'
 import { analyzeCanonicalLinks } from './canonical-links.js'
+import { checkSchemaIdentity } from './schema-identity.js'
 
 function extractSchemaContacts(structuredData: StructuredDataEntry[]): { emails: string[]; phones: string[] } {
   const emails: string[] = []
@@ -74,6 +75,18 @@ export function analyzeEntityConsistency(context: AuditContext): AnalysisResult 
     recommendations.push('Standardize brand/entity naming in HTML metadata and JSON-LD.')
   }
 
+  // Business JSON-LD that describes another business than the page shows.
+  // Reported without a score change: the naming check above already scores
+  // alignment, and this names the specific contradiction to fix.
+  const identityRecommendations: string[] = []
+  const identity = checkSchemaIdentity(context)
+  if (identity.status === 'mismatch') {
+    findings.push({ type: 'missing', code: 'entity-consistency.schema-identity.mismatch', message: identity.message })
+    identityRecommendations.push('Update this page\'s JSON-LD so its business name and address describe the business the page shows. Mismatched markup tells answer engines the page belongs to another business.')
+  } else if (identity.status === 'match') {
+    findings.push({ type: 'found', code: 'entity-consistency.schema-identity.ok', message: identity.message })
+  }
+
   // Length is a review heuristic, not a search-engine requirement. Preserve
   // existing scores: a concise title can accurately describe its page.
   const rawTitle = (context.pageTitle || '').trim()
@@ -126,9 +139,10 @@ export function analyzeEntityConsistency(context: AuditContext): AnalysisResult 
   return {
     score: clampScore(score),
     findings,
-    // Single-page renderers also use the first recommendation, so keep
-    // optional advice after any naming, canonical or contact fixes here.
-    recommendations: [...recommendations, ...advisoryRecommendations],
+    // Single-page renderers also use the first recommendation, so a schema
+    // identity fix leads and optional advice follows naming, canonical and
+    // contact fixes.
+    recommendations: [...identityRecommendations, ...recommendations, ...advisoryRecommendations],
     ...(advisoryRecommendations.length ? { advisoryRecommendations } : {}),
   }
 }

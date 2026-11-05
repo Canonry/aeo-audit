@@ -141,6 +141,8 @@ These are comparison findings, namespaced under `site` rather than a single-page
 - `entity-consistency.name.single`
 - `entity-consistency.name.moderate`
 - `entity-consistency.name.multiple`
+- `entity-consistency.schema-identity.ok`
+- `entity-consistency.schema-identity.mismatch`: LocalBusiness JSON-LD names a business the page never names, or places it in a country the page contradicts. No score change; see [Schema identity](api.md#schema-identity).
 - `entity-consistency.title.ok`
 - `entity-consistency.title.short` — fewer than 15 characters; a review hint, not a scoring penalty or search-engine minimum.
 - `entity-consistency.title.long`

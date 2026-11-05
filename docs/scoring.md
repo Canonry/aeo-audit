@@ -20,7 +20,7 @@ AI answer engines are replacing traditional search for millions of queries. Gett
 | FAQ Content | 8% | FAQPage schema, details/summary blocks, question-style headings |
 | Citations & Authority | 8% | External links, authoritative domains, sameAs references |
 | Schema Completeness | 8% | Property depth per schema type vs recommended properties |
-| Entity Consistency | 7% | Name consistency across schema, title, og:title; contact alignment |
+| Entity Consistency | 7% | Name consistency across schema, title, og:title; business JSON-LD that names another business or country than the page; contact alignment |
 | Content Freshness | 7% | dateModified, Last-Modified header, sitemap lastmod, copyright year |
 | Content Extractability | 6% | Content-to-boilerplate ratio, citation-ready blocks, paywall detection |
 | Definition Blocks | 6% | "What is", "How to" headings, step lists, HowTo schema, dl elements |
