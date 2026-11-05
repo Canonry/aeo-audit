@@ -1,5 +1,10 @@
 # Changelog
 
+## 7.6.2 (2026-11-05)
+
+### Fixed
+- A page marked up as `Hotel`, `Resort`, `Restaurant`, `Dentist` or another LocalBusiness subtype was treated as having no LocalBusiness schema, because four checks matched the literal type name. Schema Completeness reported no recognized schema types and advised adding schema, Structured Data reported "LocalBusiness schema not found", E-E-A-T reported no Organization schema, and the optional Geographic Signals reported no LocalBusiness schema. All four now count a business the page declares: at the top level, in `@graph`, or as a page's `mainEntity` or `about`, including `https://schema.org/` type URLs. Schema Completeness also follows `@id` references. A business nested deeper, such as an Offer's `seller`, still does not count, since it usually names another business. These factors' scores change on pages with subtype markup.
+
 ## 7.6.1 (2026-11-05)
 
 ### Fixed

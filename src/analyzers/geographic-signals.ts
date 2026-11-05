@@ -1,4 +1,5 @@
 import { clampScore, extractSchemaTypes } from './helpers.js'
+import { pageBusinessNodes } from '../local-business.js'
 import type { AnalysisResult, AuditContext, StructuredDataEntry } from '../types.js'
 
 function hasAddressInSchema(structuredData: StructuredDataEntry[]): boolean {
@@ -19,7 +20,8 @@ export function analyzeGeographicSignals(context: AuditContext): AnalysisResult 
   let score = 0
 
   const schemaTypes = extractSchemaTypes(context.structuredData)
-  if (schemaTypes.has('LocalBusiness')) {
+  // Hotel, Restaurant and the other LocalBusiness subtypes the page declares count.
+  if (schemaTypes.has('LocalBusiness') || pageBusinessNodes(context.structuredData).length > 0) {
     score += 32
     findings.push({ type: 'found', code: 'geographic-signals.localbusiness-schema.found', message: 'LocalBusiness schema detected.' })
   } else {

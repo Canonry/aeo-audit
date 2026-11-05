@@ -1,4 +1,5 @@
 import { clampScore, extractSchemaTypes, findTopLevelSchemaByType } from './helpers.js'
+import { pageBusinessNodes } from '../local-business.js'
 import type { AnalysisResult, AuditContext, StructuredDataEntry } from '../types.js'
 
 export function analyzeEeatSignals(context: AuditContext): AnalysisResult {
@@ -95,11 +96,13 @@ export function analyzeEeatSignals(context: AuditContext): AnalysisResult {
   // Only consider top-level entity declarations — not orgs nested as publisher,
   // brand, memberOf, etc. inside other schemas — since those are references rather
   // than the primary entity the page represents.
-  const orgs = [
+  const orgs = [...new Set([
     ...findTopLevelSchemaByType(context.structuredData, 'Organization'),
     ...findTopLevelSchemaByType(context.structuredData, 'LocalBusiness'),
     ...findTopLevelSchemaByType(context.structuredData, 'ProfessionalService'),
-  ]
+    // Hotel, Restaurant and the other LocalBusiness subtypes the page declares.
+    ...pageBusinessNodes(context.structuredData).map(({ node }) => node),
+  ])]
 
   const orgWithPeople = orgs.filter((org) => org.founder || org.employee || org.member)
 

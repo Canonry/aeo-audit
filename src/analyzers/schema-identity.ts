@@ -1,44 +1,7 @@
 import type { CheerioAPI } from 'cheerio'
 import { countWords, normalizeText } from './helpers.js'
+import { pageBusinessNodes } from '../local-business.js'
 import type { AuditContext, StructuredDataEntry } from '../types.js'
-
-/**
- * schema.org LocalBusiness and its subtypes. A node of one of these types says
- * "this page is about the business at this address", so its name and place can
- * be held against the page. Organization is left out on purpose: it is usually
- * the publisher or parent brand, which a page has no reason to name.
- */
-const LOCAL_BUSINESS_TYPES: ReadonlySet<string> = new Set(`
-  LocalBusiness AnimalShelter ArchiveOrganization ChildCare DryCleaningOrLaundry
-  EmploymentAgency InternetCafe Library ProfessionalService RadioStation RealEstateAgent
-  RecyclingCenter SelfStorage ShoppingCenter TelevisionStation TouristInformationCenter
-  TravelAgency
-  AutomotiveBusiness AutoBodyShop AutoDealer AutoPartsStore AutoRental AutoRepair AutoWash
-  GasStation MotorcycleDealer MotorcycleRepair
-  EmergencyService FireStation Hospital PoliceStation
-  EntertainmentBusiness AdultEntertainment AmusementPark ArtGallery Casino ComedyClub
-  MovieTheater NightClub
-  FinancialService AccountingService AutomatedTeller BankOrCreditUnion InsuranceAgency
-  FoodEstablishment Bakery BarOrPub Brewery CafeOrCoffeeShop Distillery FastFoodRestaurant
-  IceCreamShop Restaurant Winery
-  GovernmentOffice PostOffice
-  HealthAndBeautyBusiness BeautySalon DaySpa HairSalon HealthClub NailSalon TattooParlor
-  HomeAndConstructionBusiness Electrician GeneralContractor HVACBusiness HousePainter
-  Locksmith MovingCompany Plumber RoofingContractor
-  LegalService Attorney Notary
-  LodgingBusiness BedAndBreakfast Campground Hostel Hotel Motel Resort SkiResort VacationRental
-  MedicalBusiness CommunityHealth Dentist Dermatology DietNutrition Emergency Geriatric
-  Gynecologic MedicalClinic CovidTestingFacility Midwifery Nursing Obstetric Oncologic
-  Optician Optometric Otolaryngologic Pediatric Pharmacy Physician IndividualPhysician
-  PhysiciansOffice Physiotherapy PlasticSurgery Podiatric PrimaryCare Psychiatric PublicHealth
-  SportsActivityLocation BowlingAlley ExerciseGym GolfCourse PublicSwimmingPool SportsClub
-  StadiumOrArena TennisComplex
-  Store BikeStore BookStore ClothingStore ComputerStore ConvenienceStore DepartmentStore
-  ElectronicsStore Florist FurnitureStore GardenStore GroceryStore HardwareStore HobbyShop
-  HomeGoodsStore JewelryStore LiquorStore MensClothingStore MobilePhoneStore MovieRentalStore
-  MusicStore OfficeEquipmentStore OutletStore PawnShop PetStore ShoeStore SportingGoodsStore
-  TireShop ToyStore WholesaleStore
-`.split(/\s+/).filter(Boolean))
 
 /**
  * Words that do not tell one business from another: articles and joiners,
@@ -218,37 +181,6 @@ export function resolveCountry(raw: string): string | undefined {
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? normalizeText(value) : undefined
-}
-
-function businessType(node: StructuredDataEntry): string | undefined {
-  const types = Array.isArray(node['@type']) ? node['@type'] : [node['@type']]
-  for (const type of types) {
-    if (typeof type !== 'string') continue
-    const bare = type.trim().replace(/^(?:https?:\/\/schema\.org\/|schema:)/i, '')
-    if (LOCAL_BUSINESS_TYPES.has(bare)) return bare
-  }
-  return undefined
-}
-
-/** Business nodes the page declares: top level, `@graph` members, and a page's `mainEntity` or `about`. */
-function businessNodes(structuredData: StructuredDataEntry[]): { node: StructuredDataEntry; type: string }[] {
-  const seen = new Set<object>()
-  const nodes: { node: StructuredDataEntry; type: string }[] = []
-  const consider = (value: unknown): void => {
-    for (const candidate of Array.isArray(value) ? value : [value]) {
-      if (!candidate || typeof candidate !== 'object' || seen.has(candidate)) continue
-      const type = businessType(candidate as StructuredDataEntry)
-      if (!type) continue
-      seen.add(candidate)
-      nodes.push({ node: candidate as StructuredDataEntry, type })
-    }
-  }
-  for (const item of structuredData) {
-    consider(item)
-    consider(item.mainEntity)
-    consider(item.about)
-  }
-  return nodes
 }
 
 function readNames(node: StructuredDataEntry, key: 'name' | 'alternateName' | 'legalName'): string[] {
@@ -469,7 +401,7 @@ function describeMismatch(check: BusinessCheck, page: PageIdentity, nameMissing:
  * the page is named, because a listing page names none of them in its title.
  */
 export function checkSchemaIdentity(context: AuditContext): SchemaIdentityResult {
-  const nodes = businessNodes(context.structuredData)
+  const nodes = pageBusinessNodes(context.structuredData)
   if (!nodes.length) return { status: 'unknown' }
 
   const page = readPage(context)

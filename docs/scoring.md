@@ -13,7 +13,7 @@ AI answer engines are replacing traditional search for millions of queries. Gett
 
 | Factor | Weight | What It Checks |
 |--------|--------|---------------|
-| Structured Data (JSON-LD) | 12% | Presence of LocalBusiness, FAQPage, Service, HowTo schemas |
+| Structured Data (JSON-LD) | 12% | Presence of LocalBusiness (or a subtype such as Hotel), FAQPage, Service, HowTo schemas |
 | Content Depth | 10% | Word count, heading hierarchy, paragraph structure, lists |
 | AI Access Files (llms.txt, sitemap) | 5% | llms.txt, llms-full.txt, robots.txt, sitemap.xml availability, per-page Markdown source endpoints |
 | E-E-A-T Signals | 8% | Author meta, Person schema credentials, trust pages, reviews |

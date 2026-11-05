@@ -1,4 +1,5 @@
 import { clampScore, describeRecommendedSchemas, detectSiteCategory, extractSchemaTypes } from './helpers.js'
+import { pageBusinessNodes } from '../local-business.js'
 import type { AnalysisResult, AuditContext } from '../types.js'
 
 const PRIORITY_TYPES = ['LocalBusiness', 'FAQPage', 'Service', 'HowTo']
@@ -36,8 +37,11 @@ export function analyzeStructuredData(context: AuditContext): AnalysisResult {
     recommendations.push(`Add JSON-LD with ${describeRecommendedSchemas(detection)}.`)
   }
 
+  // A LocalBusiness subtype the page declares (Hotel, Restaurant) is LocalBusiness
+  // schema. A nested one, such as an Offer's seller, names another business.
+  const declaresBusiness = pageBusinessNodes(structuredData).length > 0
   for (const type of PRIORITY_TYPES) {
-    if (schemaTypes.has(type)) {
+    if (schemaTypes.has(type) || (type === 'LocalBusiness' && declaresBusiness)) {
       score += 12
       findings.push({ type: 'found', code: 'structured-data.schema.found', message: `${type} schema detected.` })
     } else {
