@@ -37,6 +37,11 @@ function bar(score: number, width = 20): string {
   return `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(width - filled)}${RESET}`
 }
 
+/** Width of a name column: the longest name, never narrower than `min`. */
+function nameColumnWidth(names: readonly string[], min: number): number {
+  return names.reduce((width, name) => Math.max(width, name.length), min)
+}
+
 /** Page metadata is evidence, not terminal control sequences or extra report rows. */
 function issueText(value: string): string {
   return value.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/gu, ' ').trim()
@@ -56,11 +61,12 @@ export function formatText(report: AuditReport): string {
   lines.push(`${'─'.repeat(70)}`)
 
   const sorted = [...report.factors].sort((a, b) => b.score - a.score)
+  const nameWidth = nameColumnWidth(sorted.map((factor) => factor.name), 30)
 
   for (const factor of sorted) {
     const icon = scoreIcon(factor.score)
     const fc = scoreColor(factor.score)
-    const name = factor.name.padEnd(30)
+    const name = factor.name.padEnd(nameWidth)
     lines.push(`  ${icon} ${name} ${bar(factor.score)} ${fc}${String(factor.score).padStart(3)}${RESET} ${DIM}(${factorSharePct(factor, report.factors)}% of score)${RESET}`)
   }
 
@@ -169,6 +175,10 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
     lines.push(`${BOLD}Cross-Cutting Issues${RESET}`)
     lines.push(`${'─'.repeat(70)}`)
 
+    const issueNames = report.crossCuttingIssues.map((issue) => issue.factorName)
+    const taggedNameWidth = nameColumnWidth(issueNames, 30)
+    const issueNameWidth = nameColumnWidth(issueNames, 32)
+
     for (const issue of report.crossCuttingIssues) {
       const best = `${DIM}best ${issue.bestScore}/100 on ${issue.bestPageUrl}${RESET}`
 
@@ -177,18 +187,18 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
       // "add it everywhere" dump (those pages have no business carrying it). The
       // actionable, scoped tune-up lives in Prioritized Fixes below.
       if (issue.status === 'limited') {
-        lines.push(`  ${YELLOW}${issue.factorName.padEnd(30)}${RESET} ${YELLOW}[limited]${RESET} ${DIM}avg ${issue.applicableAvgScore}/100 across ${issue.applicablePages} page${issue.applicablePages === 1 ? '' : 's'} with it${RESET} · ${best}`)
+        lines.push(`  ${YELLOW}${issue.factorName.padEnd(taggedNameWidth)}${RESET} ${YELLOW}[limited]${RESET} ${DIM}avg ${issue.applicableAvgScore}/100 across ${issue.applicablePages} page${issue.applicablePages === 1 ? '' : 's'} with it${RESET} · ${best}`)
         lines.push(`      ${DIM}present but isolated — a tune-up where it exists, not a site-wide gap${RESET}`)
         continue
       }
       if (issue.status === 'opportunity') {
-        lines.push(`  ${DIM}${issue.factorName.padEnd(30)} [opportunity] avg ${issue.avgScore}/100 · not present on any audited page${RESET}`)
+        lines.push(`  ${DIM}${issue.factorName.padEnd(taggedNameWidth)} [opportunity] avg ${issue.avgScore}/100 · not present on any audited page${RESET}`)
         continue
       }
 
       const pct = Math.round((issue.affectedPages / issue.totalPages) * 100)
       const igc = scoreColor(issue.applicableAvgScore)
-      lines.push(`  ${igc}${issue.factorName.padEnd(32)}${RESET} ${DIM}avg ${issue.applicableAvgScore}/100${RESET} · ${best} ${DIM}(affects ${pct}% of pages)${RESET}`)
+      lines.push(`  ${igc}${issue.factorName.padEnd(issueNameWidth)}${RESET} ${DIM}avg ${issue.applicableAvgScore}/100${RESET} · ${best} ${DIM}(affects ${pct}% of pages)${RESET}`)
 
       for (const detail of issue.topIssues) {
         lines.push(`      ${DIM}• ${detail.recommendation}${RESET} ${DIM}(${detail.affectedUrls.length}/${issue.totalPages} pages)${RESET}`)
