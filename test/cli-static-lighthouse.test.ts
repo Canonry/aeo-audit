@@ -20,7 +20,7 @@ describe('static-output mode rejects Lighthouse', () => {
     vi.stubGlobal('fetch', fetchSpy)
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const code = await main(['node', 'aeo-audit', STATIC_ARG, '--factors', 'lighthouse'])
+    const code = await main(['node', 'agent-readiness', STATIC_ARG, '--factors', 'lighthouse'])
 
     expect(code).toBe(1)
     expect(fetchSpy).not.toHaveBeenCalled()
@@ -30,7 +30,7 @@ describe('static-output mode rejects Lighthouse', () => {
   it('still rejects the --lighthouse flag in static mode', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const code = await main(['node', 'aeo-audit', STATIC_ARG, '--lighthouse'])
+    const code = await main(['node', 'agent-readiness', STATIC_ARG, '--lighthouse'])
 
     expect(code).toBe(1)
     expect(errorSpy.mock.calls.flat().join(' ')).toContain('static-output mode')

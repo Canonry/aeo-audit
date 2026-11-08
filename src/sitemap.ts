@@ -1,4 +1,4 @@
-import { AeoAuditError } from './errors.js'
+import { AgentReadinessError } from './errors.js'
 import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
 import {
   FetchBudgetController,
@@ -10,7 +10,7 @@ import {
   throwIfAborted,
 } from './fetch-page.js'
 import { parseSitemapXmlDocument, type SitemapXmlEntry } from './sitemap-xml.js'
-import { runAeoAudit } from './index.js'
+import { runAgentReadinessAudit } from './index.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { PAGE_SPECIFIC_FACTOR_IDS, factorApplies } from './scoring.js'
 import { buildTemplateGroups, summarizeFixReach } from './templates.js'
@@ -23,7 +23,7 @@ import type {
   CrossCuttingIssue,
   CrossCuttingStatus,
   PrioritizedFix,
-  RunAeoAuditOptions,
+  RunAgentReadinessAuditOptions,
   ScoredFactor,
   SitemapAuditOptions,
   SitemapAuditReport,
@@ -115,7 +115,7 @@ interface SitemapFetchResult {
 interface SitemapFetchOptions {
   allowPrivateHost?: string
   signal?: AbortSignal
-  onOutboundAttempt?: RunAeoAuditOptions['onOutboundAttempt']
+  onOutboundAttempt?: RunAgentReadinessAuditOptions['onOutboundAttempt']
   budget?: FetchBudgetController
   kind?: 'sitemap' | 'robots'
 }
@@ -163,8 +163,8 @@ async function fetchSitemapResponse(url: string, fetchOptions?: string | Sitemap
     responseDeadlineAt = result.responseDeadlineAt
   } catch (error) {
     if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) throw error
-    if (error instanceof AeoAuditError) throw error
-    throw new AeoAuditError('UNREACHABLE', 'Could not fetch sitemap.', { cause: error })
+    if (error instanceof AgentReadinessError) throw error
+    throw new AgentReadinessError('UNREACHABLE', 'Could not fetch sitemap.', { cause: error })
   }
 
   if (!response.ok) {
@@ -178,21 +178,21 @@ async function fetchSitemapResponse(url: string, fetchOptions?: string | Sitemap
       maxBytes: SITEMAP_MAX_BYTES,
       signal,
       deadlineAt: responseDeadlineAt,
-      deadlineError: () => new AeoAuditError('TIMEOUT', `Request timed out after ${SITEMAP_TIMEOUT_MS}ms.`),
+      deadlineError: () => new AgentReadinessError('TIMEOUT', `Request timed out after ${SITEMAP_TIMEOUT_MS}ms.`),
       tooLargeMessage: `Sitemap exceeded ${SITEMAP_MAX_BYTES} bytes.`,
     })
     return { body, status: response.status }
   } catch (error) {
     if (isCallerAbort(error, signal) || isFetchBudgetExceededError(error)) throw error
-    if (error instanceof AeoAuditError) throw error
-    throw new AeoAuditError('UNREACHABLE', 'Could not read sitemap response.', { cause: error })
+    if (error instanceof AgentReadinessError) throw error
+    throw new AgentReadinessError('UNREACHABLE', 'Could not read sitemap response.', { cause: error })
   }
 }
 
 async function fetchSitemapBody(url: string, options?: string | SitemapFetchOptions): Promise<string> {
   const result = await fetchSitemapResponse(url, options)
   if (result.status < 200 || result.status >= 300) {
-    throw new AeoAuditError('UNREACHABLE', `Sitemap returned HTTP ${result.status}.`)
+    throw new AgentReadinessError('UNREACHABLE', `Sitemap returned HTTP ${result.status}.`)
   }
   return result.body
 }
@@ -690,7 +690,7 @@ function buildPrioritizedFixes(
 function assertPositiveIntegerOption(name: string, value: number | undefined): void {
   if (value === undefined) return
   if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new AeoAuditError('BAD_INPUT', `${name} must be a positive integer.`)
+    throw new AgentReadinessError('BAD_INPUT', `${name} must be a positive integer.`)
   }
 }
 
@@ -755,7 +755,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
       budget,
     })
     if (!discovered) {
-      throw new AeoAuditError(
+      throw new AgentReadinessError(
         'UNREACHABLE',
         'No sitemap found. Tried /sitemap.xml, /sitemap-index.xml, and the Sitemap: directive in /robots.txt. Pass --sitemap <url> with an explicit URL if your sitemap lives elsewhere.',
       )
@@ -850,7 +850,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
       }
     }
 
-    throw new AeoAuditError(
+    throw new AgentReadinessError(
       'BAD_INPUT',
       pathFilter
         ? 'No auditable URLs found in sitemap after applying the changed-page path filter.'
@@ -871,7 +871,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
   // single-URL mode. includeLighthouse is deliberately NOT forwarded: each
   // PageSpeed Insights call takes 15-30s, so running it across a sitemap would be
   // pathological — the CLI rejects --lighthouse + --sitemap for the same reason.
-  const auditOptions: RunAeoAuditOptions & { budget?: FetchBudgetController } = {
+  const auditOptions: RunAgentReadinessAuditOptions & { budget?: FetchBudgetController } = {
     factors: options.factors,
     includeGeo: options.includeGeo,
     includeAgentSkills: options.includeAgentSkills,
@@ -902,7 +902,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
         const entry = entries[i]
 
         try {
-          const report = await runAeoAudit(entry.loc, auditOptions)
+          const report = await runAgentReadinessAudit(entry.loc, auditOptions)
           settled[i] = {
             pageResult: {
               url: report.finalUrl,

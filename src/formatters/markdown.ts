@@ -14,7 +14,7 @@ import type {
 export function formatMarkdown(report: AuditReport): string {
   const lines = []
 
-  lines.push(`# AEO Audit Report`)
+  lines.push(`# Agent Readiness Report`)
   lines.push(``)
   lines.push(`**URL:** ${report.finalUrl}`)
   lines.push(`**Overall Score:** ${report.overallScore}/100`)
@@ -90,7 +90,7 @@ function issueText(value: string): string {
 export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly = false): string {
   const lines = []
 
-  lines.push(`# AEO Sitemap Audit Report`)
+  lines.push(`# Agent Readiness Sitemap Report`)
   lines.push(``)
   lines.push(`**Sitemap:** ${report.sitemapUrl}`)
   lines.push(`**Aggregate Score:** ${report.aggregateScore}/100${coverageSuffix(report.coverage)}`)

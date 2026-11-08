@@ -2,15 +2,15 @@ import { auditHtmlPage, assertValidFactorIds } from './audit-html.js'
 import { fetchPage, normalizeTargetUrl, throwIfAborted } from './fetch-page.js'
 import { collectCanonicalTargets } from './canonical-targets.js'
 import type { FetchBudgetController } from './fetch-page.js'
-import type { AuditReport, RunAeoAuditOptions } from './types.js'
+import type { AuditReport, RunAgentReadinessAuditOptions } from './types.js'
 
 export {
-  AeoAuditError,
-  getAeoAuditErrorCode,
-  isAeoAuditError,
-  isAeoAuditErrorCode,
+  AgentReadinessError,
+  getAgentReadinessErrorCode,
+  isAgentReadinessError,
+  isAgentReadinessErrorCode,
 } from './errors.js'
-export type { AeoAuditErrorCode, AeoAuditErrorOptions } from './errors.js'
+export type { AgentReadinessErrorCode, AgentReadinessErrorOptions } from './errors.js'
 export { auditHtmlPage } from './audit-html.js'
 export type { AuditHtmlPageInput } from './audit-html.js'
 export { runSitemapAudit } from './sitemap.js'
@@ -36,11 +36,11 @@ export { detectPlatform, detectPlatformBatch } from './detect-platform.js'
 export { SPEC_RULES, FACTOR_SPEC_RULES, SPEC_SITE, specCitation } from './spec-references.js'
 export type { SpecRule, SpecRuleId, SpecStatus } from './spec-references.js'
 export type {
-  AeoAuditOutboundAttempt,
-  AeoAuditOutboundAttemptKind,
-  AeoAuditOutboundAttemptObserver,
+  AgentReadinessOutboundAttempt,
+  AgentReadinessOutboundAttemptKind,
+  AgentReadinessOutboundAttemptObserver,
   AuditReport,
-  RunAeoAuditOptions,
+  RunAgentReadinessAuditOptions,
   SitemapAuditBudgetMetadata,
   SitemapAuditMetadata,
   SitemapAuditOptions,
@@ -121,8 +121,8 @@ export type {
 } from './types.js'
 
 /** Fetch one URL and run the legacy single-page audit pipeline. */
-export async function runAeoAudit(rawUrl: string, options: RunAeoAuditOptions = {}): Promise<AuditReport> {
-  const internalOptions = options as RunAeoAuditOptions & { budget?: FetchBudgetController }
+export async function runAgentReadinessAudit(rawUrl: string, options: RunAgentReadinessAuditOptions = {}): Promise<AuditReport> {
+  const internalOptions = options as RunAgentReadinessAuditOptions & { budget?: FetchBudgetController }
   const normalizedUrl = normalizeTargetUrl(rawUrl)
   assertValidFactorIds(options.factors ?? [])
   const fetchedPage = await fetchPage(normalizedUrl.toString(), {

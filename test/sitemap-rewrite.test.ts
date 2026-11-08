@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { rewriteLocOrigin } from '../src/sitemap.js'
 
-// Mirror sitemap-options.test.ts: capture the per-page runAeoAudit calls so we can
+// Mirror sitemap-options.test.ts: capture the per-page runAgentReadinessAudit calls so we can
 // assert which URLs get crawled after origin rewriting.
-const runAeoAuditMock = vi.hoisted(() => vi.fn())
+const runAgentReadinessAuditMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../src/index.js', () => ({
-  runAeoAudit: runAeoAuditMock,
+  runAgentReadinessAudit: runAgentReadinessAuditMock,
 }))
 
 import { runSitemapAudit } from '../src/sitemap.js'
@@ -40,8 +40,8 @@ function fakeReport(url: string) {
 }
 
 beforeEach(() => {
-  runAeoAuditMock.mockReset()
-  runAeoAuditMock.mockImplementation((url: string) => Promise.resolve(fakeReport(url)))
+  runAgentReadinessAuditMock.mockReset()
+  runAgentReadinessAuditMock.mockImplementation((url: string) => Promise.resolve(fakeReport(url)))
   vi.stubGlobal('fetch', vi.fn(async () =>
     new Response(SITEMAP_XML, { status: 200, headers: { 'content-type': 'application/xml' } }),
   ))
@@ -79,7 +79,7 @@ describe('runSitemapAudit --rewrite-sitemap-origin', () => {
       allowPrivateHost: 'localhost',
     })
 
-    const crawled = runAeoAuditMock.mock.calls.map((c) => c[0]).sort()
+    const crawled = runAgentReadinessAuditMock.mock.calls.map((c) => c[0]).sort()
     expect(crawled).toEqual(['http://localhost:3000/', 'http://localhost:3000/about?ref=nav'])
   })
 
@@ -89,7 +89,7 @@ describe('runSitemapAudit --rewrite-sitemap-origin', () => {
       allowPrivateHost: 'localhost',
     })
 
-    const crawled = runAeoAuditMock.mock.calls.map((c) => c[0])
+    const crawled = runAgentReadinessAuditMock.mock.calls.map((c) => c[0])
     expect(crawled).toContain('https://www.demand-iq.com/')
   })
 
@@ -100,8 +100,8 @@ describe('runSitemapAudit --rewrite-sitemap-origin', () => {
       allowPrivateHost: 'localhost',
     })
 
-    expect(runAeoAuditMock).toHaveBeenCalled()
-    for (const [, options] of runAeoAuditMock.mock.calls) {
+    expect(runAgentReadinessAuditMock).toHaveBeenCalled()
+    for (const [, options] of runAgentReadinessAuditMock.mock.calls) {
       expect(options.allowPrivateHost).toBe('localhost')
     }
   })

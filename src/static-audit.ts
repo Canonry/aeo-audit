@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
-import { AeoAuditError } from './errors.js'
+import { AgentReadinessError } from './errors.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { auditHtmlPage } from './audit-html.js'
 import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
@@ -11,7 +11,7 @@ import { buildCoverage, deriveUrlShapes, selectRepresentativeSample } from './ur
 import type {
   AuditReport,
   AuxiliaryResources,
-  RunAeoAuditOptions,
+  RunAgentReadinessAuditOptions,
   SitemapAuditPlan,
   SitemapAuditReport,
   SitemapPageResult,
@@ -38,7 +38,7 @@ const AUX_FILE_SPECS: AuxFileSpec[] = [
   { key: 'sitemapXml', file: 'sitemap.xml', contentType: 'application/xml' },
 ]
 
-export interface StaticAuditOptions extends RunAeoAuditOptions {
+export interface StaticAuditOptions extends RunAgentReadinessAuditOptions {
   /**
    * Base URL used to synthesize page URLs from file paths (e.g.
    * `out/about/index.html` → `<baseUrl>/about/`). Improves URL-sensitive factors
@@ -154,7 +154,7 @@ async function auditOneFile(
   absFile: string,
   url: string,
   auxiliary: AuxiliaryResources,
-  options: RunAeoAuditOptions,
+  options: RunAgentReadinessAuditOptions,
 ): Promise<AuditReport> {
   const startedAt = Date.now()
   const html = await readFile(absFile, 'utf-8')
@@ -187,14 +187,14 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
   try {
     stats = await stat(resolved)
   } catch {
-    throw new AeoAuditError('BAD_INPUT', `Path not found: ${targetPath}`)
+    throw new AgentReadinessError('BAD_INPUT', `Path not found: ${targetPath}`)
   }
 
   const baseUrl = resolveBaseUrl(options.baseUrl)
 
   if (stats.isFile()) {
     if (!HTML_EXTENSIONS.has(path.extname(resolved).toLowerCase())) {
-      throw new AeoAuditError(
+      throw new AgentReadinessError(
         'BAD_INPUT',
         `Not an HTML file: ${targetPath}. Static mode audits a .html/.htm file or a directory of them.`,
       )
@@ -207,7 +207,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
   }
 
   if (!stats.isDirectory()) {
-    throw new AeoAuditError('BAD_INPUT', `Unsupported path: ${targetPath}. Expected an HTML file or a directory.`)
+    throw new AgentReadinessError('BAD_INPUT', `Unsupported path: ${targetPath}. Expected an HTML file or a directory.`)
   }
 
   // Directory mode: audit every HTML file and aggregate like a sitemap run.
@@ -216,7 +216,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
   const discovered = files.length
 
   if (discovered === 0) {
-    throw new AeoAuditError('BAD_INPUT', `No .html files found under ${targetPath}.`)
+    throw new AgentReadinessError('BAD_INPUT', `No .html files found under ${targetPath}.`)
   }
 
   const effectiveLimit = options.limit && options.limit > 0 ? options.limit : DEFAULT_LIMIT
@@ -246,7 +246,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     childSitemapsSkipped: 0,
   })
 
-  const auditOptions: RunAeoAuditOptions = {
+  const auditOptions: RunAgentReadinessAuditOptions = {
     factors: options.factors,
     includeGeo: options.includeGeo,
     includeAgentSkills: options.includeAgentSkills,

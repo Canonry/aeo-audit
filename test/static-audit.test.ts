@@ -30,7 +30,7 @@ describe('runStaticAudit', () => {
   let dir: string
 
   beforeAll(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), 'aeo-static-'))
+    dir = await mkdtemp(path.join(os.tmpdir(), 'agent-readiness-static-'))
     await writeFile(path.join(dir, 'index.html'), page('Home'))
     await mkdir(path.join(dir, 'about'), { recursive: true })
     await writeFile(path.join(dir, 'about', 'index.html'), page('About'))
@@ -96,7 +96,7 @@ describe('runStaticAudit critical defects (issue #42)', () => {
   let dir: string
 
   beforeAll(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), 'aeo-defects-'))
+    dir = await mkdtemp(path.join(os.tmpdir(), 'agent-readiness-defects-'))
     // Homepage with two H1s (a split headline) — a single-page defect that the
     // prevalence ranking would otherwise bury.
     await writeFile(
@@ -145,7 +145,7 @@ describe('runStaticAudit page-specific factors (limited scoping)', () => {
   let dir: string
 
   beforeAll(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), 'aeo-pagespecific-'))
+    dir = await mkdtemp(path.join(os.tmpdir(), 'agent-readiness-pagespecific-'))
     // Two ordinary pages with no FAQ — correct for their type, so faq-content scores 0.
     await writeFile(path.join(dir, 'index.html'), page('Home'))
     await writeFile(path.join(dir, 'about.html'), page('About'))

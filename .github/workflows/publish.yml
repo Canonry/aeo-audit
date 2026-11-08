@@ -147,7 +147,7 @@ jobs:
             rm -f "$REGISTRY_STDOUT" "$REGISTRY_STDERR"
             npm publish "./$TARBALL" --registry=https://registry.npmjs.org --access public --provenance
           }
-          publish_package "@canonry/aeo-audit" "release/canonry-package.tgz"
+          publish_package "@canonry/agent-readiness" "release/canonry-package.tgz"
 
   publish-clawhub:
     needs: [prepare, publish-npm]
@@ -164,4 +164,4 @@ jobs:
         run: |
           npx -y clawhub@0 login --token "$CLAWHUB_TOKEN" --no-browser
           CHANGELOG="$(git log -1 --pretty=%s)"
-          npx -y clawhub@0 publish skills/aeo --version "$VERSION" --changelog "$CHANGELOG"
+          npx -y clawhub@0 publish skills/agent-readiness --version "$VERSION" --changelog "$CHANGELOG"

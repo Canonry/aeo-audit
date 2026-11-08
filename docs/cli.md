@@ -1,7 +1,7 @@
 # CLI reference
 
 ```bash
-npx @canonry/aeo-audit <url|path> [options]
+npx @canonry/agent-readiness <url|path> [options]
 ```
 
 Pass a **URL** to audit a live site, or a **filesystem path** (a `.html` file or a directory of built HTML, e.g. `./out`) to audit static output offline.
@@ -12,16 +12,16 @@ Exit code is `0` when the score is ≥ 70 and `1` when it's below (CI-friendly).
 
 ```bash
 # Colored terminal output (default)
-npx @canonry/aeo-audit https://example.com
+npx @canonry/agent-readiness https://example.com
 
 # JSON output (for CI/CD)
-npx @canonry/aeo-audit https://example.com --format json
+npx @canonry/agent-readiness https://example.com --format json
 
 # Markdown report
-npx @canonry/aeo-audit https://example.com --format markdown
+npx @canonry/agent-readiness https://example.com --format markdown
 
 # Agent summary: the slim JSON decision, not the full report
-npx @canonry/aeo-audit https://example.com --sitemap --format agent
+npx @canonry/agent-readiness https://example.com --sitemap --format agent
 ```
 
 `--format json` is the contract for programmatic and agent consumers: every report carries a `schemaVersion` (so a parser can detect breaking shape drift) and sitemap reports expose a `criticalDefects` rollup plus a ranked `prioritizedFixes` array of structured objects. See [api.md](api.md#machine-readable-output-for-ai-agents) for the field shapes.
@@ -32,11 +32,11 @@ npx @canonry/aeo-audit https://example.com --sitemap --format agent
 
 ```bash
 # Run specific factors only
-npx @canonry/aeo-audit https://example.com --factors structured-data,faq-content
+npx @canonry/agent-readiness https://example.com --factors structured-data,faq-content
 
 # Validate JSON-LD blocks for parse errors and duplicate singleton @types
 # (catches issues like duplicate FAQPage that Google flags as invalid)
-npx @canonry/aeo-audit https://example.com --factors schema-validity
+npx @canonry/agent-readiness https://example.com --factors schema-validity
 ```
 
 Factor IDs are listed in [scoring.md](scoring.md).
@@ -45,17 +45,17 @@ Factor IDs are listed in [scoring.md](scoring.md).
 
 ```bash
 # Geographic signals (LocalBusiness geo data, address, areaServed)
-npx @canonry/aeo-audit https://example.com --include-geo
+npx @canonry/agent-readiness https://example.com --include-geo
 
 # Agent skill exposure (Schema.org Action, MCP, A2A cards, form affordances)
-npx @canonry/aeo-audit https://example.com --include-agent-skills
+npx @canonry/agent-readiness https://example.com --include-agent-skills
 
 # Lighthouse (Performance + A11y + Best Practices, mobile) via Google PageSpeed
 # Insights. Adds ~15-30s. Single-URL only (cannot combine with --sitemap).
-npx @canonry/aeo-audit https://example.com --lighthouse
+npx @canonry/agent-readiness https://example.com --lighthouse
 
 # Provide a PageSpeed Insights API key to lift anonymous rate limits
-PAGESPEED_API_KEY=xxx npx @canonry/aeo-audit https://example.com --lighthouse --format json
+PAGESPEED_API_KEY=xxx npx @canonry/agent-readiness https://example.com --lighthouse --format json
 ```
 
 See [scoring.md](scoring.md#optional-factors) for what each optional factor measures.
@@ -64,8 +64,8 @@ See [scoring.md](scoring.md#optional-factors) for what each optional factor meas
 
 ```bash
 # Force exit 1 when the meta description is missing (on top of the score gate)
-npx @canonry/aeo-audit https://example.com --require-meta
-npx @canonry/aeo-audit https://example.com --sitemap --require-meta
+npx @canonry/agent-readiness https://example.com --require-meta
+npx @canonry/agent-readiness https://example.com --sitemap --require-meta
 ```
 
 ## Sitemap mode
@@ -75,25 +75,25 @@ Audit every page discovered from the site's sitemap with bounded concurrency (5 
 ```bash
 # Auto-discover the sitemap (tries /sitemap.xml, then /sitemap-index.xml,
 # then the Sitemap: directive in /robots.txt)
-npx @canonry/aeo-audit https://example.com --sitemap
+npx @canonry/agent-readiness https://example.com --sitemap
 
 # Provide an explicit sitemap URL
-npx @canonry/aeo-audit https://example.com --sitemap https://example.com/sitemap.xml
+npx @canonry/agent-readiness https://example.com --sitemap https://example.com/sitemap.xml
 
 # Cap the number of pages (default 200, sampled across the site's URL templates)
-npx @canonry/aeo-audit https://example.com --sitemap --limit 50
+npx @canonry/agent-readiness https://example.com --sitemap --limit 50
 
 # Skip per-page output and show only the cross-cutting issues and critical defects
-npx @canonry/aeo-audit https://example.com --sitemap --top-issues
+npx @canonry/agent-readiness https://example.com --sitemap --top-issues
 
 # Rewrite each <loc>'s origin to the target you named (audit staging with prod's sitemap)
-npx @canonry/aeo-audit https://staging.example.com --sitemap --rewrite-sitemap-origin
+npx @canonry/agent-readiness https://staging.example.com --sitemap --rewrite-sitemap-origin
 
 # Audit a whole local dev server: rewrite the sitemap onto localhost and unblock it
-npx @canonry/aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local
+npx @canonry/agent-readiness http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local
 
 # PR preview workflow: audit changed static routes plus critical pages
-npx @canonry/aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local \
+npx @canonry/agent-readiness http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local \
   --changed --base main --include-critical
 ```
 
@@ -108,10 +108,10 @@ When the sitemap has more URLs than `--limit`, the run **samples across the site
 Use `--changed` with `--sitemap` for PR work when the useful question is "what changed on this branch?" rather than "what is the whole-site average?"
 
 ```bash
-npx @canonry/aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local \
+npx @canonry/agent-readiness http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local \
   --changed --base main --include-critical
 
-npx @canonry/aeo-audit https://staging.example.com --sitemap --rewrite-sitemap-origin \
+npx @canonry/agent-readiness https://staging.example.com --sitemap --rewrite-sitemap-origin \
   --changed --base origin/main --include-critical --critical-paths /,/pricing,/contact
 ```
 
@@ -130,7 +130,7 @@ The optional in-process factors are honored per page: pass `--include-geo` and/o
 Sitemap reports include a **Cross-page issues** section with duplicate titles and descriptions and their affected URLs, even at a passing score and with `--top-issues`. Agent output retains these as `siteIssues`, separately from the score-ranked `issues`. These groups describe observed pages, including on partial audits. They do not change scores or exit codes. A short-title finding (fewer than 15 characters) is also advisory; review whether the title clearly identifies the page.
 
 ```bash
-npx @canonry/aeo-audit https://example.com --sitemap --top-issues --format markdown
+npx @canonry/agent-readiness https://example.com --sitemap --top-issues --format markdown
 ```
 
 ## Static-output mode
@@ -139,16 +139,16 @@ Point the CLI at a filesystem path instead of a URL to audit built HTML directly
 
 ```bash
 # Audit a whole built directory (aggregated like sitemap mode)
-npx @canonry/aeo-audit ./out
+npx @canonry/agent-readiness ./out
 
 # Map files to real URLs so canonical / og:url checks are meaningful
-npx @canonry/aeo-audit ./out --base-url https://example.com
+npx @canonry/agent-readiness ./out --base-url https://example.com
 
 # A single built file
-npx @canonry/aeo-audit ./dist/index.html
+npx @canonry/agent-readiness ./dist/index.html
 
 # Gate CI on a missing meta description across the build
-npx @canonry/aeo-audit ./out --require-meta
+npx @canonry/agent-readiness ./out --require-meta
 ```
 
 A `.html`/`.htm` file produces a single-page report; a directory is walked for HTML files and aggregated like sitemap mode (`--limit`, `--top-issues`, `--factors`, `--include-geo`, `--include-agent-skills`, and `--require-meta` all apply). `index.html` maps to its directory URL (`out/about/index.html` → `<base>/about/`); other files drop the extension (`out/blog/post.html` → `<base>/blog/post`). `llms.txt`, `llms-full.txt`, `robots.txt`, and `sitemap.xml` are read from the directory root when present.
@@ -157,27 +157,27 @@ Coverage is **partial by design**: server-only signals (redirects, `X-Robots-Tag
 
 ## Compare mode (regression gate)
 
-`aeo-audit compare` is a subcommand that diffs two `--format json` reports — a **baseline** and a **current** run — into a regression verdict and a CI-friendly exit code. It runs no audit and touches no network; it reads reports you already produced. The same `compare` call works in any CI, a pre-commit hook, or a local shell — it is the engine behind the AEO regression GitHub Action.
+`agent-readiness compare` is a subcommand that diffs two `--format json` reports — a **baseline** and a **current** run — into a regression verdict and a CI-friendly exit code. It runs no audit and touches no network; it reads reports you already produced. The same `compare` call works in any CI, a pre-commit hook, or a local shell — it is the engine behind the [Agent Readiness Guard](../action/README.md) GitHub Action.
 
 ```bash
 # 1. Produce a current report (static-output mode shown; any mode's json works)
-npx @canonry/aeo-audit ./out --base-url https://example.com --format json > current.json
+npx @canonry/agent-readiness ./out --base-url https://example.com --format json > current.json
 
 # 2. Diff it against a stored baseline; exit 1 if it regressed
-npx @canonry/aeo-audit compare --baseline baseline.json --current current.json
+npx @canonry/agent-readiness compare --baseline baseline.json --current current.json
 
 # Tighter overall gate, plus a human Markdown summary for a PR comment
-npx @canonry/aeo-audit compare --baseline base.json --current current.json \
+npx @canonry/agent-readiness compare --baseline base.json --current current.json \
   --overall-tolerance 0 --md-out diff.md
 
 # Committed/artifact baselines: refuse to gate apples-to-oranges (exit 2) if the
 # factor set or engine major differs between the two reports
-npx @canonry/aeo-audit compare --baseline base.json --current current.json --strict-comparability
+npx @canonry/agent-readiness compare --baseline base.json --current current.json --strict-comparability
 ```
 
 A regression is **any** of: the overall/aggregate score dropping more than `--overall-tolerance` (default 2), a single page dropping more than `--page-tolerance` (default 5), a single factor dropping more than `--factor-tolerance` (default 8), a page that was auditing successfully now erroring out, a **new** `severity:critical` defect (`--fail-on-new-critical`, on by default), or a major report-schema change. Score, page, and factor deltas only gate when the two runs are **comparable** (same factor set, no major engine change); otherwise they're reported with a warning rather than failing the build. `missing-meta-description` is `severity:warning`, so it does **not** trip `--fail-on-new-critical` — use `--require-meta` on the audit or `--fail-on warnings` here. Removed pages and new warnings are report-only unless promoted with `--fail-on`. Pass `--report-only` to print the full diff without ever failing (onboarding soak mode), and `--strict-comparability` to turn a factor-set / engine-major mismatch into a hard exit-2 misconfiguration.
 
-Both reports must be the same mode (two single reports, or two multi-page reports); mixing them is a misconfiguration (exit 2). On a first run with no `--baseline`, the result is `no-baseline` and the build passes (use `--on-missing-baseline fail` to block until a baseline is seeded). stdout carries only the `CompareReport` (JSON by default, or Markdown with `--format markdown`); every human diagnostic goes to stderr, so you can pipe stdout straight into a parser. Run `aeo-audit compare --help` for the full option list.
+Both reports must be the same mode (two single reports, or two multi-page reports); mixing them is a misconfiguration (exit 2). On a first run with no `--baseline`, the result is `no-baseline` and the build passes (use `--on-missing-baseline fail` to block until a baseline is seeded). stdout carries only the `CompareReport` (JSON by default, or Markdown with `--format markdown`); every human diagnostic goes to stderr, so you can pipe stdout straight into a parser. Run `agent-readiness compare --help` for the full option list.
 
 ## Platform detection
 
@@ -185,13 +185,13 @@ Detect what platform, CMS, framework, or static site generator a website is buil
 
 ```bash
 # Identify the stack (WordPress, Webflow, Shopify, Next.js, Vercel, etc.)
-npx @canonry/aeo-audit https://example.com --detect-platform
+npx @canonry/agent-readiness https://example.com --detect-platform
 
 # JSON for programmatic use
-npx @canonry/aeo-audit https://example.com --detect-platform --format json
+npx @canonry/agent-readiness https://example.com --detect-platform --format json
 
 # Only show high-confidence matches
-npx @canonry/aeo-audit https://example.com --detect-platform --min-confidence high
+npx @canonry/agent-readiness https://example.com --detect-platform --min-confidence high
 ```
 
 The detector inspects HTML, response headers, `<meta name="generator">`, script and link sources, and platform-specific globals to fingerprint:
@@ -211,16 +211,16 @@ Pass `--urls` to fingerprint many sites in a single run. Pages are fetched with 
 
 ```bash
 # From a file (one URL per line; # comments and blank lines are skipped)
-npx @canonry/aeo-audit --detect-platform --urls urls.txt
+npx @canonry/agent-readiness --detect-platform --urls urls.txt
 
 # Inline comma-separated list
-npx @canonry/aeo-audit --detect-platform --urls https://a.com,https://b.com,https://c.com
+npx @canonry/agent-readiness --detect-platform --urls https://a.com,https://b.com,https://c.com
 
 # From stdin
-cat urls.txt | npx @canonry/aeo-audit --detect-platform --urls -
+cat urls.txt | npx @canonry/agent-readiness --detect-platform --urls -
 
 # JSON for downstream processing
-npx @canonry/aeo-audit --detect-platform --urls urls.txt --format json
+npx @canonry/agent-readiness --detect-platform --urls urls.txt --format json
 ```
 
 Per-URL fetch errors don't abort the batch: each entry is reported with `status: 'success'` or `status: 'error'`. Exit code is `0` when at least one URL succeeded, `1` otherwise.
@@ -231,10 +231,10 @@ By default the audit refuses any URL that resolves to a private, loopback, or li
 
 ```bash
 # Audit a local dev server (pass the explicit scheme; bare hosts default to https)
-npx @canonry/aeo-audit http://localhost:3000 --allow-local
+npx @canonry/agent-readiness http://localhost:3000 --allow-local
 
 # A staging box on a private IP / VPN
-npx @canonry/aeo-audit http://10.0.5.20 --allow-private
+npx @canonry/agent-readiness http://10.0.5.20 --allow-private
 ```
 
 The relaxation is **scoped to the single host you named on the CLI, and only that host**. It is evaluated per request hop, so a redirect or a sitemap `<loc>` pointing at any *other* private address (cloud metadata at `169.254.169.254`, internal services, …) is still blocked. There is no flag that disables the guard wholesale, and library/service callers that never set it stay fully protected.

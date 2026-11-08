@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-@canonry/aeo-audit — an open-source AEO (Answer Engine Optimization) audit engine and single umbrella Claude Code / ClawHub skill. Scores websites across 16 ranking factors that determine AI citation.
+@canonry/agent-readiness — an open-source website agent readiness audit engine and single umbrella Claude Code / ClawHub skill. Scores how well AI agents and answer engines can reach, read, and cite a site across 16 factors. Formerly `@canonry/aeo-audit` (and `@ainyc/aeo-audit` before that); the CHANGELOG keeps the old names in past entries.
 
 Website: https://canonry.ai
 
@@ -31,18 +31,18 @@ pnpm lint           # Run linter
 
 ```
 src/
-  index.ts           # Main entry: runAeoAudit(url, options)
+  index.ts           # Main entry: runAgentReadinessAudit(url, options)
   scoring.ts         # Factor definitions, weights, score calculation
   fetch-page.ts      # URL fetching with SSRF protection
-  errors.ts          # AeoAuditError class
+  errors.ts          # AgentReadinessError class
   cli.ts             # CLI argument parsing
   formatters/        # json, markdown, text output formatters
   analyzers/         # Per-factor analyzer modules (16 core + 2 optional) plus shared helpers.ts
   types.ts           # Shared audit/report TypeScript types
 dist/                # Compiled publishable ESM output
 bin/
-  aeo-audit.js       # CLI entry point -> dist/cli.js
-skills/aeo/          # Single umbrella Claude Code / ClawHub skill
+  agent-readiness.js # CLI entry point -> dist/cli.js
+skills/agent-readiness/ # Single umbrella Claude Code / ClawHub skill
 test/                # Unit and integration tests
 ```
 
@@ -54,11 +54,12 @@ test/                # Unit and integration tests
 - Geographic signals is optional (excluded by default); when included, weights renormalize
 - The `--factors` flag allows running a subset of analyzers
 - SSRF protection blocks private IPs and hostnames in `fetch-page.ts`
+- The crawler's network identity (User-Agent `AINYC-AEO-Audit/1.0` in `fetch-page.ts`, robots.txt token `ainyc-aeo-audit` in `crawl.ts`) is deliberately unchanged across package renames. Sites may have robots.txt rules for it, and Canonry drops traffic with that User-Agent from client traffic reports. Never rename it as part of a branding change
 - Published entrypoints resolve to compiled `dist/` output; run `pnpm run build` before local CLI smoke tests
 
 ## Code Conventions
 
-- Functional style, no classes except AeoAuditError
+- Functional style, no classes except AgentReadinessError
 - Always use `clampScore()` for score calculations
 - Findings types: `found`, `missing`, `info`, `timeout`, `unreachable`
 - Unused vars starting with `_` are ignored by ESLint
@@ -69,7 +70,7 @@ Any change to user-visible CLI surface must update **all three** of these in the
 
 1. `printHelp()` in `src/cli.ts` — Options list **and** Examples block
 2. `docs/cli.md` — the relevant mode section, the **Flag reference** table, and the **Exit codes** section (flags, examples, and any defaults). The root `README.md` only carries a handful of headline examples; the full CLI surface lives in `docs/cli.md`.
-3. `skills/aeo/SKILL.md` — Examples and the relevant mode section (e.g. `### Sitemap Mode`)
+3. `skills/agent-readiness/SKILL.md` — Examples and the relevant mode section (e.g. `### Sitemap Mode`)
 
 This applies to:
 
@@ -92,7 +93,7 @@ The ClawHub skill version must match `package.json`.
 
 ## ClawHub Publishing
 
-CI publishes the skill; there is no manual step. When a push to `main` changes the `version` in `package.json`, `.github/workflows/publish.yml` publishes the npm package and then runs `clawhub publish skills/aeo` with that version and the commit subject as the changelog. A `skills/aeo/SKILL.md` change therefore ships with the next version bump.
+CI publishes the skill; there is no manual step. When a push to `main` changes the `version` in `package.json`, `.github/workflows/publish.yml` publishes the npm package and then runs `clawhub publish skills/agent-readiness` with that version and the commit subject as the changelog. A `skills/agent-readiness/SKILL.md` change therefore ships with the next version bump.
 
 ### Publishing by hand
 
@@ -100,7 +101,7 @@ Only needed if the workflow failed, and rerunning it (`workflow_dispatch` on `ma
 
 ```bash
 clawhub whoami   # should print your handle (e.g. arberx); if not, run `clawhub login`
-clawhub publish skills/aeo --version <semver> --changelog "<description of changes>"
+clawhub publish skills/agent-readiness --version <semver> --changelog "<description of changes>"
 ```
 
 `--version` must be valid semver and **must match `package.json`**.
@@ -109,9 +110,9 @@ clawhub publish skills/aeo --version <semver> --changelog "<description of chang
 
 ClawHub flags skills as suspicious when they request excessive capabilities. Follow these rules to stay under the threshold:
 
-- **Pin npx versions** — use the current major (`@7`) instead of `@latest`. The `@latest` tag is a supply chain risk because a compromised publish can hijack all users immediately. Never pin an exact version (`@7.4.0`): the major pin already gives users every patch and minor release without a skill update. Bump it only in the release that changes the major.
+- **Pin npx versions** — use the current major (`@8`) instead of `@latest`. The `@latest` tag is a supply chain risk because a compromised publish can hijack all users immediately. Never pin an exact version (`@8.0.0`): the major pin already gives users every patch and minor release without a skill update. Bump it only in the release that changes the major.
 - **Minimize Bash patterns** — only declare the single npx command end users need. Do not include local dev commands (`pnpm run build`, `node bin/...`) in the published skill; those are for contributors, not consumers.
-- **Avoid generic Bash patterns** — `Bash(aeo-audit *)` is too broad and could match other binaries. Always use the fully qualified `npx @canonry/aeo-audit@7 *` form.
+- **Avoid generic Bash patterns** — `Bash(agent-readiness *)` is too broad and could match other binaries. Always use the fully qualified `npx @canonry/agent-readiness@8 *` form.
 - **Scope file permissions narrowly** — only request Edit/Write for file types the skill actually modifies. Use `Write(filename)` for specific files (e.g., `llms.txt`, `robots.txt`) instead of broad `Edit(*.txt)` patterns.
 - **Keep shell injection guards** — the Argument Safety section in SKILL.md is required. Never remove it.
 

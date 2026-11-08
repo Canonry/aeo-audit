@@ -1,5 +1,5 @@
 import { load, type CheerioAPI } from 'cheerio'
-import { isAeoAuditError } from './errors.js'
+import { isAgentReadinessError } from './errors.js'
 import { fetchPage, normalizeTargetUrl } from './fetch-page.js'
 import { mapWithConcurrency } from './sitemap.js'
 import type {
@@ -771,7 +771,7 @@ function buildBatchEntry(url: string, report: PlatformDetectionReport): BatchDet
 }
 
 function buildBatchError(url: string, error: unknown): BatchDetectionEntry {
-  const message = isAeoAuditError(error)
+  const message = isAgentReadinessError(error)
     ? `[${error.code}] ${error.message}`
     : error instanceof Error
       ? error.message

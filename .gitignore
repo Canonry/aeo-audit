@@ -5,6 +5,6 @@ dist/
 .env
 .env.*
 coverage/
-.aeo-audit-history/
+.agent-readiness-history/
 .claude/
 .context/

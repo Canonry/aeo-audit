@@ -1,5 +1,32 @@
 # Changelog
 
+## 8.0.0 (2026-11-07)
+
+### Changed
+
+- **BREAKING: the package is now `@canonry/agent-readiness`.** It was `@canonry/aeo-audit`, and the repository moves from `Canonry/aeo-audit` to `Canonry/agent-readiness`. The new name says what the tool checks: whether AI agents and answer engines can reach, read, and cite a website. Scores, factors, weights, finding codes, and the report shape are unchanged, so `SCHEMA_VERSION` stays `3.5`. `@canonry/aeo-audit` stays on npm at 7.6.2 and gets no further releases.
+
+  | Before | Now |
+  |---|---|
+  | `@canonry/aeo-audit` | `@canonry/agent-readiness` |
+  | `aeo-audit` command | `agent-readiness` command |
+  | `runAeoAudit`, `RunAeoAuditOptions` | `runAgentReadinessAudit`, `RunAgentReadinessAuditOptions` |
+  | `AeoAuditError`, `AeoAuditErrorCode`, `AeoAuditErrorOptions` | `AgentReadinessError`, `AgentReadinessErrorCode`, `AgentReadinessErrorOptions` |
+  | `isAeoAuditError`, `isAeoAuditErrorCode`, `getAeoAuditErrorCode` | `isAgentReadinessError`, `isAgentReadinessErrorCode`, `getAgentReadinessErrorCode` |
+  | `AeoAuditOutboundAttempt`, `AeoAuditOutboundAttemptKind`, `AeoAuditOutboundAttemptObserver` | `AgentReadinessOutboundAttempt`, `AgentReadinessOutboundAttemptKind`, `AgentReadinessOutboundAttemptObserver` |
+  | `/aeo` skill in `skills/aeo` (ClawHub `arberx/aeo`) | `/agent-readiness` skill in `skills/agent-readiness` (ClawHub `arberx/agent-readiness`) |
+  | Skill monitor history in `.aeo-audit-history/` | `.agent-readiness-history/` |
+
+- Thrown errors have `name: 'AgentReadinessError'`. Error codes (`BAD_INPUT`, `TIMEOUT`, and the rest) are unchanged.
+- The `tool` field in `--format agent` output and in `CompareReport` is `@canonry/agent-readiness`.
+- Text and Markdown reports are titled "Agent Readiness Report" and "Agent Readiness Sitemap Report". The `compare` Markdown heading is "Agent Readiness Guard".
+- **The GitHub Action is now Agent Readiness Guard**, at `Canonry/agent-readiness/action@v8`, and runs `@canonry/agent-readiness@8` by default. Its engine version input is `agent-readiness-version` (was `aeo-audit-version`), the default `baseline-path` is `.agent-readiness/baseline.${site-id}.json` (was `.aeo/baseline.${site-id}.json`), the baseline artifact is `agent-readiness-baseline-<site-id>` (was `aeo-baseline-<site-id>`), and the sticky comment header is `agent-readiness-guard-<site-id>`. The local-engine override `AEO_ENGINE_CMD` is `AGENT_READINESS_ENGINE_CMD`. See [Migrating from AEO Audit Guard](action/README.md#migrating-from-aeo-audit-guard).
+- **Regenerate stored baselines once.** This is a new engine major, so `compare --strict-comparability` (which the action uses for committed and artifact baselines) exits `2` against a 7.x or older baseline. Without `--strict-comparability`, score, page, and factor deltas against an older major are reported with a warning instead of gating.
+
+### Unchanged
+
+- The crawler still sends `User-Agent: AINYC-AEO-Audit/1.0` and follows robots.txt groups for `ainyc-aeo-audit`, so robots.txt rules that sites wrote for it keep applying.
+
 ## 7.6.2 (2026-11-05)
 
 ### Fixed

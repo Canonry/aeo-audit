@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Per-page audits must not run for real; capture them so we can assert which pages
 // (if any) get audited after the SSRF guard has filtered the child <loc>s.
-const runAeoAuditMock = vi.hoisted(() => vi.fn())
-vi.mock('../src/index.js', () => ({ runAeoAudit: runAeoAuditMock }))
+const runAgentReadinessAuditMock = vi.hoisted(() => vi.fn())
+vi.mock('../src/index.js', () => ({ runAgentReadinessAudit: runAgentReadinessAuditMock }))
 
-// Imported after vi.mock so sitemap.js picks up the mocked runAeoAudit. The
+// Imported after vi.mock so sitemap.js picks up the mocked runAgentReadinessAudit. The
 // fetch-page SSRF guard it depends on is NOT mocked — it runs for real here.
 import { runSitemapAudit } from '../src/sitemap.js'
 
@@ -51,8 +51,8 @@ function fakeReport(url: string) {
 }
 
 beforeEach(() => {
-  runAeoAuditMock.mockReset()
-  runAeoAuditMock.mockImplementation((url: string) => Promise.resolve(fakeReport(url)))
+  runAgentReadinessAuditMock.mockReset()
+  runAgentReadinessAuditMock.mockImplementation((url: string) => Promise.resolve(fakeReport(url)))
 })
 
 afterEach(() => {
@@ -84,7 +84,7 @@ describe('runSitemapAudit SSRF guard', () => {
     expect(fetchedUrls.some((u) => u.includes('169.254.169.254'))).toBe(false)
     // The public child still resolved, and only its page was audited.
     expect(fetchedUrls).toContain('http://1.1.1.1/child.xml')
-    expect(runAeoAuditMock.mock.calls.map((c) => c[0])).toEqual(['http://1.1.1.1/page-1'])
+    expect(runAgentReadinessAuditMock.mock.calls.map((c) => c[0])).toEqual(['http://1.1.1.1/page-1'])
     expect(report.pagesAudited).toBe(1)
   })
 
@@ -102,7 +102,7 @@ describe('runSitemapAudit SSRF guard', () => {
 
     expect(fetchedUrls).toContain('http://1.1.1.1/sitemap.xml')
     expect(fetchedUrls.some((u) => u.includes('169.254.169.254'))).toBe(false)
-    expect(runAeoAuditMock).not.toHaveBeenCalled()
+    expect(runAgentReadinessAuditMock).not.toHaveBeenCalled()
   })
 
   it('allowPrivateHost opts in the named host but still blocks a different private host', async () => {
@@ -130,7 +130,7 @@ describe('runSitemapAudit SSRF guard', () => {
     // DIFFERENT private host — stays blocked even with the allowance set.
     expect(fetchedUrls).toContain('http://127.0.0.1/child.xml')
     expect(fetchedUrls.some((u) => u.includes('169.254.169.254'))).toBe(false)
-    expect(runAeoAuditMock.mock.calls.map((c) => c[0])).toEqual(['http://127.0.0.1/page-1'])
+    expect(runAgentReadinessAuditMock.mock.calls.map((c) => c[0])).toEqual(['http://127.0.0.1/page-1'])
     expect(report.pagesAudited).toBe(1)
   })
 })

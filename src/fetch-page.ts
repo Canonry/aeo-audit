@@ -3,10 +3,10 @@ import { lookup as dnsLookup, type LookupAddress } from 'node:dns'
 import type { LookupFunction } from 'node:net'
 import ipaddr from 'ipaddr.js'
 import { fetch as undiciFetch, Agent } from 'undici'
-import { AeoAuditError, isAeoAuditError } from './errors.js'
+import { AgentReadinessError, isAgentReadinessError } from './errors.js'
 import type {
-  AeoAuditOutboundAttemptKind,
-  AeoAuditOutboundAttemptObserver,
+  AgentReadinessOutboundAttemptKind,
+  AgentReadinessOutboundAttemptObserver,
   AuxiliaryDiagnostics,
   AuxiliaryResource,
   AuxiliaryResourceState,
@@ -48,8 +48,8 @@ export interface FetchWithRedirectOptions {
   maxRedirects?: number
   allowPrivateHost?: string
   signal?: AbortSignal
-  onOutboundAttempt?: AeoAuditOutboundAttemptObserver
-  outboundAttemptKind?: AeoAuditOutboundAttemptKind
+  onOutboundAttempt?: AgentReadinessOutboundAttemptObserver
+  outboundAttemptKind?: AgentReadinessOutboundAttemptKind
   budget?: FetchBudget
   /** Awaited after per-hop SSRF validation and immediately before a request starts. */
   beforeOutboundAttempt?: () => void | Promise<void>
@@ -147,7 +147,7 @@ export class FetchBudgetController implements FetchBudget {
 
     if (this.maxFetches !== undefined && this.fetchesStarted >= this.maxFetches) {
       this.exhaustedReason = 'fetch-budget-exceeded'
-      throw new AeoAuditError('BUDGET_EXCEEDED', `Sitemap audit exceeded the maxFetches budget of ${this.maxFetches}.`, {
+      throw new AgentReadinessError('BUDGET_EXCEEDED', `Sitemap audit exceeded the maxFetches budget of ${this.maxFetches}.`, {
         details: { reason: this.exhaustedReason, maxFetches: this.maxFetches },
       })
     }
@@ -158,7 +158,7 @@ export class FetchBudgetController implements FetchBudget {
   assertWithinDuration(): void {
     if (this.maxDurationMs !== undefined && Date.now() - this.startedAt >= this.maxDurationMs) {
       this.exhaustedReason = 'duration-budget-exceeded'
-      throw new AeoAuditError('BUDGET_EXCEEDED', `Sitemap audit exceeded the maxDurationMs budget of ${this.maxDurationMs}.`, {
+      throw new AgentReadinessError('BUDGET_EXCEEDED', `Sitemap audit exceeded the maxDurationMs budget of ${this.maxDurationMs}.`, {
         details: { reason: this.exhaustedReason, maxDurationMs: this.maxDurationMs },
       })
     }
@@ -190,10 +190,10 @@ export class FetchBudgetController implements FetchBudget {
   }
 }
 
-export function isFetchBudgetExceededError(error: unknown): error is AeoAuditError & {
+export function isFetchBudgetExceededError(error: unknown): error is AgentReadinessError & {
   details: { reason?: SitemapAuditPartialReason }
 } {
-  return isAeoAuditError(error) && error.code === 'BUDGET_EXCEEDED'
+  return isAgentReadinessError(error) && error.code === 'BUDGET_EXCEEDED'
 }
 
 function abortReason(signal: AbortSignal): unknown {
@@ -219,13 +219,13 @@ export function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
   )
 }
 
-function findAeoAuditError(error: unknown): AeoAuditError | null {
-  if (isAeoAuditError(error)) {
+function findAgentReadinessError(error: unknown): AgentReadinessError | null {
+  if (isAgentReadinessError(error)) {
     return error
   }
 
   if (typeof error === 'object' && error !== null && 'cause' in error) {
-    return findAeoAuditError((error as { cause?: unknown }).cause)
+    return findAgentReadinessError((error as { cause?: unknown }).cause)
   }
 
   return null
@@ -262,12 +262,12 @@ export function isHostExplicitlyAllowed(hostname: string, allowPrivateHost?: str
 
 export function normalizeTargetUrl(rawUrl: unknown): URL {
   if (typeof rawUrl !== 'string') {
-    throw new AeoAuditError('BAD_INPUT', 'A target URL is required.')
+    throw new AgentReadinessError('BAD_INPUT', 'A target URL is required.')
   }
 
   const trimmed = rawUrl.trim()
   if (!trimmed) {
-    throw new AeoAuditError('BAD_INPUT', 'A target URL is required.')
+    throw new AgentReadinessError('BAD_INPUT', 'A target URL is required.')
   }
 
   const withProtocol = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`
@@ -276,11 +276,11 @@ export function normalizeTargetUrl(rawUrl: unknown): URL {
   try {
     parsed = new URL(withProtocol)
   } catch {
-    throw new AeoAuditError('INVALID_URL', 'Enter a valid URL.')
+    throw new AgentReadinessError('INVALID_URL', 'Enter a valid URL.')
   }
 
   if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new AeoAuditError('UNSUPPORTED_PROTOCOL', 'Only HTTP and HTTPS URLs are supported.')
+    throw new AgentReadinessError('UNSUPPORTED_PROTOCOL', 'Only HTTP and HTTPS URLs are supported.')
   }
 
   parsed.hash = ''
@@ -361,27 +361,27 @@ async function resolveHostAddresses(hostname: string): Promise<string[]> {
     if (result.status === 'fulfilled') {
       ips.push(...result.value)
     } else if (!isDnsNotFoundError(result.reason)) {
-      throw new AeoAuditError('UNREACHABLE', `Could not resolve host "${hostname}".`, {
+      throw new AgentReadinessError('UNREACHABLE', `Could not resolve host "${hostname}".`, {
         details: { reason: getErrorMessage(result.reason) },
       })
     }
   }
 
   if (!ips.length) {
-    throw new AeoAuditError('UNREACHABLE', `Could not resolve host "${hostname}".`)
+    throw new AgentReadinessError('UNREACHABLE', `Could not resolve host "${hostname}".`)
   }
 
   return ips
 }
 
 interface ValidateTargetOptions {
-  /** Single host permitted to resolve to a private/loopback IP. See RunAeoAuditOptions.allowPrivateHost. */
+  /** Single host permitted to resolve to a private/loopback IP. See RunAgentReadinessAuditOptions.allowPrivateHost. */
   allowPrivateHost?: string
 }
 
 async function validatePublicRequestTarget(targetUrl: URL, options: ValidateTargetOptions = {}): Promise<void> {
   if (!['http:', 'https:'].includes(targetUrl.protocol)) {
-    throw new AeoAuditError('UNSUPPORTED_PROTOCOL', 'Only HTTP and HTTPS URLs are supported.')
+    throw new AgentReadinessError('UNSUPPORTED_PROTOCOL', 'Only HTTP and HTTPS URLs are supported.')
   }
 
   // Narrowly-scoped escape hatch (CLI --allow-local): when the caller named this
@@ -395,14 +395,14 @@ async function validatePublicRequestTarget(targetUrl: URL, options: ValidateTarg
   }
 
   if (isHostnameBlocked(targetUrl.hostname)) {
-    throw new AeoAuditError('BLOCKED_HOST', 'URL points to a blocked or private hostname.')
+    throw new AgentReadinessError('BLOCKED_HOST', 'URL points to a blocked or private hostname.')
   }
 
   const ips = await resolveHostAddresses(stripPort(targetUrl.hostname))
   const privateIp = ips.find((ip) => !isPublicIpAddress(ip))
 
   if (privateIp) {
-    throw new AeoAuditError('BLOCKED_IP', 'URL resolves to a blocked or private IP address.', {
+    throw new AgentReadinessError('BLOCKED_IP', 'URL resolves to a blocked or private IP address.', {
       details: { ip: privateIp },
     })
   }
@@ -436,7 +436,7 @@ export const validatingLookup: LookupFunction = (hostname, options, callback) =>
 
     const publicAddresses = (addresses as LookupAddress[]).filter((entry) => isPublicIpAddress(entry.address))
     if (publicAddresses.length === 0) {
-      callback(new AeoAuditError('BLOCKED_IP', 'URL resolves to a blocked or private IP address.'), '')
+      callback(new AgentReadinessError('BLOCKED_IP', 'URL resolves to a blocked or private IP address.'), '')
       return
     }
 
@@ -473,7 +473,7 @@ async function timedFetch(url: URL | string, options: TimedFetchOptions): Promis
   throwIfAborted(signal)
 
   const controller = new AbortController()
-  const timeoutError = new AeoAuditError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`)
+  const timeoutError = new AgentReadinessError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`)
   const timer = setTimeout(() => controller.abort(timeoutError), timeoutMs)
   const abortListener = signal
     ? (): void => controller.abort(abortReason(signal))
@@ -503,12 +503,12 @@ async function timedFetch(url: URL | string, options: TimedFetchOptions): Promis
       throw controller.signal.reason ?? error
     }
 
-    const knownError = findAeoAuditError(error)
+    const knownError = findAgentReadinessError(error)
     if (knownError) {
       throw knownError
     }
 
-    throw new AeoAuditError('UNREACHABLE', 'Target URL could not be reached.', { cause: error })
+    throw new AgentReadinessError('UNREACHABLE', 'Target URL could not be reached.', { cause: error })
   } finally {
     clearTimeout(timer)
     if (abortListener) signal?.removeEventListener('abort', abortListener)
@@ -545,7 +545,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     throwIfAborted(signal)
     budget?.assertWithinDuration()
     if (disallowCredentials && (currentUrl.username || currentUrl.password)) {
-      throw new AeoAuditError('BAD_INPUT', 'Canonical URLs must not contain credentials.')
+      throw new AgentReadinessError('BAD_INPUT', 'Canonical URLs must not contain credentials.')
     }
     await validatePublicRequestTarget(currentUrl, { allowPrivateHost })
     throwIfAborted(signal)
@@ -586,7 +586,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
       try { destination = new URL(location, currentUrl).toString() } catch { /* Preserve the raw invalid Location. */ }
       onRedirect?.({ status: response.status, from: currentUrl.toString(), to: destination })
       cancelResponseBody(response)
-      throw new AeoAuditError('REDIRECT_LIMIT', `Too many redirects (>${maxRedirects}).`)
+      throw new AgentReadinessError('REDIRECT_LIMIT', `Too many redirects (>${maxRedirects}).`)
     }
 
     let nextUrl
@@ -595,7 +595,7 @@ export async function fetchWithValidatedRedirects(startUrl: URL | string, option
     } catch {
       onRedirect?.({ status: response.status, from: currentUrl.toString(), to: location })
       cancelResponseBody(response)
-      throw new AeoAuditError('UNREACHABLE', 'Redirect location is invalid.')
+      throw new AgentReadinessError('UNREACHABLE', 'Redirect location is invalid.')
     }
 
     redirectChain.push({
@@ -686,7 +686,7 @@ export async function readResponseBodyAsText(response: Response, options: ReadRe
   const reader = response.body?.getReader()
   if (!reader) {
     if (options.requireHtmlSniff) {
-      throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+      throw new AgentReadinessError('NOT_HTML', 'Target URL did not return HTML.')
     }
     return ''
   }
@@ -719,7 +719,7 @@ export async function readResponseBodyAsText(response: Response, options: ReadRe
   const expireDeadline = (): void => {
     let reason: unknown
     try {
-      reason = options.deadlineError?.() ?? new AeoAuditError('TIMEOUT', 'Response body timed out.')
+      reason = options.deadlineError?.() ?? new AgentReadinessError('TIMEOUT', 'Response body timed out.')
     } catch (error) {
       reason = error
     }
@@ -742,7 +742,7 @@ export async function readResponseBodyAsText(response: Response, options: ReadRe
       totalBytes += chunk.length
       if (totalBytes > options.maxBytes) {
         options.onTooLarge?.()
-        throw new AeoAuditError(
+        throw new AgentReadinessError(
           'BODY_TOO_LARGE',
           options.tooLargeMessage ?? `Response exceeded ${options.maxBytes} bytes.`,
         )
@@ -754,14 +754,14 @@ export async function readResponseBodyAsText(response: Response, options: ReadRe
         if (sniffBytes >= HTML_SNIFF_MIN_BYTES) {
           sniffed = true
           if (!looksLikeHtml(sniffSample)) {
-            throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+            throw new AgentReadinessError('NOT_HTML', 'Target URL did not return HTML.')
           }
         }
       }
       chunks.push(chunk)
     }
     if (options.requireHtmlSniff && !sniffed && !looksLikeHtml(sniffSample)) {
-      throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.')
+      throw new AgentReadinessError('NOT_HTML', 'Target URL did not return HTML.')
     }
     completed = true
     return Buffer.concat(chunks).toString('utf8')
@@ -787,7 +787,7 @@ async function readBodyAsText(response: Response, options: ReadBodyOptions): Pro
     deadlineAt,
     deadlineError: timeoutMs === undefined
       ? undefined
-      : () => new AeoAuditError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`),
+      : () => new AgentReadinessError('TIMEOUT', `Request timed out after ${timeoutMs}ms.`),
   })
   return text
 }
@@ -893,9 +893,9 @@ async function attemptAuxiliaryFetch(
       throw error
     }
 
-    const knownError = isAeoAuditError(error)
+    const knownError = isAgentReadinessError(error)
       ? error
-      : new AeoAuditError('UNREACHABLE', 'Failed to fetch auxiliary file.', { cause: error })
+      : new AgentReadinessError('UNREACHABLE', 'Failed to fetch auxiliary file.', { cause: error })
 
     if (knownError.code === 'TIMEOUT') {
       return {
@@ -1031,17 +1031,17 @@ async function fetchAuxiliaryFile(origin: string, spec: AuxiliarySpec, options: 
 
 export interface FetchPageOptions {
   skipAuxiliary?: boolean
-  /** Permit this single host to resolve to a private/loopback IP. See RunAeoAuditOptions.allowPrivateHost. */
+  /** Permit this single host to resolve to a private/loopback IP. See RunAgentReadinessAuditOptions.allowPrivateHost. */
   allowPrivateHost?: string
   signal?: AbortSignal
-  onOutboundAttempt?: AeoAuditOutboundAttemptObserver
+  onOutboundAttempt?: AgentReadinessOutboundAttemptObserver
   budget?: FetchBudgetController
 }
 
 export interface CanonicalTargetFetchOptions {
   allowPrivateHost?: string
   signal?: AbortSignal
-  onOutboundAttempt?: AeoAuditOutboundAttemptObserver
+  onOutboundAttempt?: AgentReadinessOutboundAttemptObserver
   budget?: FetchBudget
   beforeOutboundAttempt?: () => Promise<void>
   deadlineAt?: number
@@ -1058,7 +1058,7 @@ export async function fetchCanonicalTarget(rawUrl: string, options: CanonicalTar
   const remainingMs = options.deadlineAt === undefined ? AUX_TIMEOUT_MS : options.deadlineAt - Date.now()
   const deadlineExpired = (): Error => remainingMs <= AUX_TIMEOUT_MS && options.deadlineError
     ? options.deadlineError()
-    : new AeoAuditError('TIMEOUT', 'Canonical target check timed out after 5000ms.')
+    : new AgentReadinessError('TIMEOUT', 'Canonical target check timed out after 5000ms.')
   if (remainingMs <= 0) throw deadlineExpired()
   const timer = setTimeout(() => controller.abort(deadlineExpired()), Math.min(AUX_TIMEOUT_MS, remainingMs))
   const callerAbort = (): void => controller.abort(abortReason(options.signal!))
@@ -1072,7 +1072,7 @@ export async function fetchCanonicalTarget(rawUrl: string, options: CanonicalTar
       targetUrl = new URL(rawUrl)
       targetUrl.hash = ''
     } catch {
-      throw new AeoAuditError('INVALID_URL', 'Canonical URL cannot be parsed.')
+      throw new AgentReadinessError('INVALID_URL', 'Canonical URL cannot be parsed.')
     }
     const { response, finalUrl } = await Promise.race([
       fetchWithValidatedRedirects(targetUrl, {
@@ -1108,11 +1108,11 @@ export async function fetchCanonicalTarget(rawUrl: string, options: CanonicalTar
     if (observerFailed && Object.is(error, observerError)) throw error
     if (isCallerAbort(error, options.signal) || isFetchBudgetExceededError(error)) throw error
     return {
-      state: isAeoAuditError(error) && error.code === 'TIMEOUT' ? 'timeout' : 'unreachable',
+      state: isAgentReadinessError(error) && error.code === 'TIMEOUT' ? 'timeout' : 'unreachable',
       url: redirectChain.length ? redirectChain[redirectChain.length - 1].to : rawUrl,
       statusCode: null,
       redirectChain: [...redirectChain],
-      errorCode: isAeoAuditError(error) ? error.code : 'UNREACHABLE',
+      errorCode: isAgentReadinessError(error) ? error.code : 'UNREACHABLE',
     }
   } finally {
     clearTimeout(timer)
@@ -1148,7 +1148,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
         // Best effort only; preserve the stable NOT_HTML error below.
       }
     }
-    throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.', {
+    throw new AgentReadinessError('NOT_HTML', 'Target URL did not return HTML.', {
       details: { contentType },
     })
   }
@@ -1162,7 +1162,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
   })
 
   if (!isHtmlResponse(contentType, html, true)) {
-    throw new AeoAuditError('NOT_HTML', 'Target URL did not return HTML.', {
+    throw new AgentReadinessError('NOT_HTML', 'Target URL did not return HTML.', {
       details: { contentType },
     })
   }

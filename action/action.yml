@@ -1,5 +1,5 @@
-name: "AEO Audit Guard"
-description: "Technical static AEO (Answer Engine Optimization) audit for CI — build your site, audit the rendered HTML offline (no deploy, no secrets, deterministic), and fail PRs on regressions vs a baseline."
+name: "Agent Readiness Guard"
+description: "Website agent readiness gate for CI — build your site, audit the rendered HTML offline (no deploy, no secrets, deterministic), and fail PRs that regress against a baseline."
 author: "Canonry"
 branding:
   icon: "trending-up"
@@ -19,7 +19,7 @@ inputs:
     default: ""
     required: false
   base-url:
-    description: "static: passed as aeo-audit --base-url so files map to real page URLs (canonical/og:url + stable per-page diff keys). Set this to your production origin; the default depresses absolute scores. url/sitemap: the base branch's deployed URL when baseline=base-rebuild."
+    description: "static: passed as agent-readiness --base-url so files map to real page URLs (canonical/og:url + stable per-page diff keys). Set this to your production origin; the default depresses absolute scores. url/sitemap: the base branch's deployed URL when baseline=base-rebuild."
     default: "https://localhost"
     required: false
   baseline:
@@ -28,7 +28,7 @@ inputs:
     required: false
   baseline-path:
     description: "For baseline=committed: path to the committed --format json report, relative to repo root. Also the write path in mode-of-run=update-baseline. ${site-id} is templated in."
-    default: ".aeo/baseline.${site-id}.json"
+    default: ".agent-readiness/baseline.${site-id}.json"
     required: false
   site-id:
     description: "Stable id for this site in a monorepo. Namespaces the baseline path, artifact name, and sticky-comment marker so multiple sites gate independently."
@@ -38,9 +38,9 @@ inputs:
     description: "gate (default): audit + compare + fail on regression. update-baseline: re-audit and write the baseline (run on push to the default branch); does not compare or fail."
     default: "gate"
     required: false
-  aeo-audit-version:
-    description: "npm dist-tag or exact version of @canonry/aeo-audit. Must be >= 4.1 (the compare subcommand). Resolved to a concrete version once and reused for every invocation."
-    default: "4"
+  agent-readiness-version:
+    description: "npm dist-tag or exact version of @canonry/agent-readiness. Resolved to a concrete version once and reused for every invocation."
+    default: "8"
     required: false
   audit-args:
     description: "Extra flags appended to EVERY audit invocation, identical on both sides (e.g. '--limit 500 --include-agent-skills'). Space-separated tokens; values may not contain spaces. Do NOT pass --format. SSRF-relaxing flags (--allow-local/--allow-private/--rewrite-sitemap-origin) and --lighthouse in static mode are rejected."
@@ -67,11 +67,11 @@ inputs:
     default: ""
     required: false
   min-absolute-score:
-    description: "Also fail if the current score is below this floor, independent of the diff (mirrors aeo-audit's own >=70 gate). Set 0 to gate purely on regression."
+    description: "Also fail if the current score is below this floor, independent of the diff (mirrors agent-readiness's own >=70 gate). Set 0 to gate purely on regression."
     default: "0"
     required: false
   require-meta:
-    description: "Pass aeo-audit --require-meta so a missing <meta name=description> on any page fails the audit regardless of score."
+    description: "Pass agent-readiness --require-meta so a missing <meta name=description> on any page fails the audit regardless of score."
     default: "false"
     required: false
   on-missing-baseline:
@@ -114,7 +114,7 @@ outputs:
     description: "Comma-separated factor ids that regressed."
     value: "${{ steps.gate.outputs.regressed_factors }}"
   report-json:
-    description: "Path to the current full aeo-audit JSON report."
+    description: "Path to the current full agent-readiness JSON report."
     value: "${{ steps.audit-head.outputs.report_path }}"
   regression-json:
     description: "Path to the CompareReport JSON."
@@ -132,17 +132,17 @@ runs:
       id: engine
       shell: bash
       env:
-        VER: ${{ inputs.aeo-audit-version }}
+        VER: ${{ inputs.agent-readiness-version }}
       run: |
         set -euo pipefail
         node -e 'process.exit(+process.versions.node.split(".")[0] >= 20 ? 0 : 1)' \
-          || { echo "::error::aeo-audit needs Node >= 20 (the consumer workflow must run actions/setup-node)."; exit 1; }
+          || { echo "::error::agent-readiness needs Node >= 20 (the consumer workflow must run actions/setup-node)."; exit 1; }
         # `npm view <pkg>@<range> version` prints `pkg@x 'x'` lines when the range matches
         # multiple versions, so use --json and take the highest clean semver (not `tail -n1`).
-        RESOLVED=$(npm view "@canonry/aeo-audit@${VER}" version --json 2>/dev/null | tr -d '[]" ' | tr ',' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n1 || true)
+        RESOLVED=$(npm view "@canonry/agent-readiness@${VER}" version --json 2>/dev/null | tr -d '[]" ' | tr ',' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n1 || true)
         if [ -z "$RESOLVED" ]; then RESOLVED="$VER"; fi
         echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
-        echo "Using @canonry/aeo-audit@$RESOLVED"
+        echo "Using @canonry/agent-readiness@$RESOLVED"
 
     # 1. Build + audit the PR HEAD -> current.json. The engine prints JSON before
     #    its own non-zero exit (<70 / --require-meta), so `set +e` captures both.
@@ -160,7 +160,7 @@ runs:
         SITE_ID: ${{ inputs.site-id }}
       run: |
         set -uo pipefail
-        bash "$GITHUB_ACTION_PATH/audit.sh" "$RUNNER_TEMP/aeo-head-${SITE_ID}.json"
+        bash "$GITHUB_ACTION_PATH/audit.sh" "$RUNNER_TEMP/agent-readiness-head-${SITE_ID}.json"
 
     # 2a. update-baseline mode: current IS the new baseline. Write & stop.
     - name: Write baseline
@@ -241,7 +241,7 @@ runs:
       continue-on-error: true
       uses: marocchino/sticky-pull-request-comment@v2
       with:
-        header: aeo-audit-guard-${{ inputs.site-id }}
+        header: agent-readiness-guard-${{ inputs.site-id }}
         path: ${{ steps.gate.outputs.md_path }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
 
@@ -271,19 +271,19 @@ runs:
         set -uo pipefail
         FAIL=0
         if [ "${CMP_EXIT:-0}" = "2" ]; then
-          echo "::error title=AEO config error (${SITE_ID})::${MSG:-compare could not run; check target/base-url/baseline/audit-args}"
+          echo "::error title=Agent readiness config error (${SITE_ID})::${MSG:-compare could not run; check target/base-url/baseline/audit-args}"
           exit 2
         fi
         if [ "${CMP_EXIT:-0}" = "1" ]; then
-          echo "::error title=AEO regression (${SITE_ID})::${MSG} — see the PR comment for the per-factor/per-page table and how to refresh the baseline."
+          echo "::error title=Agent readiness regression (${SITE_ID})::${MSG} — see the PR comment for the per-factor/per-page table and how to refresh the baseline."
           FAIL=1
         fi
         if [ "$REQ_META" = "true" ] && [ "${AUDIT_EXIT:-0}" != "0" ]; then
-          echo "::error title=AEO meta gate (${SITE_ID})::audit exited non-zero with --require-meta (a page may be missing <meta name=description>, or the score is below 70)."
+          echo "::error title=Agent readiness meta gate (${SITE_ID})::audit exited non-zero with --require-meta (a page may be missing <meta name=description>, or the score is below 70)."
           FAIL=1
         fi
         if [ "$MIN_ABS" != "0" ] && [ -n "${SCORE:-}" ] && [ "$SCORE" -lt "$MIN_ABS" ]; then
-          echo "::error title=AEO below floor (${SITE_ID})::score $SCORE is below the absolute floor of $MIN_ABS."
+          echo "::error title=Agent readiness below floor (${SITE_ID})::score $SCORE is below the absolute floor of $MIN_ABS."
           FAIL=1
         fi
         exit $FAIL

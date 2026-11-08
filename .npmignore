@@ -5,4 +5,4 @@ eslint.config.js
 CONTRIBUTING.md
 CLAUDE.md
 CHANGELOG.md
-.aeo-audit-history/
+.agent-readiness-history/

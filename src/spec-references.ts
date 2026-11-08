@@ -1,4 +1,4 @@
-// Cross-references from aeo-audit factors to the relevant rules in the
+// Cross-references from this audit's factors to the relevant rules in the
 // platform-agnostic web specification at https://specification.website
 // (Joost de Valk). The spec's "Agent readiness" category is the closest
 // authoritative analogue to what this tool measures, so we cite the exact rule
@@ -31,7 +31,7 @@ function agentReadinessRule(slug: string, title: string, status: SpecStatus): Sp
 }
 
 /**
- * The agent-readiness rules from specification.website that aeo-audit factors map
+ * The agent-readiness rules from specification.website that this audit's factors map
  * onto. Keys are the spec slugs; `satisfies` preserves the literal keys so
  * `SpecRuleId` is the exact union of valid slugs.
  */
@@ -52,8 +52,8 @@ export const SPEC_RULES = deepFreeze({
 export type SpecRuleId = keyof typeof SPEC_RULES
 
 /**
- * Maps aeo-audit factor IDs to the specification.website agent-readiness rules they
- * evaluate. This positions aeo-audit as the automated conformance checker for the
+ * Maps factor IDs to the specification.website agent-readiness rules they
+ * evaluate. This positions the audit as the automated conformance checker for the
  * spec's agent-readiness category. The explicit type narrows each slug to a valid
  * `SpecRuleId`, so a typo'd slug fails the build.
  */
