@@ -40,14 +40,14 @@ jobs:
       - run: shellcheck action/*.sh
 
   # Exercise the composite action end-to-end against a committed HTML fixture, using
-  # the locally-built engine (AEO_ENGINE_CMD) since the new version isn't published
+  # the locally-built engine (AGENT_READINESS_ENGINE_CMD) since the new version isn't published
   # yet. Seeds a baseline, then gates the same fixture against it and expects a pass.
   dogfood-action:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
-      AEO_ENGINE_CMD: node ${{ github.workspace }}/bin/aeo-audit.js
+      AGENT_READINESS_ENGINE_CMD: node ${{ github.workspace }}/bin/agent-readiness.js
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

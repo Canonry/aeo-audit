@@ -1,12 +1,12 @@
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { compareReports, renderCompareMarkdown, DEFAULT_COMPARE_POLICY } from './compare.js'
-import { runAeoAudit } from './index.js'
+import { runAgentReadinessAudit } from './index.js'
 import { runSitemapAudit } from './sitemap.js'
 import { runStaticAudit } from './static-audit.js'
 import { normalizeTargetUrl } from './fetch-page.js'
 import { detectPlatform, detectPlatformBatch } from './detect-platform.js'
 import { getChangedRoutePaths, normalizeRoutePath } from './changed-pages.js'
-import { AeoAuditError, isAeoAuditError } from './errors.js'
+import { AgentReadinessError, isAgentReadinessError } from './errors.js'
 import {
   formatBatchPlatformJson,
   formatJson,
@@ -289,14 +289,17 @@ async function resolveChangedIncludePaths(args: ParsedArgs): Promise<string[]> {
 
 function printHelp() {
   console.log(`
-Usage: aeo-audit <url|path> [options]
-       aeo-audit compare --current <file> [--baseline <file>] [options]
+Website agent readiness audit: scores how well AI agents and answer engines
+can reach, read, and cite a site.
+
+Usage: agent-readiness <url|path> [options]
+       agent-readiness compare --current <file> [--baseline <file>] [options]
 
 Pass a URL to audit a live site, or a filesystem path (a .html file or a
 directory of built HTML, e.g. ./out) to audit static output offline.
 
 The 'compare' subcommand diffs two --format json reports into a regression
-verdict (run 'aeo-audit compare --help' for its options).
+verdict (run 'agent-readiness compare --help' for its options).
 
 Options:
   --format <type>         Output format: text (default), json, markdown, agent.
@@ -348,38 +351,38 @@ Options:
   -h, --help              Show this help message
 
 Examples:
-  aeo-audit https://example.com
-  aeo-audit https://example.com --format json
-  aeo-audit https://example.com --format agent
-  aeo-audit https://example.com --sitemap --format agent
-  aeo-audit https://example.com --factors structured-data,faq-content
-  aeo-audit https://example.com --factors schema-validity
-  aeo-audit https://example.com --include-geo
-  aeo-audit https://example.com --include-agent-skills
-  aeo-audit https://example.com --lighthouse
-  PAGESPEED_API_KEY=xxx aeo-audit https://example.com --lighthouse --format json
-  aeo-audit https://example.com --sitemap
-  aeo-audit https://example.com --sitemap https://example.com/sitemap.xml
-  aeo-audit https://example.com --sitemap --limit 10
-  aeo-audit https://example.com --sitemap --top-issues
-  aeo-audit https://example.com --sitemap --top-issues --format markdown
-  aeo-audit https://example.com --require-meta
-  aeo-audit https://example.com --sitemap --require-meta
-  aeo-audit http://localhost:3000 --allow-local
-  aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local
-  aeo-audit http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local --changed --base main --include-critical
-  aeo-audit https://staging.example.com --sitemap --rewrite-sitemap-origin
-  aeo-audit ./out
-  aeo-audit ./out --base-url https://example.com --require-meta
-  aeo-audit ./dist/index.html
-  aeo-audit https://example.com --detect-platform
-  aeo-audit https://example.com --detect-platform --format json
-  aeo-audit https://example.com --detect-platform --min-confidence medium
-  aeo-audit --detect-platform --urls urls.txt
-  aeo-audit --detect-platform --urls https://a.com,https://b.com --format json
-  cat urls.txt | aeo-audit --detect-platform --urls -
-  aeo-audit https://example.com --format json > current.json
-  aeo-audit compare --baseline baseline.json --current current.json
+  agent-readiness https://example.com
+  agent-readiness https://example.com --format json
+  agent-readiness https://example.com --format agent
+  agent-readiness https://example.com --sitemap --format agent
+  agent-readiness https://example.com --factors structured-data,faq-content
+  agent-readiness https://example.com --factors schema-validity
+  agent-readiness https://example.com --include-geo
+  agent-readiness https://example.com --include-agent-skills
+  agent-readiness https://example.com --lighthouse
+  PAGESPEED_API_KEY=xxx agent-readiness https://example.com --lighthouse --format json
+  agent-readiness https://example.com --sitemap
+  agent-readiness https://example.com --sitemap https://example.com/sitemap.xml
+  agent-readiness https://example.com --sitemap --limit 10
+  agent-readiness https://example.com --sitemap --top-issues
+  agent-readiness https://example.com --sitemap --top-issues --format markdown
+  agent-readiness https://example.com --require-meta
+  agent-readiness https://example.com --sitemap --require-meta
+  agent-readiness http://localhost:3000 --allow-local
+  agent-readiness http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local
+  agent-readiness http://localhost:3000 --sitemap --rewrite-sitemap-origin --allow-local --changed --base main --include-critical
+  agent-readiness https://staging.example.com --sitemap --rewrite-sitemap-origin
+  agent-readiness ./out
+  agent-readiness ./out --base-url https://example.com --require-meta
+  agent-readiness ./dist/index.html
+  agent-readiness https://example.com --detect-platform
+  agent-readiness https://example.com --detect-platform --format json
+  agent-readiness https://example.com --detect-platform --min-confidence medium
+  agent-readiness --detect-platform --urls urls.txt
+  agent-readiness --detect-platform --urls https://a.com,https://b.com --format json
+  cat urls.txt | agent-readiness --detect-platform --urls -
+  agent-readiness https://example.com --format json > current.json
+  agent-readiness compare --baseline baseline.json --current current.json
 
 Exit codes (audit/sitemap/static modes): 0 when score >= 70, 1 otherwise. In sitemap and
 static-directory modes, the aggregate score is used.
@@ -388,12 +391,12 @@ In --detect-platform batch mode, exit code is 0 if at least one URL succeeded, 1
 With --require-meta, exit is 1 if any audited page is missing <meta name="description">,
 regardless of the score-based rule above.
 For the 'compare' subcommand: 0 = no regression / improvement / no-baseline, 1 = regression,
-2 = misconfiguration. See 'aeo-audit compare --help'.
+2 = misconfiguration. See 'agent-readiness compare --help'.
 `)
 }
 
 /* ── compare subcommand ───────────────────────────────────────────────────
- * `aeo-audit compare` diffs two report JSONs (a baseline and a current run) into
+ * `agent-readiness compare` diffs two report JSONs (a baseline and a current run) into
  * a regression verdict. It reads pre-existing reports and runs NO audit, so it is
  * dispatched before the audit if-chain in `main()` and has its own arg grammar.
  * stdout carries ONLY the machine output (JSON unless --format markdown); every
@@ -500,9 +503,9 @@ function parseCompareArgs(argv: string[]): CompareArgs {
 
 function printCompareHelp(): void {
   console.log(`
-Usage: aeo-audit compare --current <file> [--baseline <file>] [options]
+Usage: agent-readiness compare --current <file> [--baseline <file>] [options]
 
-Diff two aeo-audit JSON reports (produced with --format json) into a regression
+Diff two agent-readiness JSON reports (produced with --format json) into a regression
 verdict and a non-zero exit code. Single (AuditReport) and multi-page
 (SitemapAuditReport) reports are both supported; the two sides must be the same
 mode. Runs no audit and touches no network.
@@ -532,10 +535,10 @@ Exit code: 0 no regression / improvement / no-baseline, 1 regression,
 --strict-comparability, unreadable/invalid report files). --report-only always 0.
 
 Examples:
-  aeo-audit https://example.com --format json > current.json
-  aeo-audit compare --baseline baseline.json --current current.json
-  aeo-audit compare --baseline base.json --current cur.json --overall-tolerance 0 --md-out diff.md
-  aeo-audit compare --baseline base.json --current cur.json --strict-comparability --fail-on removed-pages
+  agent-readiness https://example.com --format json > current.json
+  agent-readiness compare --baseline baseline.json --current current.json
+  agent-readiness compare --baseline base.json --current cur.json --overall-tolerance 0 --md-out diff.md
+  agent-readiness compare --baseline base.json --current cur.json --strict-comparability --fail-on removed-pages
 `)
 }
 
@@ -544,12 +547,12 @@ async function readReport(path: string): Promise<AuditReport | SitemapAuditRepor
   try {
     raw = await readFile(path, 'utf-8')
   } catch {
-    throw new AeoAuditError('COMPARE_MISCONFIG', `Could not read report file: ${path}`)
+    throw new AgentReadinessError('COMPARE_MISCONFIG', `Could not read report file: ${path}`)
   }
   try {
     return JSON.parse(raw) as AuditReport | SitemapAuditReport
   } catch {
-    throw new AeoAuditError('COMPARE_MISCONFIG', `Report file is not valid JSON: ${path}`)
+    throw new AgentReadinessError('COMPARE_MISCONFIG', `Report file is not valid JSON: ${path}`)
   }
 }
 
@@ -565,7 +568,7 @@ export async function mainCompare(argv: string[]): Promise<number> {
     return 2
   }
   if (!args.current) {
-    console.error('Error: compare requires --current <file>. Run "aeo-audit compare --help" for usage.')
+    console.error('Error: compare requires --current <file>. Run "agent-readiness compare --help" for usage.')
     return 2
   }
 
@@ -592,11 +595,11 @@ export async function mainCompare(argv: string[]): Promise<number> {
 
     return report.verdict === 'fail' ? 1 : 0
   } catch (error) {
-    if (isAeoAuditError(error) && error.code === 'COMPARE_MISCONFIG') {
+    if (isAgentReadinessError(error) && error.code === 'COMPARE_MISCONFIG') {
       console.error(`Error [COMPARE_MISCONFIG]: ${error.message}`)
       return 2
     }
-    if (isAeoAuditError(error)) {
+    if (isAgentReadinessError(error)) {
       console.error(`Error [${error.code}]: ${error.message}`)
     } else if (error instanceof Error) {
       console.error(`Error: ${error.message}`)
@@ -793,7 +796,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     }
 
     const formatter = FORMATTERS[args.format]
-    const report = await runAeoAudit(args.url, {
+    const report = await runAgentReadinessAudit(args.url, {
       factors: args.factors,
       includeGeo: args.includeGeo,
       includeAgentSkills: args.includeAgentSkills,
@@ -810,7 +813,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
 
     return report.overallScore >= 70 ? 0 : 1
   } catch (error) {
-    if (isAeoAuditError(error)) {
+    if (isAgentReadinessError(error)) {
       console.error(`Error [${error.code}]: ${error.message}`)
     } else if (error instanceof Error) {
       console.error(`Error: ${error.message}`)

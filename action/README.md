@@ -1,6 +1,8 @@
-# AEO Audit Guard — GitHub Action
+# Agent Readiness Guard — GitHub Action
 
-> A **technical, static AEO audit** for CI. It builds your site, audits the rendered **HTML offline** (no deploy, no live crawl, no secrets — fully deterministic), and **fails the PR** when Answer Engine Optimization signals regress against a committed baseline. Add it with `uses: Canonry/aeo-audit/action@v4`.
+> A **technical, static agent readiness audit** for CI. It builds your site, audits the rendered **HTML offline** (no deploy, no live crawl, no secrets — fully deterministic), and **fails the PR** when the signals AI agents and answer engines rely on regress against a committed baseline. Add it with `uses: Canonry/agent-readiness/action@v8`.
+>
+> Previously **AEO Audit Guard** (`Canonry/aeo-audit/action@v4`). See [Migrating from AEO Audit Guard](#migrating-from-aeo-audit-guard).
 
 ## What "technical static audit" means
 
@@ -11,8 +13,8 @@
 ## Quick start
 
 ```yaml
-# .github/workflows/aeo.yml
-name: AEO Guard
+# .github/workflows/agent-readiness.yml
+name: Agent Readiness Guard
 on:
   pull_request: { branches: [main] }
   merge_group:                       # don't wedge the merge queue (see "Required checks")
@@ -21,11 +23,11 @@ permissions:
   contents: read                     # never inherit write-all
 
 concurrency:                         # cancel superseded runs on the same PR
-  group: aeo-${{ github.ref }}
+  group: agent-readiness-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  aeo-gate:
+  agent-readiness-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -37,21 +39,21 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4   # the engine needs Node >= 20
         with: { node-version: 20, cache: pnpm }
-      - uses: Canonry/aeo-audit/action@v4
+      - uses: Canonry/agent-readiness/action@v8
         with:
           mode: static
           build-command: "pnpm install --frozen-lockfile && pnpm run build"
           target: "./out"                      # Next `output: export` / Astro `dist` / Hugo `public`
           base-url: "https://www.example.com"  # REQUIRED in practice — see "Set base-url"
           baseline: committed
-          baseline-path: ".aeo/baseline.default.json"
+          baseline-path: ".agent-readiness/baseline.default.json"
 ```
 
 On the **first run** there is no committed baseline, so the gate passes and the comment tells you to seed one. Generate it and commit it:
 
 ```bash
-npx @canonry/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json
-git add .aeo/baseline.default.json && git commit -m "chore: seed AEO baseline"
+npx @canonry/agent-readiness@8 ./out --base-url https://www.example.com --format json > .agent-readiness/baseline.default.json
+git add .agent-readiness/baseline.default.json && git commit -m "chore: seed agent readiness baseline"
 ```
 
 From then on, every PR is measured against that committed baseline.
@@ -77,7 +79,7 @@ Score, page, and factor deltas only gate when the two runs are **comparable** (s
 When you *meant* to change content and the score legitimately moved, refresh the committed baseline in the **same PR** — the reviewer approves the score change as a normal file diff:
 
 ```bash
-npx @canonry/aeo-audit@4 ./out --base-url https://www.example.com --format json > .aeo/baseline.default.json
+npx @canonry/agent-readiness@8 ./out --base-url https://www.example.com --format json > .agent-readiness/baseline.default.json
 ```
 
 The PR comment always prints this exact command. Avoid loosening a global tolerance for a one-off drop — that permanently weakens the gate for every future PR.
@@ -86,12 +88,12 @@ The PR comment always prints this exact command. Avoid loosening a global tolera
 
 - **`committed`** (default) — a JSON report committed at `baseline-path`. Deterministic, reviewable, secret-free, and the accept-a-drop flow is just a file diff. Refresh it on merge with a separate job (below).
 - **`base-rebuild`** — re-audit the PR's base SHA in the same run (needs `actions/checkout` with `fetch-depth: 0`). No stored artifact, always fresh, but ~2× build time and the base build must be reproducible in a worktree (use an isolated dependency store to avoid contaminating it with the head's `node_modules`).
-- **`artifact`** — download the latest successful default-branch baseline artifact (needs `actions: read`). Cheaper than base-rebuild, subject to artifact retention.
+- **`artifact`** — download the latest successful default-branch baseline artifact, named `agent-readiness-baseline-<site-id>` (needs `actions: read`). Cheaper than base-rebuild, subject to artifact retention.
 
 ### Refreshing a committed baseline on merge
 
 ```yaml
-  aeo-baseline:
+  agent-readiness-baseline:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -103,21 +105,21 @@ The PR comment always prints this exact command. Avoid loosening a global tolera
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
-      - uses: Canonry/aeo-audit/action@v4
+      - uses: Canonry/agent-readiness/action@v8
         with:
           mode-of-run: update-baseline
           build-command: "pnpm install --frozen-lockfile && pnpm run build"
           target: "./out"
           base-url: "https://www.example.com"
           baseline: committed
-          baseline-path: ".aeo/baseline.default.json"
+          baseline-path: ".agent-readiness/baseline.default.json"
           comment: "false"
       - uses: peter-evans/create-pull-request@v6
         with:
-          add-paths: .aeo/baseline.default.json
-          branch: chore/aeo-baseline
-          commit-message: "chore: refresh AEO baseline"
-          title: "chore: refresh AEO baseline"
+          add-paths: .agent-readiness/baseline.default.json
+          branch: chore/agent-readiness-baseline
+          commit-message: "chore: refresh agent readiness baseline"
+          title: "chore: refresh agent readiness baseline"
 ```
 
 It opens a reviewable PR rather than force-pushing the baseline to your default branch.
@@ -139,7 +141,7 @@ Give each site a `site-id` (namespaces the baseline path, the artifact name, and
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
-      - uses: Canonry/aeo-audit/action@v4
+      - uses: Canonry/agent-readiness/action@v8
         with:
           site-id: ${{ matrix.site.id }}
           build-command: "pnpm install --frozen-lockfile && ${{ matrix.site.build }}"
@@ -156,11 +158,26 @@ In `static` mode `base-url` maps files to real page URLs (`out/about/index.html 
 - **Use `pull_request`, never `pull_request_target`.** On *fork* PRs the token is read-only with no secrets, so building the PR's code is safe-ish (the comment can't post and falls back to the job summary). On *same-repo branch* PRs the token and secrets ARE available while this action runs your `build-command` — keep the gate job's `permissions` minimal (`contents: read` + `pull-requests: write`) and put **no deploy/npm/cloud secrets in that job**.
 - `build-command`, `target`, `base-url`, and `audit-args` are **trusted maintainer config** — never wire PR-author-controlled values into them. The `with:` block is part of the PR diff, so protect `.github/workflows` with branch/required-workflow rules.
 - `audit-args` rejects the SSRF-relaxing flags (`--allow-local`, `--allow-private`, `--rewrite-sitemap-origin`) and `--lighthouse` in static mode. Default `static` mode does no network I/O at all.
-- The engine is pinned to `@canonry/aeo-audit@4` (never `@latest`). Pin this action and the third-party actions above to commit SHAs for full supply-chain protection.
+- The engine is pinned to `@canonry/agent-readiness@8` (never `@latest`). Pin this action and the third-party actions above to commit SHAs for full supply-chain protection.
 
 ## Required checks & events
 
 Run the action on `pull_request` **and** `merge_group` so a required status check is produced for both PRs and the merge queue. Don't make the *job* conditional on the event in a way that skips it entirely — a required check that never reports leaves the merge queue pending forever.
+
+## Migrating from AEO Audit Guard
+
+This action was **AEO Audit Guard**, run as `Canonry/aeo-audit/action@v4` or `Canonry/aeo-audit-action@v4` with the `@canonry/aeo-audit` engine. Update the `uses:` line: GitHub does not redirect action references to a renamed repository, so `Canonry/aeo-audit/action@v4` stops resolving once this repository is renamed. To move to this version:
+
+| Change | Before | Now |
+|---|---|---|
+| Action | `Canonry/aeo-audit/action@v4` | `Canonry/agent-readiness/action@v8` |
+| Engine | `@canonry/aeo-audit@4` | `@canonry/agent-readiness@8` |
+| Engine version input | `aeo-audit-version` | `agent-readiness-version` |
+| Default `baseline-path` | `.aeo/baseline.${site-id}.json` | `.agent-readiness/baseline.${site-id}.json` |
+| Baseline artifact name | `aeo-baseline-<site-id>` | `agent-readiness-baseline-<site-id>` |
+| Sticky comment | `aeo-audit-guard-<site-id>` | `agent-readiness-guard-<site-id>` |
+
+Regenerate your baseline with the new engine. A committed or artifact baseline from an older engine major fails the comparability check with exit `2`. If you set `baseline-path` explicitly, it keeps working; otherwise move the file or set `baseline-path` to the old location. The first run after the move posts a new sticky comment instead of updating the old one.
 
 ## Inputs & outputs
 

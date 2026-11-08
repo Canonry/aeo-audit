@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Capture the options runSitemapAudit hands to each per-page runAeoAudit call so
+// Capture the options runSitemapAudit hands to each per-page runAgentReadinessAudit call so
 // we can assert opt-in factor flags are forwarded. vi.hoisted lets the hoisted
 // vi.mock factory reference the spy.
-const runAeoAuditMock = vi.hoisted(() => vi.fn())
+const runAgentReadinessAuditMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../src/index.js', () => ({
-  runAeoAudit: runAeoAuditMock,
+  runAgentReadinessAudit: runAgentReadinessAuditMock,
 }))
 
-// Imported after vi.mock so sitemap.js picks up the mocked runAeoAudit.
+// Imported after vi.mock so sitemap.js picks up the mocked runAgentReadinessAudit.
 import { runSitemapAudit } from '../src/sitemap.js'
 
 const SITEMAP_URL = 'http://1.1.1.1/sitemap.xml'
@@ -48,8 +48,8 @@ function fakeReport(url: string) {
 }
 
 beforeEach(() => {
-  runAeoAuditMock.mockReset()
-  runAeoAuditMock.mockImplementation((url: string) => Promise.resolve(fakeReport(url)))
+  runAgentReadinessAuditMock.mockReset()
+  runAgentReadinessAuditMock.mockImplementation((url: string) => Promise.resolve(fakeReport(url)))
   // Serve the sitemap XML for the sitemap fetch (fetchSitemapResponse uses global fetch).
   vi.stubGlobal('fetch', vi.fn(async () =>
     new Response(SITEMAP_XML, { status: 200, headers: { 'content-type': 'application/xml' } }),
@@ -69,8 +69,8 @@ describe('runSitemapAudit option forwarding', () => {
       includeGeo: true,
     })
 
-    expect(runAeoAuditMock).toHaveBeenCalledTimes(1)
-    const [auditedUrl, options] = runAeoAuditMock.mock.calls[0]
+    expect(runAgentReadinessAuditMock).toHaveBeenCalledTimes(1)
+    const [auditedUrl, options] = runAgentReadinessAuditMock.mock.calls[0]
     expect(auditedUrl).toBe(PAGE_URL)
     expect(options).toMatchObject({ includeAgentSkills: true, includeGeo: true })
   })
@@ -78,7 +78,7 @@ describe('runSitemapAudit option forwarding', () => {
   it('does not enable agent skills when the flag is absent', async () => {
     await runSitemapAudit(PAGE_URL, { sitemapUrl: SITEMAP_URL })
 
-    const [, options] = runAeoAuditMock.mock.calls[0]
+    const [, options] = runAgentReadinessAuditMock.mock.calls[0]
     expect(options.includeAgentSkills).toBeFalsy()
     expect(options.includeGeo).toBeFalsy()
   })
@@ -89,7 +89,7 @@ describe('runSitemapAudit option forwarding', () => {
       factors: ['agent-skill-exposure', 'structured-data'],
     })
 
-    const [, options] = runAeoAuditMock.mock.calls[0]
+    const [, options] = runAgentReadinessAuditMock.mock.calls[0]
     expect(options.factors).toEqual(['agent-skill-exposure', 'structured-data'])
   })
 
@@ -101,7 +101,7 @@ describe('runSitemapAudit option forwarding', () => {
       includeLighthouse: true,
     })
 
-    const [, options] = runAeoAuditMock.mock.calls[0]
+    const [, options] = runAgentReadinessAuditMock.mock.calls[0]
     expect(options.includeLighthouse).toBeUndefined()
   })
 
@@ -120,7 +120,7 @@ describe('runSitemapAudit option forwarding', () => {
       includePaths: ['/', '/contact'],
     })
 
-    const crawled = runAeoAuditMock.mock.calls.map((call) => call[0]).sort()
+    const crawled = runAgentReadinessAuditMock.mock.calls.map((call) => call[0]).sort()
     expect(crawled).toEqual(['http://1.1.1.1/', 'http://1.1.1.1/contact?ref=sitemap'])
     expect(report.pagesDiscovered).toBe(3)
     expect(report.pagesAudited).toBe(2)
@@ -141,7 +141,7 @@ describe('runSitemapAudit option forwarding', () => {
       maxFetches: 1,
     })
 
-    expect(runAeoAuditMock).not.toHaveBeenCalled()
+    expect(runAgentReadinessAuditMock).not.toHaveBeenCalled()
     expect(report.pagesAudited).toBe(0)
     expect(report.pagesSkipped).toBe(3)
     expect(report.metadata?.partial).toBe(true)
@@ -164,7 +164,7 @@ describe('runSitemapAudit option forwarding', () => {
         'http://1.1.1.1/pricing',
       ]), { status: 200, headers: { 'content-type': 'application/xml' } }),
     ))
-    runAeoAuditMock.mockImplementation((url: string, options?: { budget?: { consumeFetch: () => void } }) => {
+    runAgentReadinessAuditMock.mockImplementation((url: string, options?: { budget?: { consumeFetch: () => void } }) => {
       options?.budget?.consumeFetch()
       return Promise.resolve(fakeReport(url))
     })
@@ -174,7 +174,7 @@ describe('runSitemapAudit option forwarding', () => {
       maxFetches: 3,
     })
 
-    expect(runAeoAuditMock).toHaveBeenCalledTimes(2)
+    expect(runAgentReadinessAuditMock).toHaveBeenCalledTimes(2)
     expect(report.pagesAudited).toBe(2)
     expect(report.metadata?.partial).toBe(true)
     expect(report.metadata?.budget).toMatchObject({
@@ -198,7 +198,7 @@ describe('runSitemapAudit option forwarding', () => {
         headers: { 'content-type': 'application/xml' },
       }),
     ))
-    runAeoAuditMock.mockImplementation(async (url: string) => {
+    runAgentReadinessAuditMock.mockImplementation(async (url: string) => {
       // Yield first so every worker starts its page at elapsed 0, then let
       // this page take 20 ms.
       await Promise.resolve()
@@ -211,7 +211,7 @@ describe('runSitemapAudit option forwarding', () => {
       maxDurationMs: 10,
     })
 
-    expect(runAeoAuditMock).toHaveBeenCalledTimes(5)
+    expect(runAgentReadinessAuditMock).toHaveBeenCalledTimes(5)
     expect(report.pagesAudited).toBe(5)
     expect(report.metadata?.partial).toBe(true)
     expect(report.metadata?.budget).toMatchObject({

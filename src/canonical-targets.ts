@@ -1,12 +1,12 @@
 import { load } from 'cheerio'
 import { inspectCanonicalLinks, MAX_CANONICAL_TARGETS } from './analyzers/canonical-links.js'
 import { fetchCanonicalTarget, type CanonicalTargetFetchOptions } from './fetch-page.js'
-import type { AuxiliaryResources, CanonicalTargetResult, FetchedPage, RunAeoAuditOptions } from './types.js'
+import type { AuxiliaryResources, CanonicalTargetResult, FetchedPage, RunAgentReadinessAuditOptions } from './types.js'
 
 /** Shared single-page and crawl probes; self canonicals reuse the response already fetched. */
 export async function collectCanonicalTargets(
   page: Pick<FetchedPage, 'html' | 'finalUrl' | 'statusCode' | 'headers'> & { auxiliary: AuxiliaryResources },
-  options: CanonicalTargetFetchOptions & Pick<RunAeoAuditOptions, 'factors'>,
+  options: CanonicalTargetFetchOptions & Pick<RunAgentReadinessAuditOptions, 'factors'>,
 ): Promise<Record<string, CanonicalTargetResult> | undefined> {
   if (options.factors?.length && !options.factors.some((id) => id === 'entity-consistency' || id === 'technical-seo')) return undefined
   const { urls } = inspectCanonicalLinks({

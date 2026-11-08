@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Small glue between the aeo-audit CLI and the GitHub Action. It does NOT compute
- * any verdict — that is owned by `aeo-audit compare` (typed + vitest-tested). It
+ * Small glue between the agent-readiness CLI and the GitHub Action. It does NOT compute
+ * any verdict — that is owned by `agent-readiness compare` (typed + vitest-tested). It
  * only:
  *   --extract-score   <report.json>   → prints the report's headline score
  *   --extract-outputs <compare.json>  → prints `key=value` lines for $GITHUB_OUTPUT

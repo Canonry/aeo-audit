@@ -24,7 +24,7 @@ vi.mock('node:dns', async () => {
 })
 
 import { fetchWithValidatedRedirects } from '../src/fetch-page.js'
-import { isAeoAuditError } from '../src/errors.js'
+import { isAgentReadinessError } from '../src/errors.js'
 
 describe('fetchWithValidatedRedirects DNS rebinding guard', () => {
   beforeEach(() => {
@@ -58,7 +58,7 @@ describe('fetchWithValidatedRedirects DNS rebinding guard', () => {
         caught = error
       }
 
-      expect(isAeoAuditError(caught) && caught.code).toBe('BLOCKED_IP')
+      expect(isAgentReadinessError(caught) && caught.code).toBe('BLOCKED_IP')
       expect(resolve4Mock).toHaveBeenCalledWith('public-preflight.test')
       expect(lookupMock).toHaveBeenCalled()
       expect(hits).toBe(0)

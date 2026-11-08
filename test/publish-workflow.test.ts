@@ -23,7 +23,7 @@ const changelog = readFileSync(
 
 describe('release workflow', () => {
   it('publishes only the Canonry package to public npm', () => {
-    expect(packageJson.name).toBe('@canonry/aeo-audit')
+    expect(packageJson.name).toBe('@canonry/agent-readiness')
     expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+$/)
     expect(changelog).toContain(`## ${packageJson.version} (`)
     expect(packageJson.publishConfig?.registry).toBe(
@@ -33,7 +33,7 @@ describe('release workflow', () => {
 
     expect(workflow).toContain('id-token: write')
     expect(workflow).toContain(
-      'publish_package "@canonry/aeo-audit" "release/canonry-package.tgz"',
+      'publish_package "@canonry/agent-readiness" "release/canonry-package.tgz"',
     )
     expect(workflow.match(/npm publish "\.\/\$TARBALL" --registry=https:\/\/registry\.npmjs\.org --access public --provenance/g)).toHaveLength(1)
     expect(workflow).toContain('npm install --global npm@11.5.1')

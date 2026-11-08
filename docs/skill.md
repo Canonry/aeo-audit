@@ -1,13 +1,13 @@
 # Claude Code / ClawHub skill
 
-This package ships one umbrella skill source at [`skills/aeo/SKILL.md`](../skills/aeo/SKILL.md).
+This package ships one umbrella skill source at [`skills/agent-readiness/SKILL.md`](../skills/agent-readiness/SKILL.md).
 
-ClawHub package: [arberx/aeo](https://clawhub.ai/arberx/aeo)
+ClawHub package: [arberx/agent-readiness](https://clawhub.ai/arberx/agent-readiness)
 
 ## Command
 
 ```text
-/aeo <mode> <url> [flags]
+/agent-readiness <mode> <url> [flags]
 ```
 
 ## Modes
@@ -21,22 +21,22 @@ ClawHub package: [arberx/aeo](https://clawhub.ai/arberx/aeo)
 ## Examples
 
 ```text
-/aeo audit https://example.com
-/aeo fix https://example.com
-/aeo schema https://example.com
-/aeo llms https://example.com
-/aeo monitor https://site-a.com --compare https://site-b.com
+/agent-readiness audit https://example.com
+/agent-readiness fix https://example.com
+/agent-readiness schema https://example.com
+/agent-readiness llms https://example.com
+/agent-readiness monitor https://site-a.com --compare https://site-b.com
 ```
 
 ## Install
 
 ```bash
 # Personal install
-git clone https://github.com/Canonry/aeo-audit.git /tmp/aeo-audit
-cp -r /tmp/aeo-audit/skills/aeo ~/.claude/skills/
+git clone https://github.com/Canonry/agent-readiness.git /tmp/agent-readiness
+cp -r /tmp/agent-readiness/skills/agent-readiness ~/.claude/skills/
 
 # Or project-level
-cp -r /tmp/aeo-audit/skills/aeo .claude/skills/
+cp -r /tmp/agent-readiness/skills/agent-readiness .claude/skills/
 ```
 
 ## Testing the skill from this repo
@@ -45,5 +45,5 @@ If you're testing the skill from a local checkout instead of the published packa
 
 ```bash
 pnpm run build
-node bin/aeo-audit.js https://example.com --format json
+node bin/agent-readiness.js https://example.com --format json
 ```

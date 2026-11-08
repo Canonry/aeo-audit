@@ -1,6 +1,6 @@
 import type { CheerioAPI } from 'cheerio'
 import { deepFreeze } from './immutable.js'
-import type { AeoAuditErrorCode } from './errors.js'
+import type { AgentReadinessErrorCode } from './errors.js'
 
 export type FindingType = 'found' | 'missing' | 'info' | 'timeout' | 'unreachable'
 
@@ -122,7 +122,7 @@ export interface AuditContext {
   pageTitle: string
 }
 
-export type AeoAuditOutboundAttemptKind =
+export type AgentReadinessOutboundAttemptKind =
   | 'page'
   | 'auxiliary'
   | 'sitemap'
@@ -130,16 +130,16 @@ export type AeoAuditOutboundAttemptKind =
   | 'diagnostic'
   | 'canonical'
 
-export interface AeoAuditOutboundAttempt {
-  kind: AeoAuditOutboundAttemptKind
+export interface AgentReadinessOutboundAttempt {
+  kind: AgentReadinessOutboundAttemptKind
   method: 'GET'
   url: string
   redirectDepth: number
 }
 
-export type AeoAuditOutboundAttemptObserver = (attempt: AeoAuditOutboundAttempt) => void | Promise<void>
+export type AgentReadinessOutboundAttemptObserver = (attempt: AgentReadinessOutboundAttempt) => void | Promise<void>
 
-export interface RunAeoAuditOptions {
+export interface RunAgentReadinessAuditOptions {
   factors?: string[] | null
   includeGeo?: boolean
   includeAgentSkills?: boolean
@@ -147,7 +147,7 @@ export interface RunAeoAuditOptions {
   /** Abort the audit. Caller cancellation rejects with the signal's original reason. */
   signal?: AbortSignal
   /** Observes each outbound GET after SSRF preflight validation and before the socket is opened. */
-  onOutboundAttempt?: AeoAuditOutboundAttemptObserver
+  onOutboundAttempt?: AgentReadinessOutboundAttemptObserver
   /**
    * Narrowly-scoped escape hatch for the SSRF guard. Set to a single hostname
    * (e.g. `localhost`, `127.0.0.1`, `staging.internal`) to permit that ONE host
@@ -271,7 +271,7 @@ export interface AuditReport {
   criticalDefects: CriticalDefect[]
   metadata: AuditMetadata
   /**
-   * Provenance for regression comparison (issue: AEO regression gate). Records the
+   * Provenance for regression comparison (issue: readiness regression gate). Records the
    * engine version that produced this report so a stored baseline can be checked
    * for comparability against a current run — scoring changes ship under package
    * versions that do NOT bump `schemaVersion`, so the shape version alone can't tell
@@ -624,7 +624,7 @@ export interface SitemapAuditPlan {
   childSitemapsSkipped: number
 }
 
-export interface SitemapAuditOptions extends RunAeoAuditOptions {
+export interface SitemapAuditOptions extends RunAgentReadinessAuditOptions {
   sitemapUrl?: string
   limit?: number
   topIssuesOnly?: boolean
@@ -794,7 +794,7 @@ export interface CrawlPageObservation {
    * `error` is a human string that has never been safe to branch on; this is.
    * Null when the page did not fail, or failed in a way with no code.
    */
-  errorCode: AeoAuditErrorCode | null
+  errorCode: AgentReadinessErrorCode | null
   metrics: CrawlPageMetrics
 }
 
@@ -1034,7 +1034,7 @@ export type CrawlEvent =
 
 export type SiteCrawlEventHandler = (event: CrawlEvent) => void | Promise<void>
 
-export interface SiteCrawlOptions extends RunAeoAuditOptions {
+export interface SiteCrawlOptions extends RunAgentReadinessAuditOptions {
   /** Full reports retain page and edge rows. Summary mode streams rows but does not return the graph. */
   mode?: 'full' | 'summary'
   /** Alias for `mode: 'summary'`, useful for config-driven callers. */
@@ -1158,7 +1158,7 @@ export interface BatchPlatformDetectionReport {
  * comparable. Embedded at audit time; absent on reports from older engines.
  */
 export interface CompareMeta {
-  /** npm package version (`@canonry/aeo-audit`) that produced the report. */
+  /** npm package version (`@canonry/agent-readiness`) that produced the report. */
   engineVersion: string
   /** Active factor-id set for the audit, sorted. A mismatch means the weighted
    * basis differs (`--factors`/`--include-*`), so score deltas are apples-to-oranges. */

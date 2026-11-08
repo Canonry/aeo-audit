@@ -1,10 +1,10 @@
 ---
-name: aeo
-description: Run AEO audits, preview branch audits, changed-page sitemap audits, local/private preview audits with explicit opt-in, sitemap origin rewriting, static-output audits, regression comparisons, site fixes, schema validation, and llms.txt generation.
+name: agent-readiness
+description: Run website agent readiness audits (AEO, llms.txt, structured data, AI crawler access), preview branch audits, changed-page sitemap audits, local/private preview audits with explicit opt-in, sitemap origin rewriting, static-output audits, regression comparisons, site fixes, schema validation, and llms.txt generation.
 homepage: https://canonry.ai
-repository: https://github.com/Canonry/aeo-audit
+repository: https://github.com/Canonry/agent-readiness
 allowed-tools:
-  - Bash(npx @canonry/aeo-audit@7 *)
+  - Bash(npx @canonry/agent-readiness@8 *)
   - Read
   - Glob
   - Grep
@@ -13,7 +13,7 @@ allowed-tools:
   - Write(robots.txt)
 ---
 
-# AEO
+# Agent Readiness
 
 Website: [canonry.ai](https://canonry.ai)
 
@@ -24,14 +24,14 @@ One skill for audit, preview-branch review, fixes, schema, llms.txt, and monitor
 Always use the published package:
 
 ```bash
-npx @canonry/aeo-audit@7 "<url>" [flags] --format json
+npx @canonry/agent-readiness@8 "<url>" [flags] --format json
 ```
 
 ## Argument Safety
 
 **Never interpolate user input directly into shell commands.** Always:
 1. Validate that the target is either a URL matching `https://` / `http://` or a local filesystem path (static-output mode), and that it contains no shell metacharacters.
-2. Quote every argument individually (e.g., `npx @canonry/aeo-audit@7 "https://example.com" --format json`).
+2. Quote every argument individually (e.g., `npx @canonry/agent-readiness@8 "https://example.com" --format json`).
 3. Pass flags as separate, literal tokens — never construct command strings from raw user text.
 4. Reject arguments containing characters like `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>`, or newlines.
 
@@ -71,7 +71,7 @@ If no mode is provided, default to `audit`.
 - `detect-platform https://example.com --min-confidence high`
 - `detect-platform --urls competitors.txt`
 - `detect-platform --urls https://a.com,https://b.com`
-- `compare --baseline baseline.json --current current.json` (fail CI on AEO regression)
+- `compare --baseline baseline.json --current current.json` (fail CI on a readiness regression)
 
 ## Mode Selection
 
@@ -84,7 +84,7 @@ Use for broad requests such as "audit this site" or "why am I not being cited?"
 
 1. Run:
    ```bash
-   npx @canonry/aeo-audit@7 "<url>" [flags] --format json
+   npx @canonry/agent-readiness@8 "<url>" [flags] --format json
    ```
 2. Return:
    - Overall score
@@ -105,11 +105,11 @@ Read `siteIssues` as well as the score-ranked fixes. Duplicate titles and descri
 Use `--sitemap` to audit all pages discovered from the site's sitemap:
 
 ```bash
-npx @canonry/aeo-audit@7 "<url>" --sitemap --format json
-npx @canonry/aeo-audit@7 "<url>" --sitemap https://example.com/sitemap.xml --format json
-npx @canonry/aeo-audit@7 "<url>" --sitemap --limit 10 --format json
-npx @canonry/aeo-audit@7 "<url>" --sitemap --top-issues --format json
-npx @canonry/aeo-audit@7 "<url>" --sitemap --top-issues --format markdown
+npx @canonry/agent-readiness@8 "<url>" --sitemap --format json
+npx @canonry/agent-readiness@8 "<url>" --sitemap https://example.com/sitemap.xml --format json
+npx @canonry/agent-readiness@8 "<url>" --sitemap --limit 10 --format json
+npx @canonry/agent-readiness@8 "<url>" --sitemap --top-issues --format json
+npx @canonry/agent-readiness@8 "<url>" --sitemap --top-issues --format markdown
 ```
 
 Flags:
@@ -142,7 +142,7 @@ Use this path for PR review, local production builds, preview deployments, and b
 For a local preview server whose sitemap emits production canonicals:
 
 ```bash
-npx @canonry/aeo-audit@7 "http://localhost:3000" \
+npx @canonry/agent-readiness@8 "http://localhost:3000" \
   --sitemap \
   --rewrite-sitemap-origin \
   --allow-local \
@@ -163,9 +163,9 @@ Guidance:
 For branch-vs-production regression review, produce comparable reports first, then run `compare`:
 
 ```bash
-npx @canonry/aeo-audit@7 "https://production.example" --sitemap --format json > baseline.json
-npx @canonry/aeo-audit@7 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json > current.json
-npx @canonry/aeo-audit@7 compare --baseline baseline.json --current current.json --format markdown
+npx @canonry/agent-readiness@8 "https://production.example" --sitemap --format json > baseline.json
+npx @canonry/agent-readiness@8 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json > current.json
+npx @canonry/agent-readiness@8 compare --baseline baseline.json --current current.json --format markdown
 ```
 
 Report:
@@ -190,8 +190,8 @@ When the audit fetches `/llms.txt`, `/llms-full.txt`, `/robots.txt`, and `/sitem
 By default the audit blocks any URL that resolves to a private, loopback, or link-local address (SSRF protection). When the user wants to audit **their own** dev or staging server, pass `--allow-local` (alias `--allow-private`):
 
 ```bash
-npx @canonry/aeo-audit@7 "http://localhost:3000" --allow-local --format json
-npx @canonry/aeo-audit@7 "http://10.0.5.20" --allow-private --format json
+npx @canonry/agent-readiness@8 "http://localhost:3000" --allow-local --format json
+npx @canonry/agent-readiness@8 "http://10.0.5.20" --allow-private --format json
 ```
 
 - Pass the explicit `http://` scheme for local dev servers — a bare host defaults to `https://`.
@@ -199,7 +199,7 @@ npx @canonry/aeo-audit@7 "http://10.0.5.20" --allow-private --format json
 - To audit a whole local site whose sitemap hardcodes the prod domain, combine with sitemap origin rewriting:
 
 ```bash
-npx @canonry/aeo-audit@7 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json
+npx @canonry/agent-readiness@8 "http://localhost:3000" --sitemap --rewrite-sitemap-origin --allow-local --format json
 ```
 
 ### Static-Output Mode
@@ -208,11 +208,11 @@ When the user wants to audit **built HTML offline** (CI on a `next export` / `di
 
 ```bash
 # A directory of built HTML (aggregated like sitemap mode)
-npx @canonry/aeo-audit@7 "./out" --base-url https://example.com --format json
+npx @canonry/agent-readiness@8 "./out" --base-url https://example.com --format json
 # A single built file
-npx @canonry/aeo-audit@7 "./dist/index.html" --format json
+npx @canonry/agent-readiness@8 "./dist/index.html" --format json
 # Gate CI on missing meta descriptions across the build
-npx @canonry/aeo-audit@7 "./out" --require-meta --format json
+npx @canonry/agent-readiness@8 "./out" --require-meta --format json
 ```
 
 - A `.html`/`.htm` file → single-page report; a directory → aggregated report (`--limit`, `--top-issues`, `--factors`, `--include-geo`, `--include-agent-skills`, `--require-meta` apply).
@@ -222,17 +222,17 @@ npx @canonry/aeo-audit@7 "./out" --require-meta --format json
 
 ### Compare / Regression Mode
 
-When the user wants to **fail CI on an AEO regression** (a PR dropped the score, broke a page, or introduced a structural defect), use the `compare` subcommand. It diffs two saved `--format json` reports — a baseline and the current run — and exits non-zero on a regression. It runs no audit and no network; it only reads reports.
+When the user wants to **fail CI on a readiness regression** (a PR dropped the score, broke a page, or introduced a structural defect), use the `compare` subcommand. It diffs two saved `--format json` reports — a baseline and the current run — and exits non-zero on a regression. It runs no audit and no network; it only reads reports.
 
 ```bash
 # 1. Produce the current report (any mode's --format json output works)
-npx @canonry/aeo-audit@7 "./out" --base-url https://example.com --format json > current.json
+npx @canonry/agent-readiness@8 "./out" --base-url https://example.com --format json > current.json
 # 2. Diff against a stored baseline — exit 1 if it regressed
-npx @canonry/aeo-audit@7 compare --baseline baseline.json --current current.json
+npx @canonry/agent-readiness@8 compare --baseline baseline.json --current current.json
 # Write a Markdown summary (for a PR comment) and tighten the overall gate
-npx @canonry/aeo-audit@7 compare --baseline baseline.json --current current.json --overall-tolerance 0 --md-out diff.md
+npx @canonry/agent-readiness@8 compare --baseline baseline.json --current current.json --overall-tolerance 0 --md-out diff.md
 # Committed/artifact baselines: hard-fail (exit 2) if factor set / engine major differ
-npx @canonry/aeo-audit@7 compare --baseline baseline.json --current current.json --strict-comparability
+npx @canonry/agent-readiness@8 compare --baseline baseline.json --current current.json --strict-comparability
 ```
 
 - **A regression is any of:** overall/aggregate drop > `--overall-tolerance` (default 2); a single page drop > `--page-tolerance` (default 5); a single factor drop > `--factor-tolerance` (default 8); a page that was auditing successfully now erroring; a new `severity:critical` defect (`--fail-on-new-critical`, default on); or a major report-schema change. Score/page/factor deltas only gate when the two runs are **comparable** (same factor set, no major engine change) — otherwise they're warnings, not failures.
@@ -242,11 +242,11 @@ npx @canonry/aeo-audit@7 compare --baseline baseline.json --current current.json
 
 ### Lighthouse Mode
 
-Use `--lighthouse` when the user wants page speed, accessibility, or best-practices scoring alongside the AEO factors. It calls Google PageSpeed Insights (mobile strategy) and aggregates Performance + Accessibility + Best Practices into a single optional factor (weight 8).
+Use `--lighthouse` when the user wants page speed, accessibility, or best-practices scoring alongside the readiness factors. It calls Google PageSpeed Insights (mobile strategy) and aggregates Performance + Accessibility + Best Practices into a single optional factor (weight 8).
 
 ```bash
-npx @canonry/aeo-audit@7 "<url>" --lighthouse --format json
-PAGESPEED_API_KEY=xxx npx @canonry/aeo-audit@7 "<url>" --lighthouse --format json
+npx @canonry/agent-readiness@8 "<url>" --lighthouse --format json
+PAGESPEED_API_KEY=xxx npx @canonry/agent-readiness@8 "<url>" --lighthouse --format json
 ```
 
 Constraints:
@@ -259,8 +259,8 @@ Constraints:
 Use `--detect-platform` when the user wants to know what stack a site is built on (e.g., "is this WordPress?", "what framework does competitor X use?", "is this site custom-built?"). This is much faster than a full audit because it skips analyzer scoring.
 
 ```bash
-npx @canonry/aeo-audit@7 "<url>" --detect-platform --format json
-npx @canonry/aeo-audit@7 "<url>" --detect-platform --min-confidence high --format json
+npx @canonry/agent-readiness@8 "<url>" --detect-platform --format json
+npx @canonry/agent-readiness@8 "<url>" --detect-platform --min-confidence high --format json
 ```
 
 Flags:
@@ -276,9 +276,9 @@ The report groups detections by category (CMS, site builder, e-commerce, framewo
 When the user wants to fingerprint many sites at once (competitor lists, customer cohorts), pass `--urls`:
 
 ```bash
-npx @canonry/aeo-audit@7 --detect-platform --urls urls.txt --format json
-npx @canonry/aeo-audit@7 --detect-platform --urls https://a.com,https://b.com --format json
-cat urls.txt | npx @canonry/aeo-audit@7 --detect-platform --urls - --format json
+npx @canonry/agent-readiness@8 --detect-platform --urls urls.txt --format json
+npx @canonry/agent-readiness@8 --detect-platform --urls https://a.com,https://b.com --format json
+cat urls.txt | npx @canonry/agent-readiness@8 --detect-platform --urls - --format json
 ```
 
 The batch report contains a `results` array; each entry has `status: 'success'` or `'error'`, plus the same shape as a single-URL report on success. Per-URL fetch errors do not abort the run. Exit code is `0` when at least one URL succeeded, `1` otherwise.
@@ -289,7 +289,7 @@ Use when the user wants code changes applied after the audit.
 
 1. Run:
    ```bash
-   npx @canonry/aeo-audit@7 "<url>" [flags] --format json
+   npx @canonry/agent-readiness@8 "<url>" [flags] --format json
    ```
 2. Find factors scoring below 70 (lowest first).
 3. Apply targeted fixes in the current codebase.
@@ -318,14 +318,14 @@ Validity issues like duplicate singleton `@type`s and JSON parse errors are **pe
 Site-wide (default):
 
 ```bash
-npx @canonry/aeo-audit@7 "<url>" --sitemap --top-issues --format json
-npx @canonry/aeo-audit@7 "<url>" --sitemap --top-issues --format markdown --factors structured-data,schema-completeness,schema-validity,entity-consistency
+npx @canonry/agent-readiness@8 "<url>" --sitemap --top-issues --format json
+npx @canonry/agent-readiness@8 "<url>" --sitemap --top-issues --format markdown --factors structured-data,schema-completeness,schema-validity,entity-consistency
 ```
 
 Single page:
 
 ```bash
-npx @canonry/aeo-audit@7 "<url>" --format json --factors structured-data,schema-completeness,schema-validity,entity-consistency
+npx @canonry/agent-readiness@8 "<url>" --format json --factors structured-data,schema-completeness,schema-validity,entity-consistency
 ```
 
 Report:
@@ -352,7 +352,7 @@ Use when the user wants `llms.txt` or `llms-full.txt` created or improved.
 If a URL is provided:
 1. Run:
    ```bash
-   npx @canonry/aeo-audit@7 "<url>" [flags] --format json --factors ai-access-files
+   npx @canonry/agent-readiness@8 "<url>" [flags] --format json --factors ai-access-files
    ```
 2. Inspect existing AI-readable files if present.
 3. Extract key content from the site.
@@ -374,7 +374,7 @@ Use when the user wants progress tracking or a competitor comparison.
 
 Single URL:
 1. Run the audit.
-2. Compare against prior results in `.aeo-audit-history/` if present.
+2. Compare against prior results in `.agent-readiness-history/` if present.
 3. Show overall and per-factor deltas.
 4. Save the current result.
 

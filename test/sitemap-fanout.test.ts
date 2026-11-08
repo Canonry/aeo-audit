@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Per-page audits must not run for real; capture them so the fan-out assertions are
 // about sitemap fetching only.
-const runAeoAuditMock = vi.hoisted(() => vi.fn())
-vi.mock('../src/index.js', () => ({ runAeoAudit: runAeoAuditMock }))
+const runAgentReadinessAuditMock = vi.hoisted(() => vi.fn())
+vi.mock('../src/index.js', () => ({ runAgentReadinessAudit: runAgentReadinessAuditMock }))
 
 import { runSitemapAudit } from '../src/sitemap.js'
 import type { SitemapAuditPlan } from '../src/types.js'
@@ -46,8 +46,8 @@ function fakeReport(url: string) {
 }
 
 beforeEach(() => {
-  runAeoAuditMock.mockReset()
-  runAeoAuditMock.mockImplementation((url: string) => Promise.resolve(fakeReport(url)))
+  runAgentReadinessAuditMock.mockReset()
+  runAgentReadinessAuditMock.mockImplementation((url: string) => Promise.resolve(fakeReport(url)))
 })
 
 afterEach(() => {

@@ -1,8 +1,8 @@
 # Scoring
 
-## Why AEO?
+## Why agent readiness?
 
-AI answer engines are replacing traditional search for millions of queries. Getting cited by ChatGPT or Perplexity requires different signals than ranking in Google:
+AI answer engines and agents now read websites on people's behalf. Getting cited by ChatGPT or Perplexity, or used by an agent, takes different signals than ranking in Google:
 
 - **Structured data** (JSON-LD) with FAQPage schema shows 2.7x higher citation rates
 - **llms.txt** files help AI systems understand your site at a glance
@@ -92,4 +92,4 @@ A sitemap (or static) run averages each factor across every audited page into `c
 | `limited` | A page-specific factor **present on at least one page** (best score ≥ 30) but isolated. A tune-up/extend, not build-from-scratch. | Demoted below all `sitewide` issues. |
 | `opportunity` | A page-specific factor **not yet present on any audited page**. Adding it is discretionary. | Demoted, with no pages marked "affected". |
 
-For a `limited` factor the fix is scoped to the page(s) that actually carry it and the recommendation is the tune-up from there (*"add question-style headings to `/faq`"*) — never the "add it everywhere" recommendation aggregated from pages that correctly lack it. Presence (best ≥ 30), **not** coverage breadth, is the gate: thin coverage is the expected state for these factors and never downgrades a `limited` to a worse label. The page-specific set is currently **FAQ Content** and **Definition Blocks** (`PAGE_SPECIFIC_FACTOR_IDS`, exported from `@canonry/aeo-audit/scoring`).
+For a `limited` factor the fix is scoped to the page(s) that actually carry it and the recommendation is the tune-up from there (*"add question-style headings to `/faq`"*) — never the "add it everywhere" recommendation aggregated from pages that correctly lack it. Presence (best ≥ 30), **not** coverage breadth, is the gate: thin coverage is the expected state for these factors and never downgrades a `limited` to a worse label. The page-specific set is currently **FAQ Content** and **Definition Blocks** (`PAGE_SPECIFIC_FACTOR_IDS`, exported from `@canonry/agent-readiness/scoring`).

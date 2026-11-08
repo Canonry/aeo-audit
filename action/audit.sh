@@ -5,8 +5,8 @@ set -uo pipefail
 source "$GITHUB_ACTION_PATH/lib.sh"
 
 OUT="$1"
-if ! aeo_run_audit "$OUT"; then
-  echo "::error::aeo-audit head step failed (build error). Check build-command and target."
+if ! agent_readiness_run_audit "$OUT"; then
+  echo "::error::agent-readiness head step failed (build error). Check build-command and target."
   exit 1
 fi
 if [ ! -s "$OUT" ]; then
@@ -18,5 +18,5 @@ SCORE=$(node "$GITHUB_ACTION_PATH/render-comment.cjs" --extract-score "$OUT")
 {
   echo "score=$SCORE"
   echo "report_path=$OUT"
-  echo "audit_exit=$AEO_AUDIT_EXIT"
+  echo "audit_exit=$AGENT_READINESS_AUDIT_EXIT"
 } >>"$GITHUB_OUTPUT"

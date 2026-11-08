@@ -1,4 +1,4 @@
-import { AeoAuditError } from './errors.js'
+import { AgentReadinessError } from './errors.js'
 import { DEFECT_TITLES } from './critical-defects.js'
 import { deepFreeze } from './immutable.js'
 import type {
@@ -17,7 +17,7 @@ import type {
   SitemapPageResult,
 } from './types.js'
 
-const TOOL = '@canonry/aeo-audit'
+const TOOL = '@canonry/agent-readiness'
 
 /**
  * Conservative, noise-aware defaults. Tolerances are deliberately non-zero:
@@ -109,7 +109,7 @@ const EMPTY_DIMENSIONS: DimensionResult = {
 
 /**
  * Diff two reports into a regression verdict. `baseline` may be null (first run).
- * Throws `AeoAuditError('COMPARE_MISCONFIG')` for situations where a diff is
+ * Throws `AgentReadinessError('COMPARE_MISCONFIG')` for situations where a diff is
  * meaningless — the CLI maps that to exit code 2 (distinct from a real regression).
  *
  * Correctness notes:
@@ -175,7 +175,7 @@ export function compareReports(
 
   // ── Report-mode mismatch is a misconfiguration, not a regression ─────────
   if (isSitemapReport(baseline) !== isSitemapReport(current)) {
-    throw new AeoAuditError(
+    throw new AgentReadinessError(
       'COMPARE_MISCONFIG',
       `Report mode mismatch: baseline is ${isSitemapReport(baseline) ? 'multi-page (sitemap/static-dir)' : 'single-page'}, ` +
         `current is ${reportMode === 'sitemap' ? 'multi-page (sitemap/static-dir)' : 'single-page'}. ` +
@@ -198,7 +198,7 @@ export function compareReports(
       : 'unknown'
 
   if (policy.strictComparability && factorSetMismatch) {
-    throw new AeoAuditError(
+    throw new AgentReadinessError(
       'COMPARE_MISCONFIG',
       `Factor-set mismatch: baseline [${[...baseFactors].sort().join(', ')}] vs current [${[...curFactors].sort().join(', ')}]. ` +
         'Scores are renormalized over different factor sets and are not comparable. ' +
@@ -206,7 +206,7 @@ export function compareReports(
     )
   }
   if (policy.strictComparability && engineDrift === 'major') {
-    throw new AeoAuditError(
+    throw new AgentReadinessError(
       'COMPARE_MISCONFIG',
       `Engine major-version mismatch: baseline produced by ${baselineEngineVersion}, current by ${currentEngineVersion}. ` +
         'Scoring may differ across majors; regenerate the baseline with the current engine.',
@@ -567,7 +567,7 @@ export function renderCompareMarkdown(report: CompareReport): string {
   const lines: string[] = []
   const badge =
     report.result === 'regression' ? `${RESULT_BADGE.regression} (${report.regressionCount})` : RESULT_BADGE[report.result]
-  lines.push(`## AEO Audit Guard — ${badge}`)
+  lines.push(`## Agent Readiness Guard — ${badge}`)
   lines.push('')
 
   if (report.result === 'no-baseline') {

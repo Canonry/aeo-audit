@@ -191,7 +191,7 @@ ${pagePaths.map((pagePath) => `  <url><loc>${origin}${pagePath}</loc><priority>0
 }
 
 async function spawnCli(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  const child = spawn(process.execPath, [new URL('../../bin/aeo-audit.js', import.meta.url).pathname, ...args], {
+  const child = spawn(process.execPath, [new URL('../../bin/agent-readiness.js', import.meta.url).pathname, ...args], {
     cwd: new URL('../..', import.meta.url),
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -231,7 +231,7 @@ test('--require-meta forces exit 1 when the fixture has no <meta name="descripti
 
   const exitCode = await main([
     'node',
-    'aeo-audit',
+    'agent-readiness',
     FIXTURE_URL,
     '--format',
     'json',
@@ -260,7 +260,7 @@ test('compiled CLI returns the expected JSON report for the fixture site', async
 
   const exitCode = await main([
     'node',
-    'aeo-audit',
+    'agent-readiness',
     FIXTURE_URL,
     '--format',
     'json',

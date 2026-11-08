@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { afterEach, test, vi } from 'vitest'
 
-import { auditHtmlPage, runAeoAudit } from '../src/index.js'
-import type { AuditReport, RunAeoAuditOptions, ScoredFactor } from '../src/types.js'
-import { AeoAuditError } from '../src/errors.js'
+import { auditHtmlPage, runAgentReadinessAudit } from '../src/index.js'
+import type { AuditReport, RunAgentReadinessAuditOptions, ScoredFactor } from '../src/types.js'
+import { AgentReadinessError } from '../src/errors.js'
 import { FetchBudgetController } from '../src/fetch-page.js'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -52,7 +52,7 @@ test('audit reuses its successful main response for a self canonical and preserv
   const requested = mockRequests({
     [PAGE_URL]: () => htmlResponse('<link rel="canonical" href="/page">'),
   })
-  const report = await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] })
+  const report = await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] })
   const factor = entityFactor(report)
 
   assert.equal(factor.score, 100)
@@ -74,7 +74,7 @@ test('audit reuses the main 404 status as a broken self canonical', async () => 
   const requested = mockRequests({
     [PAGE_URL]: () => htmlResponse('<link rel="canonical" href="/page">', 404),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 80)
   assertFinding(factor, 'unreachable', /Canonical target .*HTTP 404/)
@@ -89,7 +89,7 @@ for (const status of [404, 500]) {
       [PAGE_URL]: () => htmlResponse('<link rel="canonical" href="/target">'),
       [targetUrl]: () => new Response('', { status }),
     })
-    const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+    const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
     assert.equal(factor.score, 80)
     assertFinding(factor, 'unreachable', new RegExp(`Canonical target .*HTTP ${status}`))
@@ -105,7 +105,7 @@ test('audit reports and penalizes a canonical redirect even when the destination
     [targetUrl]: () => new Response(null, { status: 301, headers: { location: '/destination' } }),
     [destinationUrl]: () => new Response('Successful destination', { status: 200 }),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 90)
   assertFinding(factor, 'info', /Canonical URL .*redirects \(1 hop\).*destination/)
@@ -117,9 +117,9 @@ test('audit reports and penalizes a canonical redirect even when the destination
 test('a canonical target timeout remains an uncertain finding and does not abort the audit', async () => {
   mockRequests({
     [PAGE_URL]: () => htmlResponse('<link rel="canonical" href="/target">'),
-    [`${ORIGIN}/target`]: () => { throw new AeoAuditError('TIMEOUT', 'Canonical request timed out.') },
+    [`${ORIGIN}/target`]: () => { throw new AgentReadinessError('TIMEOUT', 'Canonical request timed out.') },
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 90)
   assertFinding(factor, 'timeout', /Canonical target .*timed out/)
@@ -130,7 +130,7 @@ test('audit skips canonical target requests when Entity Consistency is excluded'
   const requested = mockRequests({
     [PAGE_URL]: () => htmlResponse('<link rel="canonical" href="/target">'),
   })
-  const report = await runAeoAudit(PAGE_URL, { factors: ['structured-data'] })
+  const report = await runAgentReadinessAudit(PAGE_URL, { factors: ['structured-data'] })
 
   assert.deepEqual(report.factors.map((factor) => factor.id), ['structured-data'])
   assert.equal(requested.length, 6)
@@ -146,7 +146,7 @@ test('audit scores and probes only active head canonicals', async () => {
       '<link rel="canonical" href="/body"><template><link rel="canonical" href="/body-template"></template>',
     ),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 100)
   assertFinding(factor, 'info', /Canonical tag is ignored/)
@@ -162,7 +162,7 @@ test('audit reports a missing canonical when all declarations are ignored withou
       '<link rel="canonical" href="/body">',
     ),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 80)
   assertFinding(factor, 'missing', /Canonical URL tag is missing/)
@@ -175,7 +175,7 @@ for (const href of ['', 'http://[', 'ftp://1.1.1.1/file', 'javascript:alert(1)',
     const requested = mockRequests({
       [PAGE_URL]: () => htmlResponse(`<link rel="canonical" href="${href}">`),
     })
-    const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+    const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
     assert.equal(factor.score, 80)
     assertFinding(factor, 'missing', /Invalid canonical URL/)
@@ -193,7 +193,7 @@ for (const [href, targetUrl] of [
       [PAGE_URL]: () => htmlResponse(`<link rel="canonical" href="${href}">`),
       [targetUrl]: () => new Response('', { status: 200 }),
     })
-    const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+    const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
     assert.equal(factor.score, 100)
     assertFinding(factor, 'found', /Canonical target .*HTTP 200/)
@@ -210,7 +210,7 @@ test('audit reports Unicode-whitespace canonical variants as conflicts and probe
     [targetUrl]: () => new Response('', { status: 200 }),
     [whitespaceTargetUrl]: () => new Response('', { status: 200 }),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 80)
   assertFinding(factor, 'missing', /Conflicting canonical tags/)
@@ -224,7 +224,7 @@ test('audit neither credits nor probes a rel value separated by non-ASCII whites
   const requested = mockRequests({
     [PAGE_URL]: () => htmlResponse('<link rel="canonical&nbsp;alternate" href="/target">'),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 80)
   assertFinding(factor, 'missing', /Canonical URL tag is missing/)
@@ -237,7 +237,7 @@ test('audit accepts ASCII-separated rel tokens alongside an unrelated non-ASCII 
     [PAGE_URL]: () => htmlResponse('<link rel="canonical&nbsp;alternate" href="/ignored"><link rel="alternate\t\n\f\r CANONICAL" href="/target">'),
     [targetUrl]: () => new Response('', { status: 200 }),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 100)
   assertFinding(factor, 'found', /Canonical target .*HTTP 200/)
@@ -252,7 +252,7 @@ test('audit reports duplicate canonical declarations and requests each distinct 
     [PAGE_URL]: () => htmlResponse(`<link rel="canonical" href="/target"><link rel="alternate CANONICAL" href="${targetUrl}">`),
     [targetUrl]: () => new Response('', { status: 200 }),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 90)
   assertFinding(factor, 'info', /Duplicate canonical tags/)
@@ -268,7 +268,7 @@ test('audit reports conflicting canonical declarations and deduplicates repeated
     [targetA]: () => new Response('', { status: 200 }),
     [targetB]: () => new Response('', { status: 200 }),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 80)
   assertFinding(factor, 'missing', /Conflicting canonical tags.*target-a.*target-b/)
@@ -284,7 +284,7 @@ test('audit limits canonical target checks to the first five distinct URLs', asy
   }
   for (const url of targetUrls.slice(0, 5)) routes[url] = () => new Response('', { status: 200 })
   const requested = mockRequests(routes)
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assertFinding(factor, 'info', /Canonical target checks are limited to the first 5 distinct URLs/)
   assert.deepEqual(requested.filter((url) => targetUrls.includes(url)).sort(), targetUrls.slice(0, 5))
@@ -299,7 +299,7 @@ test('audit resolves relative canonical URLs against the final audited URL after
     [finalUrl]: () => htmlResponse('<link rel="canonical" href="target">'),
     [targetUrl]: () => new Response('', { status: 200 }),
   })
-  const report = await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] })
+  const report = await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] })
 
   assert.equal(report.finalUrl, finalUrl)
   assert.equal(entityFactor(report).score, 100)
@@ -312,7 +312,7 @@ test('audit resolves a canonical URL using the first base href', async () => {
     [PAGE_URL]: () => htmlResponse('<base href="/assets/"><base href="/wrong/"><link rel="canonical" href="target">'),
     [targetUrl]: () => new Response('', { status: 200 }),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 100)
   assert.ok(requested.includes(targetUrl))
@@ -325,7 +325,7 @@ test('audit ignores base URLs inside inert template content', async () => {
     [PAGE_URL]: () => htmlResponse('<template><base href="/wrong/"></template><base href="/active/"><link rel="canonical" href="target">'),
     [targetUrl]: () => new Response('', { status: 200 }),
   })
-  const factor = entityFactor(await runAeoAudit(PAGE_URL, { factors: ['entity-consistency'] }))
+  const factor = entityFactor(await runAgentReadinessAudit(PAGE_URL, { factors: ['entity-consistency'] }))
 
   assert.equal(factor.score, 100)
   assert.ok(requested.includes(targetUrl))
@@ -384,7 +384,7 @@ test('audit forwards its observer to canonical requests and awaits it before fet
     },
   })
 
-  await runAeoAudit(PAGE_URL, {
+  await runAgentReadinessAudit(PAGE_URL, {
     factors: ['entity-consistency'],
     onOutboundAttempt: async (attempt) => {
       if (attempt.kind === 'canonical') observed.push(attempt.url)
@@ -404,7 +404,7 @@ test('audit forwards caller cancellation to canonical requests unchanged', async
     },
   })
 
-  await assert.rejects(runAeoAudit(PAGE_URL, {
+  await assert.rejects(runAgentReadinessAudit(PAGE_URL, {
     factors: ['entity-consistency'],
     signal: controller.signal,
   }), (error) => error === reason)
@@ -416,10 +416,10 @@ test('audit forwards its shared outbound budget to canonical requests', async ()
     [PAGE_URL]: () => htmlResponse('<link rel="canonical" href="/target">'),
   })
 
-  await assert.rejects(runAeoAudit(PAGE_URL, {
+  await assert.rejects(runAgentReadinessAudit(PAGE_URL, {
     factors: ['entity-consistency'],
     budget,
-  } as RunAeoAuditOptions & { budget: FetchBudgetController }), (error) => {
+  } as RunAgentReadinessAuditOptions & { budget: FetchBudgetController }), (error) => {
     assert.ok(error && typeof error === 'object' && 'code' in error)
     assert.equal(error.code, 'BUDGET_EXCEEDED')
     return true
@@ -436,7 +436,7 @@ test('audit forwards allowPrivateHost to the canonical target check', async () =
     [targetUrl]: () => new Response(null, { status: 200 }),
   })
 
-  const factor = entityFactor(await runAeoAudit(pageUrl, {
+  const factor = entityFactor(await runAgentReadinessAudit(pageUrl, {
     factors: ['entity-consistency'],
     allowPrivateHost: '127.0.0.1',
   }))

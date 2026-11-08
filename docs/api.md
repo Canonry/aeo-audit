@@ -2,16 +2,16 @@
 
 The library exposes four audit entry points. Use `runSiteCrawl` when you need a page graph, crawl depth, or internal-link metrics.
 
-Use `runSitemapAudit` when you need only a sitemap score rollup. `runAeoAudit` fetches only the URL that you pass.
+Use `runSitemapAudit` when you need only a sitemap score rollup. `runAgentReadinessAudit` fetches only the URL that you pass.
 
 TypeScript declaration files are included automatically.
 
 ## Single page
 
 ```ts
-import { runAeoAudit } from '@canonry/aeo-audit'
+import { runAgentReadinessAudit } from '@canonry/agent-readiness'
 
-const report = await runAeoAudit('https://example.com/specific-page', {
+const report = await runAgentReadinessAudit('https://example.com/specific-page', {
   includeGeo: false,         // Include geographic signals (default: false)
   includeAgentSkills: false, // Include agent skill exposure (default: false)
   includeLighthouse: false,  // Include Lighthouse via PageSpeed Insights (default: false; adds ~15-30s)
@@ -34,7 +34,7 @@ The result includes every discoverable URL within the limits. It cannot find a U
 The crawl boundary is the root URL's exact host (including any non-default port). Cross-host links and redirects are recorded but never followed. If the root redirects to another host, the result is explicitly partial with `terminationReason: 'root-host-redirect'`; callers should restart with `finalRootUrl` after confirming that host is intended. An off-host `robots.txt` redirect is not followed and appears in `summary.warnings`.
 
 ```ts
-import { runSiteCrawl } from '@canonry/aeo-audit'
+import { runSiteCrawl } from '@canonry/agent-readiness'
 
 const report = await runSiteCrawl('https://example.com', {
   mode: 'summary',
@@ -180,7 +180,7 @@ The field is **optional**, as is `summary.linkPlacementRulesetVersion`. The engi
 ## Site-wide (sitemap)
 
 ```ts
-import { runSitemapAudit } from '@canonry/aeo-audit'
+import { runSitemapAudit } from '@canonry/agent-readiness'
 
 const report = await runSitemapAudit('https://example.com', {
   limit: 200,               // Max pages to audit (default 200, sorted by sitemap priority)
@@ -217,7 +217,7 @@ Each entry in `crossCuttingIssues[].topIssues` carries a `recommendation` plus t
 ## Static output (offline, from disk)
 
 ```ts
-import { runStaticAudit } from '@canonry/aeo-audit'
+import { runStaticAudit } from '@canonry/agent-readiness'
 
 const result = await runStaticAudit('./out', {
   baseUrl: 'https://example.com', // maps files to page URLs (default https://localhost)

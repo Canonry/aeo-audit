@@ -1,12 +1,12 @@
 {
-  "name": "@canonry/aeo-audit",
-  "version": "7.6.2",
-  "description": "The most comprehensive open-source Answer Engine Optimization (AEO) audit tool. Scores websites across 16 ranking factors that determine AI citation.",
+  "name": "@canonry/agent-readiness",
+  "version": "8.0.0",
+  "description": "Website agent readiness audit. Scores how well AI agents and answer engines can reach, read, and cite a site across 16 factors, from a CLI, library, agent skill, or CI gate.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "aeo-audit": "bin/aeo-audit.js"
+    "agent-readiness": "bin/agent-readiness.js"
   },
   "exports": {
     ".": {
@@ -70,7 +70,11 @@
     "node": ">=20"
   },
   "keywords": [
+    "agent-readiness",
+    "ai-agents",
+    "ai-crawlers",
     "aeo",
+    "geo",
     "answer-engine-optimization",
     "seo",
     "ai-seo",
@@ -85,10 +89,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Canonry/aeo-audit.git"
+    "url": "git+https://github.com/Canonry/agent-readiness.git"
   },
   "homepage": "https://canonry.ai",
   "bugs": {
-    "url": "https://github.com/Canonry/aeo-audit/issues"
+    "url": "https://github.com/Canonry/agent-readiness/issues"
   }
 }

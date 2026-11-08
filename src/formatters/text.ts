@@ -47,7 +47,7 @@ export function formatText(report: AuditReport): string {
 
   const sc = scoreColor(report.overallScore)
   lines.push(``)
-  lines.push(`${BOLD}AEO Audit Report${RESET}`)
+  lines.push(`${BOLD}Agent Readiness Report${RESET}`)
   lines.push(`${DIM}${report.finalUrl}${RESET}`)
   lines.push(``)
   lines.push(`  ${BOLD}Score:${RESET} ${sc}${BOLD}${report.overallScore}/100${RESET}  ${bar(report.overallScore, 30)}`)
@@ -94,7 +94,7 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
 
   const sc = scoreColor(report.aggregateScore)
   lines.push(``)
-  lines.push(`${BOLD}AEO Sitemap Audit Report${RESET}`)
+  lines.push(`${BOLD}Agent Readiness Sitemap Report${RESET}`)
   lines.push(`${DIM}${report.sitemapUrl}${RESET}`)
   lines.push(``)
   lines.push(`  ${BOLD}Aggregate Score:${RESET} ${sc}${BOLD}${report.aggregateScore}/100${RESET}  ${bar(report.aggregateScore, 30)}`)

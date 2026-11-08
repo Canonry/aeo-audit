@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { compareReports, renderCompareMarkdown, driftLevel, isSitemapReport, DEFAULT_COMPARE_POLICY } from '../src/compare.js'
-import { isAeoAuditError } from '../src/errors.js'
+import { isAgentReadinessError } from '../src/errors.js'
 import type {
   AuditReport,
   ComparePolicy,
@@ -318,7 +318,7 @@ describe('comparability guards', () => {
       compareReports(base, cur, policy({ strictComparability: true }))
       throw new Error('expected throw')
     } catch (err) {
-      expect(isAeoAuditError(err) && err.code).toBe('COMPARE_MISCONFIG')
+      expect(isAgentReadinessError(err) && err.code).toBe('COMPARE_MISCONFIG')
     }
   })
 
@@ -367,7 +367,7 @@ describe('mode mismatch', () => {
       compareReports(base, cur, policy())
       throw new Error('expected throw')
     } catch (err) {
-      expect(isAeoAuditError(err) && err.code).toBe('COMPARE_MISCONFIG')
+      expect(isAgentReadinessError(err) && err.code).toBe('COMPARE_MISCONFIG')
     }
   })
 })

@@ -81,7 +81,7 @@ function sitemapReport(score: number): SitemapAuditReport {
 }
 
 async function writeReports(files: Record<string, unknown>): Promise<Record<string, string>> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'aeo-compare-'))
+  const dir = await mkdtemp(path.join(tmpdir(), 'agent-readiness-compare-'))
   const out: Record<string, string> = {}
   for (const [name, value] of Object.entries(files)) {
     const filePath = path.join(dir, `${name}.json`)
@@ -101,7 +101,7 @@ test('compare exits 0 and emits clean JSON on stdout when there is no regression
   const main = await loadMain()
   const files = await writeReports({ base: singleReport(80), cur: singleReport(80) })
 
-  const exit = await main(['node', 'aeo-audit', 'compare', '--baseline', files.base, '--current', files.cur])
+  const exit = await main(['node', 'agent-readiness', 'compare', '--baseline', files.base, '--current', files.cur])
 
   assert.equal(exit, 0)
   assert.equal(stdout.length, 1, 'stdout carries exactly one JSON document')
@@ -116,7 +116,7 @@ test('compare exits 1 on a real regression and keeps stdout valid JSON (diagnost
   const main = await loadMain()
   const files = await writeReports({ base: singleReport(80), cur: singleReport(50) })
 
-  const exit = await main(['node', 'aeo-audit', 'compare', '--baseline', files.base, '--current', files.cur])
+  const exit = await main(['node', 'agent-readiness', 'compare', '--baseline', files.base, '--current', files.cur])
 
   assert.equal(exit, 1)
   const report = JSON.parse(stdout[0]) as CompareReport
@@ -132,7 +132,7 @@ test('compare --report-only never exits non-zero even with a regression', async 
 
   const exit = await main([
     'node',
-    'aeo-audit',
+    'agent-readiness',
     'compare',
     '--baseline',
     files.base,
@@ -149,7 +149,7 @@ test('compare exits 2 on a report-mode mismatch (single vs sitemap)', async (t) 
   const main = await loadMain()
   const files = await writeReports({ base: sitemapReport(80), cur: singleReport(80) })
 
-  const exit = await main(['node', 'aeo-audit', 'compare', '--baseline', files.base, '--current', files.cur])
+  const exit = await main(['node', 'agent-readiness', 'compare', '--baseline', files.base, '--current', files.cur])
 
   assert.equal(exit, 2)
   assert.ok(stderr.some((line) => line.includes('COMPARE_MISCONFIG')))
@@ -158,14 +158,14 @@ test('compare exits 2 on a report-mode mismatch (single vs sitemap)', async (t) 
 test('compare exits 2 when --current is missing', async (t) => {
   captureConsole(t)
   const main = await loadMain()
-  const exit = await main(['node', 'aeo-audit', 'compare'])
+  const exit = await main(['node', 'agent-readiness', 'compare'])
   assert.equal(exit, 2)
 })
 
 test('compare exits 2 when a report file cannot be read', async (t) => {
   captureConsole(t)
   const main = await loadMain()
-  const exit = await main(['node', 'aeo-audit', 'compare', '--current', '/nonexistent/aeo-report-xyz.json'])
+  const exit = await main(['node', 'agent-readiness', 'compare', '--current', '/nonexistent/agent-readiness-report-xyz.json'])
   assert.equal(exit, 2)
 })
 
@@ -174,7 +174,7 @@ test('compare with no baseline passes (first run) and reports no-baseline', asyn
   const main = await loadMain()
   const files = await writeReports({ cur: singleReport(72) })
 
-  const exit = await main(['node', 'aeo-audit', 'compare', '--current', files.cur])
+  const exit = await main(['node', 'agent-readiness', 'compare', '--current', files.cur])
 
   assert.equal(exit, 0)
   const report = JSON.parse(stdout[0]) as CompareReport

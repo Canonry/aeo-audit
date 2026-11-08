@@ -12,24 +12,24 @@ test('public root import compiles every hosted-engine export', () => {
   mkdirSync(fileURLToPath(new URL('../../.context', import.meta.url)), { recursive: true })
   writeFileSync(fixturePath, `
 import {
-  AeoAuditError,
+  AgentReadinessError,
   engineVersion,
-  getAeoAuditErrorCode,
-  isAeoAuditError,
-  isAeoAuditErrorCode,
-  runAeoAudit,
+  getAgentReadinessErrorCode,
+  isAgentReadinessError,
+  isAgentReadinessErrorCode,
+  runAgentReadinessAudit,
   runSiteCrawl,
   runSitemapAudit,
   CRAWL_SCHEMA_VERSION,
   CRAWL_LINK_PLACEMENT_RULESET_VERSION,
   RECOGNIZED_ARIA_ROLES,
   isRecognizedAriaRole,
-  type AeoAuditErrorCode,
-  type AeoAuditOutboundAttempt,
-  type AeoAuditOutboundAttemptKind,
-  type AeoAuditOutboundAttemptObserver,
+  type AgentReadinessErrorCode,
+  type AgentReadinessOutboundAttempt,
+  type AgentReadinessOutboundAttemptKind,
+  type AgentReadinessOutboundAttemptObserver,
   type AuditReport,
-  type RunAeoAuditOptions,
+  type RunAgentReadinessAuditOptions,
   type SitemapAuditBudgetMetadata,
   type SitemapAuditMetadata,
   type SitemapAuditOptions,
@@ -43,23 +43,23 @@ import {
   type CrawlWarning,
   type SiteCrawlOptions,
   type SiteCrawlReport,
-} from '@canonry/aeo-audit'
+} from '@canonry/agent-readiness'
 
-const code: AeoAuditErrorCode = 'BUDGET_EXCEEDED'
-const error = new AeoAuditError(code, 'budget spent')
-const observedCode: AeoAuditErrorCode | null = getAeoAuditErrorCode(error)
-const kind: AeoAuditOutboundAttemptKind = 'sitemap'
-const attempt: AeoAuditOutboundAttempt = {
+const code: AgentReadinessErrorCode = 'BUDGET_EXCEEDED'
+const error = new AgentReadinessError(code, 'budget spent')
+const observedCode: AgentReadinessErrorCode | null = getAgentReadinessErrorCode(error)
+const kind: AgentReadinessOutboundAttemptKind = 'sitemap'
+const attempt: AgentReadinessOutboundAttempt = {
   kind,
   method: 'GET',
   url: 'https://example.com/sitemap.xml',
   redirectDepth: 0,
 }
-const observer: AeoAuditOutboundAttemptObserver = (outbound) => {
-  outbound satisfies AeoAuditOutboundAttempt
+const observer: AgentReadinessOutboundAttemptObserver = (outbound) => {
+  outbound satisfies AgentReadinessOutboundAttempt
 }
 const controller = new AbortController()
-const auditOptions: RunAeoAuditOptions = {
+const auditOptions: RunAgentReadinessAuditOptions = {
   signal: controller.signal,
   onOutboundAttempt: observer,
 }
@@ -126,7 +126,7 @@ const legacySummary: CrawlSummary = undefined as unknown as Omit<CrawlSummary, '
 const recognizesDpub: boolean = isRecognizedAriaRole('doc-chapter')
 const roleCount: number = RECOGNIZED_ARIA_ROLES.length
 
-void runAeoAudit
+void runAgentReadinessAudit
 void legacyEdge
 void inContent
 void legacySummary
@@ -139,8 +139,8 @@ void crawlOptions
 void warning
 void CRAWL_SCHEMA_VERSION
 void engineVersion
-void isAeoAuditError
-void isAeoAuditErrorCode
+void isAgentReadinessError
+void isAgentReadinessErrorCode
 void observedCode
 void attempt
 void sitemapOptions

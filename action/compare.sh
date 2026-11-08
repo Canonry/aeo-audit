@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Diff head vs baseline via `aeo-audit compare`, then publish CI outputs + the
+# Diff head vs baseline via `agent-readiness compare`, then publish CI outputs + the
 # Markdown path. The verdict and exit code are owned by the CLI — this script never
 # re-derives them. committed/artifact baselines run --strict-comparability because
 # matched audit settings can't be guaranteed by construction.
@@ -7,8 +7,8 @@ set -uo pipefail
 # shellcheck source=lib.sh disable=SC1091
 source "$GITHUB_ACTION_PATH/lib.sh"
 
-REG="$RUNNER_TEMP/aeo-regression-${SITE_ID}.json"
-MD="$RUNNER_TEMP/aeo-compare-${SITE_ID}.md"
+REG="$RUNNER_TEMP/agent-readiness-regression-${SITE_ID}.json"
+MD="$RUNNER_TEMP/agent-readiness-compare-${SITE_ID}.md"
 {
   echo "regression_path=$REG"
   echo "md_path=$MD"
@@ -33,7 +33,7 @@ if [ "$HAS_BASE" = "true" ]; then
   esac
 fi
 
-aeo_engine "${ARGS[@]}" >"$REG"
+agent_readiness_engine "${ARGS[@]}" >"$REG"
 CMP_EXIT=$?
 
 # exit 2 = misconfiguration; compare wrote its reason to stderr and may not have

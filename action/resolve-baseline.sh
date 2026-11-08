@@ -6,7 +6,7 @@ set -uo pipefail
 # shellcheck source=lib.sh disable=SC1091
 source "$GITHUB_ACTION_PATH/lib.sh"
 
-BASE_OUT="$RUNNER_TEMP/aeo-base-${SITE_ID}.json"
+BASE_OUT="$RUNNER_TEMP/agent-readiness-base-${SITE_ID}.json"
 MISS=""
 
 case "$BASELINE" in
@@ -18,9 +18,9 @@ case "$BASELINE" in
     if [ -z "${BASE_SHA:-}" ]; then
       MISS="NO_PR_BASE"
     else
-      WT="$RUNNER_TEMP/aeo-base-wt-${SITE_ID}"
+      WT="$RUNNER_TEMP/agent-readiness-base-wt-${SITE_ID}"
       if git worktree add --detach "$WT" "$BASE_SHA" 2>/dev/null; then
-        if ! (cd "$WT" && aeo_run_audit "$BASE_OUT"); then MISS="BASE_BUILD_FAILED"; fi
+        if ! (cd "$WT" && agent_readiness_run_audit "$BASE_OUT"); then MISS="BASE_BUILD_FAILED"; fi
         git worktree remove --force "$WT" 2>/dev/null || true
       else
         MISS="NO_HISTORY"
@@ -34,8 +34,8 @@ case "$BASELINE" in
     RUN_ID=$(gh run list --repo "$REPO" --branch "$DEFAULT_BRANCH" --workflow "$WORKFLOW" \
       --status success --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
     if [ -n "$RUN_ID" ] && gh run download "$RUN_ID" --repo "$REPO" \
-      -n "aeo-baseline-${SITE_ID}" -D "$RUNNER_TEMP/aeo-art" 2>/dev/null; then
-      cp "$RUNNER_TEMP/aeo-art"/*.json "$BASE_OUT" 2>/dev/null || MISS="MISSING"
+      -n "agent-readiness-baseline-${SITE_ID}" -D "$RUNNER_TEMP/agent-readiness-art" 2>/dev/null; then
+      cp "$RUNNER_TEMP/agent-readiness-art"/*.json "$BASE_OUT" 2>/dev/null || MISS="MISSING"
     else
       MISS="MISSING"
     fi

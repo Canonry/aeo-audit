@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { load } from 'cheerio'
 import type { CheerioAPI } from 'cheerio'
-import { AeoAuditError, getAeoAuditErrorCode, isAeoAuditError } from './errors.js'
+import { AgentReadinessError, getAgentReadinessErrorCode, isAgentReadinessError } from './errors.js'
 import { fetchWithValidatedRedirects, isCallerAbort, isHtmlResponse, isSoft404, normalizeTargetUrl, readResponseBodyAsText, throwIfAborted } from './fetch-page.js'
 import { assertValidFactorIds, auditHtmlPage } from './audit-html.js'
 import { inspectCanonicalLinks } from './analyzers/canonical-links.js'
@@ -454,7 +454,7 @@ class CrawlBudget implements FetchBudget {
     }
   }
 
-  durationExceededError(): AeoAuditError {
+  durationExceededError(): AgentReadinessError {
     this.stop('max-duration')
     return this.exhaustedError()
   }
@@ -486,13 +486,13 @@ class CrawlBudget implements FetchBudget {
     if (!this.softStop) this.softStop = reason
   }
 
-  private exhaustedError(): AeoAuditError {
-    return new AeoAuditError('BUDGET_EXCEEDED', `Site crawl stopped: ${this.terminationReason ?? 'budget exhausted'}.`)
+  private exhaustedError(): AgentReadinessError {
+    return new AgentReadinessError('BUDGET_EXCEEDED', `Site crawl stopped: ${this.terminationReason ?? 'budget exhausted'}.`)
   }
 }
 
 function isBudgetError(error: unknown): boolean {
-  return isAeoAuditError(error) && error.code === 'BUDGET_EXCEEDED'
+  return isAgentReadinessError(error) && error.code === 'BUDGET_EXCEEDED'
 }
 
 /**
@@ -505,7 +505,7 @@ function isBudgetError(error: unknown): boolean {
  * `UNREACHABLE`, so these two codes cover the transient set.
  */
 function isTransientFetchError(error: unknown): boolean {
-  const code = getAeoAuditErrorCode(error)
+  const code = getAgentReadinessErrorCode(error)
   return code === 'TIMEOUT' || code === 'UNREACHABLE'
 }
 
@@ -1040,15 +1040,15 @@ async function readResponse(
       deadlineAt: Math.min(responseDeadlineAt, crawlDeadlineAt),
       deadlineError: crawlDeadlineWins
         ? () => budget.durationExceededError()
-        : () => new AeoAuditError('TIMEOUT', `Request timed out after ${CRAWL_FETCH_TIMEOUT_MS}ms.`),
+        : () => new AgentReadinessError('TIMEOUT', `Request timed out after ${CRAWL_FETCH_TIMEOUT_MS}ms.`),
       beforeRead: () => budget.assertWithinDuration(),
       onChunk: (bytes) => budget.consumeBytes(bytes),
       onTooLarge: () => budget.stop('max-page-bytes'),
       tooLargeMessage: `Crawl response exceeded ${maxBytes} bytes.`,
     })
   } catch (error) {
-    if (isCallerAbort(error, signal) || isBudgetError(error) || isAeoAuditError(error)) throw error
-    throw new AeoAuditError('UNREACHABLE', 'Could not read crawl response.', { cause: error })
+    if (isCallerAbort(error, signal) || isBudgetError(error) || isAgentReadinessError(error)) throw error
+    throw new AgentReadinessError('UNREACHABLE', 'Could not read crawl response.', { cause: error })
   }
 }
 
@@ -1958,7 +1958,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       if (isCallerAbort(error, options.signal)) throw error
       if (isBudgetError(error)) return
       const message = error instanceof Error ? error.message : String(error)
-      const failureCode = getAeoAuditErrorCode(error)
+      const failureCode = getAgentReadinessErrorCode(error)
       await recordPage(createObservation({
         requestedUrl: item.url,
         finalUrl: null,

@@ -1,10 +1,10 @@
-# Contributing to @canonry/aeo-audit
+# Contributing to @canonry/agent-readiness
 
 ## Getting Started
 
 ```bash
-git clone https://github.com/Canonry/aeo-audit.git
-cd aeo-audit
+git clone https://github.com/Canonry/agent-readiness.git
+cd agent-readiness
 pnpm install
 pnpm run typecheck
 pnpm run build
@@ -48,7 +48,7 @@ pnpm test
 
 ## Code Style
 
-- Functional style, no classes except `AeoAuditError`
+- Functional style, no classes except `AgentReadinessError`
 - Use `clampScore()` from helpers for all score calculations
 - Findings use types: `found`, `missing`, `info`, `timeout`, `unreachable`
 - Recommendations should be actionable and specific

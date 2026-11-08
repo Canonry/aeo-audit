@@ -21,7 +21,7 @@ import { analyzeAgentSkillExposure } from './analyzers/agent-skill-exposure.js'
 import { analyzeLighthouse } from './analyzers/lighthouse.js'
 import { getVisibleText, parseJsonLdScripts, countWords } from './analyzers/helpers.js'
 import { detectCriticalDefects } from './critical-defects.js'
-import { AeoAuditError } from './errors.js'
+import { AgentReadinessError } from './errors.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { FACTOR_DEFINITIONS, OPTIONAL_FACTOR_DEFINITIONS, scoreFactors } from './scoring.js'
 import type {
@@ -31,7 +31,7 @@ import type {
   AuxiliaryResources,
   CanonicalTargetResult,
   RedirectHop,
-  RunAeoAuditOptions,
+  RunAgentReadinessAuditOptions,
   ScoredFactor,
 } from './types.js'
 
@@ -72,7 +72,7 @@ export function assertValidFactorIds(selectedFactors: string[]): void {
   if (!selectedFactors.length) return
   const invalid = selectedFactors.filter((id) => !ALL_FACTOR_IDS.has(id))
   if (invalid.length) {
-    throw new AeoAuditError('BAD_INPUT', `Unknown factor ID(s): ${invalid.join(', ')}. Valid IDs: ${[...ALL_FACTOR_IDS].join(', ')}`)
+    throw new AgentReadinessError('BAD_INPUT', `Unknown factor ID(s): ${invalid.join(', ')}. Valid IDs: ${[...ALL_FACTOR_IDS].join(', ')}`)
   }
 }
 
@@ -117,7 +117,7 @@ function readInternalLinks($: CheerioAPI, pageUrl: string): string[] {
 }
 
 /** Run the pure analyzer pipeline against already-fetched HTML. */
-export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAeoAuditOptions = {}): Promise<AuditReport> {
+export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAgentReadinessAuditOptions = {}): Promise<AuditReport> {
   const selectedFactors = options.factors ?? []
   assertValidFactorIds(selectedFactors)
   const $ = load(page.html)

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { runAeoAudit, runSiteCrawl } from '../src/index.js'
+import { runAgentReadinessAudit, runSiteCrawl } from '../src/index.js'
 import type { AuditReport, SiteCrawlOptions } from '../src/types.js'
 
 const root = 'https://1.1.1.1/'
@@ -23,7 +23,7 @@ test.each([undefined, ['technical-seo']] as const)('crawl and single-page audits
   site(['/canonical-old'], (url) => url.pathname === '/canonical-old'
     ? new Response(null, { status: 301, headers: { location: '/canonical-missing' } })
     : new Response(null, { status: 404 }))
-  const single = await runAeoAudit(root, { factors: factors ? [...factors] : undefined })
+  const single = await runAgentReadinessAudit(root, { factors: factors ? [...factors] : undefined })
   requested.length = 0
   const report = await runSiteCrawl(root, { ...options, factors: factors ? [...factors] : undefined })
   if (report.mode !== 'full') throw new Error('Expected pages')

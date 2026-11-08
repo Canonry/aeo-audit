@@ -3,7 +3,7 @@ import dns from 'node:dns/promises'
 import { afterEach, test, vi } from 'vitest'
 
 import { FetchBudgetController, fetchCanonicalTarget, fetchPage } from '../src/fetch-page.js'
-import type { AeoAuditOutboundAttempt } from '../src/types.js'
+import type { AgentReadinessOutboundAttempt } from '../src/types.js'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -262,7 +262,7 @@ test('fetchCanonicalTarget preserves caller cancellation during a request', asyn
 })
 
 test('fetchCanonicalTarget observes and budgets every redirect request', async () => {
-  const attempts: AeoAuditOutboundAttempt[] = []
+  const attempts: AgentReadinessOutboundAttempt[] = []
   const budget = new FetchBudgetController({ maxFetches: 2 })
   const mocked = mockFetch(async () => attempts.length === 1
     ? new Response(null, { status: 301, headers: { location: '/final' } })
