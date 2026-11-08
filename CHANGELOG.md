@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.0.1 (2026-11-07)
+
+### Fixed
+
+- Text reports padded factor names to 30 characters, but "AI Access Files (llms.txt, sitemap)" is 35, so its bar started five columns to the right of every other bar. The cross-cutting issue rows in sitemap reports had the same problem. Name columns now widen to fit the longest name. JSON, Markdown, and agent output are unchanged.
+
 ## 8.0.0 (2026-11-07)
 
 ### Changed

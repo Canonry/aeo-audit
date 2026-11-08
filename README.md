@@ -21,6 +21,10 @@
 
 <p align="center"><sub>Formerly <code>@canonry/aeo-audit</code> · <a href="CHANGELOG.md#800-2026-11-07">What changed in 8.0</a></sub></p>
 
+<p align="center">
+  <a href="#quick-start"><img src="https://raw.githubusercontent.com/Canonry/agent-readiness/main/docs/images/readme/hero.svg" alt="An agent-readiness audit of a sample site in a terminal: the score, a bar for each of the 16 factors, a summary, and the top recommendations, with sample data" width="100%" /></a>
+</p>
+
 ```bash
 npx @canonry/agent-readiness https://example.com
 ```

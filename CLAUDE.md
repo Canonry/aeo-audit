@@ -81,6 +81,8 @@ This applies to:
 
 Before opening a PR that touches `src/cli.ts`, grep `docs/cli.md` and SKILL.md for the affected flag name to confirm everything still matches.
 
+The README's terminal image (`docs/images/readme/hero.svg`) is rendered from a real audit of `test/fixtures/site`. When a change alters the text report (`src/formatters/text.ts`, factor names, or scoring of the sample site), regenerate it with `pnpm run build && node scripts/render-readme-hero.mjs`.
+
 ## Versioning
 
 Follows semver. Bump `version` in `package.json` on every change that ships:

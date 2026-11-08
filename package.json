@@ -1,6 +1,6 @@
 {
   "name": "@canonry/agent-readiness",
-  "version": "8.0.0",
+  "version": "8.0.1",
   "description": "Website agent readiness audit. Scores how well AI agents and answer engines can reach, read, and cite a site across 16 factors, from a CLI, library, agent skill, or CI gate.",
   "type": "module",
   "main": "./dist/index.js",
