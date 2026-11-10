@@ -232,7 +232,8 @@ function urlVersionPatternOf(url: string): { key: string; section: string; param
   const parameters = [...new Set(parsed.searchParams.keys())].sort()
   const firstSegment = parsed.pathname.split('/').find(Boolean)
   const section = firstSegment === undefined ? '/' : `/${firstSegment}`
-  return { key: JSON.stringify([section, parameters]), section, parameters }
+  // Learned per host: two hosts can share a section name and nothing else.
+  return { key: JSON.stringify([hostBoundary(parsed), section, parameters]), section, parameters }
 }
 
 interface UrlVersionPatternState {
@@ -1123,6 +1124,11 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   const allowedHost = hostBoundary(root)
   // Read once for every page of the crawl.
   const entityRegistry = snapshotEntityRegistry(options.entityRegistry)
+  // More hosts the same site owns. Each is crawled and audited like the root's,
+  // with its own robots.txt, llms.txt and sitemaps; links between them are internal.
+  const extraRoots = [...new Set((options.additionalRoots ?? []).map((value) => normalizeCrawlUrl(value)))]
+    .filter((value) => hostBoundary(new URL(value)) !== allowedHost)
+  const allowedHosts = new Set([allowedHost, ...extraRoots.map((value) => hostBoundary(new URL(value)))])
   const pages = new Map<string, CrawlPageObservation>()
   const pageByUrl = new Map<string, CrawlPageObservation>()
   const pendingPages = new Map<string, CrawlPageObservation>()
@@ -1169,7 +1175,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   let fetchRetriesAttempted = 0
   let fetchRetriesRecovered = 0
 
-  const isAllowed = (url: URL): boolean => hostBoundary(url) === allowedHost
+  const isAllowed = (url: URL): boolean => allowedHosts.has(hostBoundary(url))
   const paceRequest = async (): Promise<void> => {
     await pacer.wait({
       signal: options.signal,
@@ -1639,48 +1645,69 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     }
   }
   const globalAuxiliary: AuxiliaryResources = {}
-  let robots: RobotsRules = { rules: [], sitemaps: [], crawlDelayMs: null }
-  const robotsUrl = new URL('/robots.txt', root).toString()
-  try {
-    const robotsResult = await safeAuxFetch(robotsUrl, 'robots')
-    globalAuxiliary.robotsTxt = auxiliaryResource(robotsResult, robotsUrl)
-    if (robotsResult?.response.ok) {
-      robots = parseRobots(robotsResult.body)
-      robotsCrawlDelayMs = robots.crawlDelayMs
-      if (options.respectRobots !== false && robotsCrawlDelayMs !== null) {
-        pacer.delayMs = Math.max(limits.requestDelayMs, robotsCrawlDelayMs)
-        pacer.applyDelaySinceLastGrant()
-      }
-    } else if (robotsResult?.redirectChain.length) {
-      const lastHop = robotsResult.redirectChain.at(-1)!
-      if (!isAllowed(new URL(lastHop.to))) {
-        addWarning({
-          code: 'robots-host-redirect',
-          message: 'robots.txt redirected outside the exact crawl host; its rules were not followed or applied.',
-          from: normalizeCrawlUrl(lastHop.from),
-          to: normalizeCrawlUrl(lastHop.to),
-        })
-      }
-    }
-  } catch (error) {
-    if (isCallerAbort(error, options.signal)) throw error
-    if (!isBudgetError(error)) throw error
-  }
-  if (!globalAuxiliary.robotsTxt) globalAuxiliary.robotsTxt = auxiliaryResource(null, robotsUrl)
-  for (const [key, path] of [['llmsTxt', '/llms.txt'], ['llmsFullTxt', '/llms-full.txt']] as const) {
-    const url = new URL(path, root).toString()
+  /**
+   * One host's robots.txt, llms.txt and llms-full.txt, into `auxiliary`. Every
+   * host the crawl may visit gets its own, so a page is checked against the
+   * rules and files of the host it is on. A robots.txt crawl delay slows the
+   * whole crawl, which shares one pacer.
+   */
+  const loadHostFiles = async (hostRoot: URL, auxiliary: AuxiliaryResources): Promise<RobotsRules> => {
+    let hostRobots: RobotsRules = { rules: [], sitemaps: [], crawlDelayMs: null }
+    const robotsUrl = new URL('/robots.txt', hostRoot).toString()
     try {
-      globalAuxiliary[key] = auxiliaryResource(await safeAuxFetch(url, 'auxiliary'), url)
+      const robotsResult = await safeAuxFetch(robotsUrl, 'robots')
+      auxiliary.robotsTxt = auxiliaryResource(robotsResult, robotsUrl)
+      if (robotsResult?.response.ok) {
+        hostRobots = parseRobots(robotsResult.body)
+        if (options.respectRobots !== false && hostRobots.crawlDelayMs !== null) {
+          pacer.delayMs = Math.max(pacer.delayMs, limits.requestDelayMs, hostRobots.crawlDelayMs)
+          pacer.applyDelaySinceLastGrant()
+        }
+      } else if (robotsResult?.redirectChain.length) {
+        const lastHop = robotsResult.redirectChain.at(-1)!
+        if (!isAllowed(new URL(lastHop.to))) {
+          addWarning({
+            code: 'robots-host-redirect',
+            message: 'robots.txt redirected outside the exact crawl host; its rules were not followed or applied.',
+            from: normalizeCrawlUrl(lastHop.from),
+            to: normalizeCrawlUrl(lastHop.to),
+          })
+        }
+      }
     } catch (error) {
       if (isCallerAbort(error, options.signal)) throw error
       if (!isBudgetError(error)) throw error
-      globalAuxiliary[key] = auxiliaryResource(null, url)
     }
+    if (!auxiliary.robotsTxt) auxiliary.robotsTxt = auxiliaryResource(null, robotsUrl)
+    for (const [key, path] of [['llmsTxt', '/llms.txt'], ['llmsFullTxt', '/llms-full.txt']] as const) {
+      const url = new URL(path, hostRoot).toString()
+      try {
+        auxiliary[key] = auxiliaryResource(await safeAuxFetch(url, 'auxiliary'), url)
+      } catch (error) {
+        if (isCallerAbort(error, options.signal)) throw error
+        if (!isBudgetError(error)) throw error
+        auxiliary[key] = auxiliaryResource(null, url)
+      }
+    }
+    return hostRobots
   }
+  const robots = await loadHostFiles(root, globalAuxiliary)
+  robotsCrawlDelayMs = robots.crawlDelayMs
+  const robotsByHost = new Map<string, RobotsRules>([[allowedHost, robots]])
+  const auxiliaryByHost = new Map<string, AuxiliaryResources>([[allowedHost, globalAuxiliary]])
+  for (const extraRoot of extraRoots) {
+    const hostRoot = new URL(extraRoot)
+    const auxiliary: AuxiliaryResources = {}
+    robotsByHost.set(hostBoundary(hostRoot), await loadHostFiles(hostRoot, auxiliary))
+    auxiliaryByHost.set(hostBoundary(hostRoot), auxiliary)
+  }
+  const robotsFor = (url: string): RobotsRules => robotsByHost.get(hostBoundary(new URL(url))) ?? robots
+  const auxiliaryFor = (url: string): AuxiliaryResources => auxiliaryByHost.get(hostBoundary(new URL(url))) ?? globalAuxiliary
 
   // Root is intentionally queued before sitemap locations so a sitemap cannot
   // consume the page cap and suppress the caller's explicit target.
   await markDiscovered(rootUrl, 0, { root: true })
+  for (const extraRoot of extraRoots) await markDiscovered(extraRoot, 0, { root: true })
 
   const sitemapQueue = new Set<string>()
   const addSitemap = (candidate: string, base = rootUrl): void => {
@@ -1699,6 +1726,11 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     addSitemap('/sitemap-index.xml')
   }
   for (const sitemap of robots.sitemaps) addSitemap(sitemap, rootUrl)
+  for (const extraRoot of extraRoots) {
+    addSitemap('/sitemap.xml', extraRoot)
+    addSitemap('/sitemap-index.xml', extraRoot)
+    for (const sitemap of robotsFor(extraRoot).sitemaps) addSitemap(sitemap, extraRoot)
+  }
 
   let sitemapPageUrls = 0
   const uniqueSitemapPageUrls = new Set<string>()
@@ -1718,8 +1750,9 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       throw error
     }
     if (!sitemap?.response.ok) continue
-    if (!globalAuxiliary.sitemapXml || globalAuxiliary.sitemapXml.state !== 'ok') {
-      globalAuxiliary.sitemapXml = auxiliaryResource(sitemap, sitemapUrl)
+    const sitemapAuxiliary = auxiliaryFor(sitemapUrl)
+    if (!sitemapAuxiliary.sitemapXml || sitemapAuxiliary.sitemapXml.state !== 'ok') {
+      sitemapAuxiliary.sitemapXml = auxiliaryResource(sitemap, sitemapUrl)
     }
     const document = parseSitemapXmlDocument(sitemap.body)
     if (document.children.length > limits.maxSitemapFanout) budget.stop('max-sitemap-fanout')
@@ -1749,6 +1782,10 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
 
   if (!globalAuxiliary.sitemapXml) {
     globalAuxiliary.sitemapXml = auxiliaryResource(null, new URL('/sitemap.xml', root).toString())
+  }
+  for (const extraRoot of extraRoots) {
+    const auxiliary = auxiliaryFor(extraRoot)
+    if (!auxiliary.sitemapXml) auxiliary.sitemapXml = auxiliaryResource(null, new URL('/sitemap.xml', extraRoot).toString())
   }
 
   const processTerminal = async (
@@ -1837,7 +1874,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
       try {
         canonicalTargets = await collectCanonicalTargets({
           html: fetched.body, finalUrl: requestedFinal, statusCode: fetched.response.status,
-          headers: fetched.headers, auxiliary: globalAuxiliary,
+          headers: fetched.headers, auxiliary: auxiliaryFor(requestedFinal),
         }, {
           factors: options.factors, allowPrivateHost: options.allowPrivateHost,
           signal: options.signal, onOutboundAttempt: options.onOutboundAttempt,
@@ -1856,7 +1893,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         html: fetched.body,
         headers: fetched.headers,
         redirectChain: fetched.redirectChain,
-        auxiliary: globalAuxiliary,
+        auxiliary: auxiliaryFor(requestedFinal),
         fetchTimeMs: 0,
         canonicalTargets,
       }, {
@@ -1933,7 +1970,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
     if (processed.has(item.url)) return
     processed.add(item.url)
     const provenance = provenanceFor(item.url)
-    if (options.respectRobots !== false && !robotsAllows(item.url, robots)) {
+    if (options.respectRobots !== false && !robotsAllows(item.url, robotsFor(item.url))) {
       await recordPage(createObservation({
         requestedUrl: item.url,
         finalUrl: null,

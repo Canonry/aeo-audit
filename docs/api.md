@@ -82,6 +82,18 @@ A false `summary.complete` value means that a declared crawl limit or the exact-
 
 Use `mode: 'full'` for a returned `pages` and `edges` graph. Use summary mode when the event handler stores the graph.
 
+### Other hosts the site owns
+
+The crawl stays on the root URL's exact host. A site that also serves pages from another host it owns, such as a search or booking subdomain, can pass those hosts' roots as `additionalRoots`:
+
+```ts
+const report = await runSiteCrawl('https://www.example.com', {
+  additionalRoots: ['https://search.example.com/'],
+})
+```
+
+Each additional host is crawled and audited like the root's. Its root page is queued right after the main root, and its `/sitemap.xml`, `/sitemap-index.xml` and the sitemaps its own robots.txt lists are read even when `sitemapUrl` or `sitemapUrls` replace the main host's defaults. Every page is checked against the robots.txt rules of the host it is on, and audited with that host's robots.txt, llms.txt, llms-full.txt and sitemap. Links between the hosts are internal, and URL versions are learned per host. The page budget is shared, and the slowest robots.txt crawl delay paces the whole crawl. The additional roots carry `provenance.root: true`; the summary's `rootUrl` and `finalRootUrl` stay the main root's. A root on the main root's own host is ignored.
+
 ### Skipping URL versions
 
 A URL version is a URL with a query string whose HTML declares a canonical on the same site and path with a different query or none, such as `/unit/7/?forcecache=1` declaring `/unit/7/`. It is a copy of that page. Sites that add filter, view or cache parameters to their links can have thousands of them, and fetching each one spends the crawl's time and page budget on duplicates.
