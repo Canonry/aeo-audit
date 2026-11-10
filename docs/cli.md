@@ -155,6 +155,60 @@ A `.html`/`.htm` file produces a single-page report; a directory is walked for H
 
 Coverage is **partial by design**: server-only signals (redirects, `X-Robots-Tag`, `Last-Modified`, `Link` headers) aren't visible from static files, so factors that depend on them score as if the header were absent. Audit the deployed URL for full coverage.
 
+## Pages that name another entity (`--entities`)
+
+A site with one page per property, location or brand often copies FAQ answers and page copy between those pages and forgets to change the names. Pass the list of entities as a JSON file, and a page that belongs to one entity gets a **Names another entity** critical defect when its FAQ questions or answers, its title or an H1 name another one:
+
+```json
+{
+  "entities": [
+    {
+      "key": "northwind-ridge",
+      "names": ["Northwind Ridge", "Northwind Ridge Apartments"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/northwind-ridge/" }
+      ]
+    },
+    {
+      "key": "northwind-harbor",
+      "names": ["Northwind Harbor", "The Harbor at Northwind"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/northwind-harbor/" },
+        { "host": "northwindharbor.example.com", "pathPrefix": "/" }
+      ]
+    },
+    {
+      "key": "westshore",
+      "names": ["The Residences at Westshore"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/westshore/" }
+      ]
+    },
+    {
+      "key": "rival-lofts",
+      "names": ["Rival Lofts"]
+    }
+  ]
+}
+```
+
+That file ships with the package as [`skills/agent-readiness/entities.example.json`](../skills/agent-readiness/entities.example.json): copy it and replace the names, hosts and paths. Northwind Harbor also has a site of its own (every page on `northwindharbor.example.com`), and Rival Lofts is a competitor with no pages on the site, so a page that names it is flagged too.
+
+```bash
+# Every page in the sitemap
+npx @canonry/agent-readiness https://homes.example.com --sitemap --entities entities.json
+
+# One page
+npx @canonry/agent-readiness https://homes.example.com/apartments/northwind-ridge/ --entities entities.json
+
+# Built HTML: --base-url puts the pages on the host the matchers name
+npx @canonry/agent-readiness ./out --base-url https://homes.example.com --entities entities.json
+```
+
+Each entity has a unique `key`, its `names` (display name first, then aliases) and the `urlMatchers` of the pages that belong to it, a host plus a path prefix. An entity with no pages on the site, such as a competitor, leaves `urlMatchers` out. Other fields are ignored. A page belongs to the entity with the longest matching prefix on its host. The text and Markdown reports list each flagged page with the FAQ question or field and a snippet; `--format json` carries them as `evidence`. The check does not change scores or exit codes.
+
+A file that cannot be read, is not JSON, or has a malformed entry stops the run with exit `1` and an error naming the field, such as `entities[0].urlMatchers[0].pathPrefix must be a string starting with "/"`. The CLI prints a notice when no entity has `urlMatchers` (nothing can be checked) and when static-output mode runs without `--base-url` (pages sit under `https://localhost`). A single built file is addressed by its file name, so audit the directory or the live URL instead. `--entities` cannot be combined with `--detect-platform`. Matching rules are in [Pages that name another entity](api.md#pages-that-name-another-entity).
+
 ## Compare mode (regression gate)
 
 `agent-readiness compare` is a subcommand that diffs two `--format json` reports — a **baseline** and a **current** run — into a regression verdict and a CI-friendly exit code. It runs no audit and touches no network; it reads reports you already produced. The same `compare` call works in any CI, a pre-commit hook, or a local shell — it is the engine behind the [Agent Readiness Guard](../action/README.md) GitHub Action.
@@ -175,7 +229,7 @@ npx @canonry/agent-readiness compare --baseline base.json --current current.json
 npx @canonry/agent-readiness compare --baseline base.json --current current.json --strict-comparability
 ```
 
-A regression is **any** of: the overall/aggregate score dropping more than `--overall-tolerance` (default 2), a single page dropping more than `--page-tolerance` (default 5), a single factor dropping more than `--factor-tolerance` (default 8), a page that was auditing successfully now erroring out, a **new** `severity:critical` defect (`--fail-on-new-critical`, on by default), or a major report-schema change. Score, page, and factor deltas only gate when the two runs are **comparable** (same factor set, no major engine change); otherwise they're reported with a warning rather than failing the build. `missing-meta-description` is `severity:warning`, so it does **not** trip `--fail-on-new-critical` — use `--require-meta` on the audit or `--fail-on warnings` here. Removed pages and new warnings are report-only unless promoted with `--fail-on`. Pass `--report-only` to print the full diff without ever failing (onboarding soak mode), and `--strict-comparability` to turn a factor-set / engine-major mismatch into a hard exit-2 misconfiguration.
+A regression is **any** of: the overall/aggregate score dropping more than `--overall-tolerance` (default 2), a single page dropping more than `--page-tolerance` (default 5), a single factor dropping more than `--factor-tolerance` (default 8), a page that was auditing successfully now erroring out, a **new** `severity:critical` defect (`--fail-on-new-critical`, on by default), or a major report-schema change. Score, page, and factor deltas only gate when the two runs are **comparable** (same factor set, no major engine change); otherwise they're reported with a warning rather than failing the build. `missing-meta-description` is `severity:warning`, so it does **not** trip `--fail-on-new-critical` — use `--require-meta` on the audit or `--fail-on warnings` here. A `names-another-entity` defect (from audits run with `--entities`) is compared only when both reports were audited with an entity list; otherwise it is left out with a warning. Removed pages and new warnings are report-only unless promoted with `--fail-on`. Pass `--report-only` to print the full diff without ever failing (onboarding soak mode), and `--strict-comparability` to turn a factor-set / engine-major mismatch into a hard exit-2 misconfiguration.
 
 Both reports must be the same mode (two single reports, or two multi-page reports); mixing them is a misconfiguration (exit 2). On a first run with no `--baseline`, the result is `no-baseline` and the build passes (use `--on-missing-baseline fail` to block until a baseline is seeded). stdout carries only the `CompareReport` (JSON by default, or Markdown with `--format markdown`); every human diagnostic goes to stderr, so you can pipe stdout straight into a parser. Run `agent-readiness compare --help` for the full option list.
 
@@ -269,6 +323,7 @@ A file that answers 2xx with an HTML page instead of the file is a **soft 404**:
 | `--allow-local` (alias `--allow-private`) | Allow the single target host you named on the CLI to resolve to a private/loopback IP (e.g. `http://localhost:3000`). Scoped to that one host only; redirects and sitemap `<loc>`s to any other private host stay blocked. |
 | `--rewrite-sitemap-origin` | In `--sitemap` mode, rewrite every `<loc>`'s origin to the target URL's origin (preserving path/query) before crawling. For auditing a staging host or local dev server with a sitemap that hardcodes the prod domain. |
 | `--base-url <url>` | In static-output mode, the base URL used to map files to page URLs (e.g. `out/about/index.html` → `<base>/about/`). Default `https://localhost`. |
+| `--entities <file>` | JSON file listing the entities (properties, locations, brands) the site has pages for. A page that belongs to one gets a "Names another entity" critical defect when its FAQ, title or H1 names another. Single-URL, sitemap and static-output modes; static-output needs `--base-url`. An invalid file exits `1`. See [Pages that name another entity](#pages-that-name-another-entity---entities). |
 | `-h`, `--help` | Show the help message |
 
 ### `compare` subcommand flags
@@ -292,6 +347,6 @@ A file that answers 2xx with an HTML page instead of the file is a **soft 404**:
 
 Duplicate metadata and short-title review findings are informational and do not independently fail the audit. Inspect their stable codes even when the score passes.
 
-Exit code `0` for score ≥ 70, `1` for < 70 (CI-friendly). In sitemap and static-directory modes the exit code is based on the aggregate score. In `--detect-platform` mode the exit code is `0` if any platform is detected (or, in batch mode, if any URL succeeded), `1` otherwise. When `--require-meta` is passed, exit is forced to `1` if any audited page lacks `<meta name="description">`, regardless of the score-based rule.
+Exit code `0` for score ≥ 70, `1` for < 70 (CI-friendly). In sitemap and static-directory modes the exit code is based on the aggregate score. In `--detect-platform` mode the exit code is `0` if any platform is detected (or, in batch mode, if any URL succeeded), `1` otherwise. When `--require-meta` is passed, exit is forced to `1` if any audited page lacks `<meta name="description">`, regardless of the score-based rule. An unreadable or invalid `--entities` file exits `1` before any audit runs; the check itself never changes the exit code.
 
 The **`compare` subcommand** has its own exit contract: `0` = no regression, an improvement, or a first run with no baseline; `1` = a regression tripped a gating dimension; `2` = a misconfiguration (report-mode mismatch, an unreadable or invalid report file, a missing `--current`, or — with `--strict-comparability` — an incomparable factor set / engine major). `--report-only` always exits `0`.

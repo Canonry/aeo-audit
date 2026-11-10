@@ -12,6 +12,7 @@ import { deepFreeze } from './immutable.js'
 import { parseSitemapXmlDocument } from './sitemap-xml.js'
 import { buildDuplicateMetadataIssues } from './site-issues.js'
 import type { FetchBudget } from './fetch-page.js'
+import { snapshotEntityRegistry } from './entity-mentions.js'
 import type {
   CanonicalTargetResult,
   CrawlAnchorSummary,
@@ -1120,6 +1121,8 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
   const rootUrl = normalizeCrawlUrl(rawUrl)
   const root = new URL(rootUrl)
   const allowedHost = hostBoundary(root)
+  // Read once for every page of the crawl.
+  const entityRegistry = snapshotEntityRegistry(options.entityRegistry)
   const pages = new Map<string, CrawlPageObservation>()
   const pageByUrl = new Map<string, CrawlPageObservation>()
   const pendingPages = new Map<string, CrawlPageObservation>()
@@ -1861,6 +1864,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         includeGeo: options.includeGeo,
         includeAgentSkills: options.includeAgentSkills,
         includeLighthouse: options.includeLighthouse,
+        entityRegistry,
       })
     } catch (error) {
       // An analyzer failure must not discard the fetched crawl observation.

@@ -229,6 +229,19 @@ export function compareReports(
     warnings.push('Baseline has no engineVersion (older report) — engine comparability could not be checked.')
   }
 
+  // A check only one run made is not compared: a newly enabled check is not a
+  // regression, and a dropped one is not a fix.
+  const skippedDefects = new Set<string>()
+  const baselineEntityCheck = baseline.compareMeta?.entityCheck === true
+  const currentEntityCheck = current.compareMeta?.entityCheck === true
+  if (baselineEntityCheck !== currentEntityCheck) {
+    skippedDefects.add('names-another-entity')
+    warnings.push(
+      `Only the ${currentEntityCheck ? 'current run' : 'baseline'} checked pages against an entity registry, ` +
+        'so names-another-entity defects are not compared.',
+    )
+  }
+
   // ── Schema drift ─────────────────────────────────────────────────────────
   const schemaDrift = driftLevel(baseline.schemaVersion, current.schemaVersion)
   if (schemaDrift === 'minor') {
@@ -277,8 +290,8 @@ export function compareReports(
   // ── Detailed dimensions ──────────────────────────────────────────────────
   const dims =
     reportMode === 'sitemap'
-      ? diffSitemap(baseline as SitemapAuditReport, current as SitemapAuditReport, policy, comparable, warnings)
-      : diffSingle(baseline as AuditReport, current as AuditReport, policy, comparable)
+      ? diffSitemap(baseline as SitemapAuditReport, current as SitemapAuditReport, policy, comparable, warnings, skippedDefects)
+      : diffSingle(baseline as AuditReport, current as AuditReport, policy, comparable, skippedDefects)
 
   // ── Gate assembly ────────────────────────────────────────────────────────
   for (const page of dims.regressedPages) {
@@ -365,6 +378,7 @@ function diffSingle(
   current: AuditReport,
   policy: ComparePolicy,
   comparable: boolean,
+  skippedDefects: ReadonlySet<string>,
 ): DimensionResult {
   const regressedFactors: FactorDelta[] = []
   let improvedFactorCount = 0
@@ -392,7 +406,7 @@ function diffSingle(
   const baseDefectIds = new Set(baseline.criticalDefects.map((defect) => defect.id))
   const newDefects: DefectChange[] = []
   for (const defect of current.criticalDefects) {
-    if (baseDefectIds.has(defect.id)) continue
+    if (baseDefectIds.has(defect.id) || skippedDefects.has(defect.id)) continue
     newDefects.push({
       id: defect.id,
       severity: defect.severity,
@@ -411,6 +425,7 @@ function diffSitemap(
   policy: ComparePolicy,
   comparable: boolean,
   warnings: string[],
+  skippedDefects: ReadonlySet<string>,
 ): DimensionResult {
   if (baseline.pagesTruncated > 0 || current.pagesTruncated > 0) {
     warnings.push(
@@ -488,7 +503,7 @@ function diffSitemap(
     if (!baseAll.has(url)) addedPages.push(url)
   }
 
-  const newDefects = diffSitemapDefects(baseline, current, baseSuccess)
+  const newDefects = diffSitemapDefects(baseline, current, baseSuccess, skippedDefects)
 
   return {
     regressedFactors,
@@ -512,6 +527,7 @@ function diffSitemapDefects(
   baseline: SitemapAuditReport,
   current: SitemapAuditReport,
   baseSuccess: Map<string, SitemapPageResult>,
+  skippedDefects: ReadonlySet<string>,
 ): DefectChange[] {
   const baseOccurrences = new Map<string, Set<string>>() // id → set of urls
   for (const group of baseline.criticalDefects) {
@@ -521,6 +537,7 @@ function diffSitemapDefects(
 
   const changes = new Map<string, DefectChange>() // `${id}|${kind}` → change
   for (const group of current.criticalDefects) {
+    if (skippedDefects.has(group.id)) continue
     const baseUrls = baseOccurrences.get(group.id)
     for (const page of group.pages) {
       if (baseUrls?.has(page.url)) continue // pre-existing on this page

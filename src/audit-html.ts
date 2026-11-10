@@ -18,6 +18,7 @@ import { analyzeContentExtractability } from './analyzers/content-extractability
 import { analyzeTechnicalSeo } from './analyzers/technical-seo.js'
 import { analyzeSnippetEligibility } from './analyzers/snippet-eligibility.js'
 import { analyzeAgentSkillExposure } from './analyzers/agent-skill-exposure.js'
+import { snapshotEntityRegistry } from './entity-mentions.js'
 import { analyzeLighthouse } from './analyzers/lighthouse.js'
 import { getVisibleText, parseJsonLdScripts, countWords } from './analyzers/helpers.js'
 import { detectCriticalDefects } from './critical-defects.js'
@@ -120,6 +121,7 @@ function readInternalLinks($: CheerioAPI, pageUrl: string): string[] {
 export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAgentReadinessAuditOptions = {}): Promise<AuditReport> {
   const selectedFactors = options.factors ?? []
   assertValidFactorIds(selectedFactors)
+  const entityRegistry = snapshotEntityRegistry(options.entityRegistry)
   const $ = load(page.html)
   const structuredData = parseJsonLdScripts($)
   const textContent = getVisibleText($, page.html)
@@ -165,8 +167,12 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAgentR
     overallScore,
     summary: buildSummary(factors, overallScore),
     factors,
-    criticalDefects: detectCriticalDefects(context),
-    compareMeta: { engineVersion: engineVersion(), factorIds: factors.map((factor) => factor.id).sort() },
+    criticalDefects: detectCriticalDefects(context, { entityRegistry }),
+    compareMeta: {
+      engineVersion: engineVersion(),
+      factorIds: factors.map((factor) => factor.id).sort(),
+      ...(entityRegistry ? { entityCheck: true } : {}),
+    },
     metadata: {
       fetchTimeMs: page.fetchTimeMs,
       pageTitle: context.pageTitle,

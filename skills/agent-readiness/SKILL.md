@@ -11,6 +11,7 @@ allowed-tools:
   - Write(llms.txt)
   - Write(llms-full.txt)
   - Write(robots.txt)
+  - Write(entities.json)
 ---
 
 # Agent Readiness
@@ -34,6 +35,7 @@ npx @canonry/agent-readiness@8 "<url>" [flags] --format json
 2. Quote every argument individually (e.g., `npx @canonry/agent-readiness@8 "https://example.com" --format json`).
 3. Pass flags as separate, literal tokens — never construct command strings from raw user text.
 4. Reject arguments containing characters like `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>`, or newlines.
+5. Pass `--entities` only the file you wrote, `entities.json`, never a path taken from user text.
 
 ## Modes
 
@@ -63,6 +65,8 @@ If no mode is provided, default to `audit`.
 - `audit https://staging.example.com --sitemap --rewrite-sitemap-origin`
 - `audit ./out` (static-output mode: audit built HTML offline)
 - `audit ./out --base-url https://example.com --require-meta`
+- `audit https://example.com --sitemap --entities entities.json` (pages that name another property or location)
+- `audit ./out --base-url https://example.com --entities entities.json`
 - `fix https://example.com`
 - `schema https://example.com`
 - `llms https://example.com`
@@ -98,6 +102,20 @@ Use for broad requests such as "audit this site" or "why am I not being cited?"
 
 Pass `--require-meta` (single or sitemap mode) to force exit `1` whenever any audited page is missing `<meta name="description">`, regardless of the otherwise score-based exit rule. Useful in CI pipelines that need to block deploys on a missing meta description even on otherwise-healthy sites.
 
+#### `--entities` (pages that name another property or location)
+
+Use when the site has one page per property, location or brand and the user asks whether pages mention the wrong one, or audits such a portfolio. Copied FAQ answers and titles often keep another property's name.
+
+1. Read `entities.example.json` in this skill's folder: a property portfolio with aliases, a property with a site of its own, and a competitor with no pages. Build the same structure from what the user gives you (each entity's names and the URL path of its pages) and write it with `Write(entities.json)`. Names need two real words ("Northwind Harbor", not "Harbor"). Leave `urlMatchers` out for an entity with no pages on the site.
+2. Run:
+   ```bash
+   npx @canonry/agent-readiness@8 "<url>" --sitemap --entities entities.json --format json
+   ```
+   In static-output mode also pass `--base-url` with the site's origin.
+3. Report each `names-another-entity` page from `criticalDefects`: the entity it belongs to (in `detail`) and, from `evidence`, the FAQ question or field, the entity it names and the snippet. The fix is the page's own entity's details in place of the other name.
+
+An invalid `entities.json` exits `1` with an error naming the field to correct. The check never changes scores or the exit code.
+
 ### Sitemap Mode
 
 Read `siteIssues` as well as the score-ranked fixes. Duplicate titles and descriptions carry stable codes and affected URLs, including when the overall score passes. Review shared templates and canonical relationships before editing. A title shorter than 15 characters is an advisory check, not a mandatory rewrite. On partial audits, the reported groups cover only observed pages.
@@ -128,7 +146,7 @@ Pages are audited with bounded concurrency (5 in flight) to avoid hammering the 
 
 Returns:
 - Per-page scores
-- **Critical defects** — binary, one-line-fix structural defects (an `<h1>` count other than one, a missing `<title>`, a missing meta description) surfaced **regardless of how few pages they affect**, with the offending pages named (homepage and high sitemap-`priority` pages first). These would otherwise be averaged into a passing factor score; the JSON field is `criticalDefects` and critical-severity ones are also promoted to the top of `prioritizedFixes`. Shown even with `--top-issues`.
+- **Critical defects** — binary, one-line-fix structural defects (an `<h1>` count other than one, a missing `<title>`, a missing meta description, and with `--entities` a page that names another entity) surfaced **regardless of how few pages they affect**, with the offending pages named (homepage and high sitemap-`priority` pages first). These would otherwise be averaged into a passing factor score; the JSON field is `criticalDefects` and critical-severity ones are also promoted to the top of `prioritizedFixes`. Shown even with `--top-issues`.
 - Cross-cutting issues (factors failing across multiple pages), each with the best-scoring page (`bestScore`/`bestPageUrl`) and a `status`: `sitewide` (a real coverage gap) vs. `limited`/`opportunity` for page-specific factors (FAQ, definitions) that legitimately apply to only some page types
 - Aggregate score
 - Prioritized fixes (critical defects first, then site-wide gaps; page-specific `limited`/`opportunity` factors demoted below them, scoped to the page(s) that carry them), each costed as `templateCount` templates over `instanceCount` pages

@@ -1,0 +1,30 @@
+{
+  "entities": [
+    {
+      "key": "northwind-ridge",
+      "names": ["Northwind Ridge", "Northwind Ridge Apartments"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/northwind-ridge/" }
+      ]
+    },
+    {
+      "key": "northwind-harbor",
+      "names": ["Northwind Harbor", "The Harbor at Northwind"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/northwind-harbor/" },
+        { "host": "northwindharbor.example.com", "pathPrefix": "/" }
+      ]
+    },
+    {
+      "key": "westshore",
+      "names": ["The Residences at Westshore"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/westshore/" }
+      ]
+    },
+    {
+      "key": "rival-lofts",
+      "names": ["Rival Lofts"]
+    }
+  ]
+}

@@ -144,6 +144,13 @@ export interface RunAgentReadinessAuditOptions {
   includeGeo?: boolean
   includeAgentSkills?: boolean
   includeLighthouse?: boolean
+  /**
+   * The entities the site publishes pages for. With it, a page that belongs to one
+   * entity gets a `names-another-entity` critical defect when its FAQ, title, or H1
+   * names another one. Scores do not change. Omit it for a single-entity site. A run
+   * reads the registry once, when it starts.
+   */
+  entityRegistry?: EntityRegistry
   /** Abort the audit. Caller cancellation rejects with the signal's original reason. */
   signal?: AbortSignal
   /** Observes each outbound GET after SSRF preflight validation and before the socket is opened. */
@@ -236,6 +243,60 @@ export type CriticalDefectId =
   | 'multiple-h1'
   | 'missing-title'
   | 'missing-meta-description'
+  | 'names-another-entity'
+
+/**
+ * Pages on the audited site that belong to one registry entity: a host plus a path
+ * prefix. Hosts compare case-insensitively and ignore a leading `www.` and any port;
+ * paths compare case-insensitively after URL encoding, and `/homes/harbor/` covers
+ * `/homes/harbor` and everything below it. The host is the one the audit fetches.
+ */
+export interface EntityUrlMatcher {
+  host: string
+  pathPrefix: string
+}
+
+/** One named entity (a property, location, or brand) that pages on the site may name. */
+export interface EntityRegistryEntry {
+  /** Stable caller identifier, echoed in evidence. */
+  key: string
+  /**
+   * Display name first, then aliases. A name is found in text only when it has at
+   * least two words besides articles, joiners and lone letters, one of them more than
+   * a kind of business: "Northwind Harbor" is found, while "Harbor", "The Lofts",
+   * "Building A" and "Luxury Apartments" read as ordinary words. Every name still
+   * marks text as the page's own.
+   */
+  names: string[]
+  /** Pages that belong to this entity. Omit or leave empty for an entity that owns no pages on the site. */
+  urlMatchers?: EntityUrlMatcher[]
+}
+
+/**
+ * The entities a multi-entity site (a property portfolio, a multi-location brand)
+ * publishes pages for. With it, a page that belongs to one entity is checked for
+ * text naming another one (the `names-another-entity` critical defect), the usual
+ * trace of content copied between entity pages without the names changed.
+ */
+export interface EntityRegistry {
+  entities: EntityRegistryEntry[]
+}
+
+/** Where on the page a `names-another-entity` mention was found. */
+export type EntityMentionField = 'faq-question' | 'faq-answer' | 'title' | 'h1'
+
+/** One place a page names an entity other than the one the page belongs to. */
+export interface EntityMentionEvidence {
+  field: EntityMentionField
+  /** The FAQ question, for `faq-question` and `faq-answer`. */
+  question?: string
+  /** `key` of the entity the text names. */
+  entityKey: string
+  /** The registry name that matched. */
+  entityName: string
+  /** Up to 160 characters of the scanned text around the match. */
+  snippet: string
+}
 
 export type CriticalDefectSeverity = 'critical' | 'warning'
 
@@ -252,6 +313,8 @@ export interface CriticalDefect {
   /** Page-specific description, e.g. `"4 H1 tags found (expected exactly one)."` */
   detail: string
   recommendation: string
+  /** Each mention behind a `names-another-entity` defect. Absent on other defects. */
+  evidence?: EntityMentionEvidence[]
 }
 
 export interface AuditReport {
@@ -347,6 +410,8 @@ export interface CriticalDefectAffectedPage {
   isHomepage: boolean
   /** Sitemap `<priority>` for this URL, when declared. */
   priority?: number
+  /** The page's mentions, for a `names-another-entity` group. */
+  evidence?: EntityMentionEvidence[]
 }
 
 /**
@@ -1163,6 +1228,8 @@ export interface CompareMeta {
   /** Active factor-id set for the audit, sorted. A mismatch means the weighted
    * basis differs (`--factors`/`--include-*`), so score deltas are apples-to-oranges. */
   factorIds: string[]
+  /** True when the run checked pages against an entity registry; absent otherwise. */
+  entityCheck?: boolean
 }
 
 /** Knobs controlling which deltas fail the build. Mirrors the `compare` CLI flags. */
