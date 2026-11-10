@@ -6,6 +6,7 @@ import { auditHtmlPage } from './audit-html.js'
 import { buildCriticalDefects, isHomepageUrl } from './critical-defects.js'
 import { SCHEMA_VERSION, engineVersion } from './schema.js'
 import { buildCrossCuttingIssues, buildPrioritizedFixes, mapWithConcurrency, unionFactorIds, buildSiteIssues } from './sitemap.js'
+import { snapshotEntityRegistry } from './entity-mentions.js'
 import { buildTemplateGroups } from './templates.js'
 import { buildCoverage, deriveUrlShapes, selectRepresentativeSample } from './url-templates.js'
 import type {
@@ -43,7 +44,8 @@ export interface StaticAuditOptions extends RunAgentReadinessAuditOptions {
    * Base URL used to synthesize page URLs from file paths (e.g.
    * `out/about/index.html` → `<baseUrl>/about/`). Improves URL-sensitive factors
    * (canonical, og:url, robots.txt path matching). Treated as an origin; defaults
-   * to `https://localhost`.
+   * to `https://localhost`. With an `entityRegistry`, set it to the site's own
+   * origin: pages belong to entities by host.
    */
   baseUrl?: string
   /** Max HTML files to audit when the target is a directory (default 200). */
@@ -250,7 +252,8 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     factors: options.factors,
     includeGeo: options.includeGeo,
     includeAgentSkills: options.includeAgentSkills,
-    entityRegistry: options.entityRegistry,
+    // Read once for every page of the run.
+    entityRegistry: snapshotEntityRegistry(options.entityRegistry),
   }
 
   const settled = await mapWithConcurrency(
@@ -310,6 +313,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     compareMeta: {
       engineVersion: engineVersion(),
       factorIds: unionFactorIds(successReports),
+      ...(auditOptions.entityRegistry ? { entityCheck: true } : {}),
     },
     sitemapUrl: resolved,
     auditedAt: new Date().toISOString(),

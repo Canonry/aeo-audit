@@ -221,6 +221,74 @@ function collectNestedTypes(obj: unknown, types: Set<string>, seen = new WeakSet
   }
 }
 
+/** A reference names a node without describing it: it holds only `@id`, and perhaps `@type`. */
+export function isNodeReference(node: StructuredDataEntry): boolean {
+  return Object.keys(node).every((key) => key === '@id' || key === '@type')
+}
+
+/**
+ * Follows JSON-LD node references. A schema graph often names a node in one
+ * place and defines it in another: Yoast, for one, writes an FAQ as
+ * `"mainEntity": [{"@id": ".../#faq-question-1"}]` and puts each Question
+ * elsewhere in the graph. The returned function maps such a reference to the
+ * node it names, in any JSON-LD block on the page. Ids are compared after
+ * resolving them against the page URL, as JSON-LD does, so "#q1" matches
+ * "https://example.com/faq#q1". Blank node ids ("_:b0") are not followed: each
+ * block scopes its own, and the parsed list no longer says which block a node
+ * came from. Anything else comes back unchanged, as does a reference to a node
+ * the page does not define. Non-objects come back as null.
+ */
+export function createSchemaRefResolver(
+  structuredData: StructuredDataEntry[],
+  pageUrl: string,
+): (value: unknown) => StructuredDataEntry | null {
+  const resolveId = (id: string): string | null => {
+    if (id.startsWith('_:')) {
+      return null
+    }
+
+    try {
+      return new URL(id, pageUrl).href
+    } catch {
+      return id
+    }
+  }
+
+  const nodesById = new Map<string, StructuredDataEntry>()
+  const seen = new WeakSet<object>()
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== 'object' || seen.has(value)) {
+      return
+    }
+    seen.add(value)
+
+    if (Array.isArray(value)) {
+      value.forEach(visit)
+      return
+    }
+
+    const node = value as StructuredDataEntry
+    const id = node['@id']
+    const key = typeof id === 'string' && !isNodeReference(node) ? resolveId(id) : null
+    if (key !== null && !nodesById.has(key)) {
+      nodesById.set(key, node)
+    }
+    Object.values(node).forEach(visit)
+  }
+  visit(structuredData)
+
+  return (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null
+    }
+
+    const node = value as StructuredDataEntry
+    const id = node['@id']
+    const key = typeof id === 'string' && isNodeReference(node) ? resolveId(id) : null
+    return (key !== null && nodesById.get(key)) || node
+  }
+}
+
 export function findTopLevelSchemaByType(structuredData: StructuredDataEntry[], typeName: string): StructuredDataEntry[] {
   return structuredData.filter((item) => {
     const rawType = item?.['@type']

@@ -147,7 +147,8 @@ export interface RunAgentReadinessAuditOptions {
   /**
    * The entities the site publishes pages for. With it, a page that belongs to one
    * entity gets a `names-another-entity` critical defect when its FAQ, title, or H1
-   * names another one. Scores do not change. Omit it for a single-entity site.
+   * names another one. Scores do not change. Omit it for a single-entity site. A run
+   * reads the registry once, when it starts.
    */
   entityRegistry?: EntityRegistry
   /** Abort the audit. Caller cancellation rejects with the signal's original reason. */
@@ -246,8 +247,9 @@ export type CriticalDefectId =
 
 /**
  * Pages on the audited site that belong to one registry entity: a host plus a path
- * prefix. Hosts compare case-insensitively and ignore a leading `www.`; paths compare
- * case-insensitively, and `/homes/harbor/` covers `/homes/harbor` and everything below it.
+ * prefix. Hosts compare case-insensitively and ignore a leading `www.` and any port;
+ * paths compare case-insensitively after URL encoding, and `/homes/harbor/` covers
+ * `/homes/harbor` and everything below it. The host is the one the audit fetches.
  */
 export interface EntityUrlMatcher {
   host: string
@@ -259,12 +261,15 @@ export interface EntityRegistryEntry {
   /** Stable caller identifier, echoed in evidence. */
   key: string
   /**
-   * Display name first, then aliases. A name needs at least two words to be matched:
-   * single words ("Harbor", "Legacy") are too often ordinary words.
+   * Display name first, then aliases. A name is found in text only when it has at
+   * least two words besides articles, joiners and lone letters, one of them more than
+   * a kind of business: "Northwind Harbor" is found, while "Harbor", "The Lofts",
+   * "Building A" and "Luxury Apartments" read as ordinary words. Every name still
+   * marks text as the page's own.
    */
   names: string[]
-  /** Pages that belong to this entity. Empty for an entity that owns no pages on the site. */
-  urlMatchers: EntityUrlMatcher[]
+  /** Pages that belong to this entity. Omit or leave empty for an entity that owns no pages on the site. */
+  urlMatchers?: EntityUrlMatcher[]
 }
 
 /**
@@ -1223,6 +1228,8 @@ export interface CompareMeta {
   /** Active factor-id set for the audit, sorted. A mismatch means the weighted
    * basis differs (`--factors`/`--include-*`), so score deltas are apples-to-oranges. */
   factorIds: string[]
+  /** True when the run checked pages against an entity registry; absent otherwise. */
+  entityCheck?: boolean
 }
 
 /** Knobs controlling which deltas fail the build. Mirrors the `compare` CLI flags. */

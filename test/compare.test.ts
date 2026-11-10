@@ -274,6 +274,31 @@ describe('defects', () => {
     ])
   })
 
+  it('does not compare names-another-entity defects when only one run checked entities', () => {
+    const pages = [page('https://x.test/', 80), page('https://x.test/a', 80)]
+    const named = defectGroup('names-another-entity', 'critical', ['https://x.test/a'])
+    const base = sitemapReport({ pages })
+    const cur = sitemapReport({ pages, defects: [named] })
+    cur.compareMeta = { ...cur.compareMeta!, entityCheck: true }
+    const enabled = compareReports(base, cur, policy())
+    expect(enabled.verdict).toBe('pass')
+    expect(enabled.newDefects).toEqual([])
+    expect(enabled.warnings).toContain('Only the current run checked pages against an entity registry, so names-another-entity defects are not compared.')
+    // Once both runs check, a new mention gates like any other critical defect.
+    base.compareMeta = { ...base.compareMeta!, entityCheck: true }
+    const both = compareReports(base, cur, policy())
+    expect(both.verdict).toBe('fail')
+    expect(both.newDefects[0]).toMatchObject({ id: 'names-another-entity', kind: 'new-type' })
+    expect(both.warnings.some((warning) => warning.includes('entity registry'))).toBe(false)
+    // A single-page report behaves the same, and dropping the check is not a fix.
+    const defect: CriticalDefect = { id: 'names-another-entity', severity: 'critical', detail: '', recommendation: '' }
+    const single = singleReport({ score: 80, defects: [defect] })
+    single.compareMeta = { ...single.compareMeta!, entityCheck: true }
+    expect(compareReports(singleReport({ score: 80 }), single, policy())).toMatchObject({ verdict: 'pass', newDefects: [] })
+    expect(compareReports(single, singleReport({ score: 80 }), policy()).warnings)
+      .toContain('Only the baseline checked pages against an entity registry, so names-another-entity defects are not compared.')
+  })
+
   it('gates when a known defect spreads to an existing, previously-clean page (page-regression)', () => {
     // missing-h1 already exists on / in the baseline; it spreads to the existing,
     // previously-clean /a in the current run — that page existed and got worse.

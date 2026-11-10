@@ -3,15 +3,19 @@ import { countWords, normalizeText } from './helpers.js'
 import { pageBusinessNodes } from '../local-business.js'
 import type { AuditContext, StructuredDataEntry } from '../types.js'
 
+/** Articles and joiners, which hold names together but are not part of what they say. */
+const JOINING_WORDS: ReadonlySet<string> = new Set(`
+  the a an and of at on in by for to
+  la le les el los las lo il de del della di du des da do dos das der die und y e et
+`.split(/\s+/).filter(Boolean))
+
 /**
  * Words that do not tell one business from another: articles and joiners,
  * legal forms, and the kind of business. Sister properties share these
  * ("The Example Resort" and "Example Resort & Spa" are one name), so matching
  * on them would let any two resorts match.
  */
-const NON_IDENTIFYING: ReadonlySet<string> = new Set(`
-  the a an and of at on in by for to
-  la le les el los las lo il de del della di du des da do dos das der die und y e et
+const NON_IDENTIFYING: ReadonlySet<string> = new Set([...JOINING_WORDS, ...`
   llc inc incorporated corp corporation co company ltd limited plc llp lp pllc pc
   gmbh ag sa sas sarl srl bv nv pty sl
   hotel hotels resort resorts inn inns lodge lodges motel motels suite suites hostel hostels
@@ -21,7 +25,7 @@ const NON_IDENTIFYING: ReadonlySet<string> = new Set(`
   clinic dental medical store shop salon studio center centre club group collection
   hospitality properties
   official site website home homepage welcome
-`.split(/\s+/).filter(Boolean))
+`.split(/\s+/).filter(Boolean)])
 
 /**
  * Below this many words of page text, a name missing from the page is no
@@ -96,8 +100,14 @@ function containsWords(haystack: string, needle: string): boolean {
   return /^[a-z0-9 ]+$/.test(needle) ? haystack.includes(` ${needle} `) : haystack.includes(needle)
 }
 
-function isIdentifying(token: string): boolean {
+/** A lowercase word that tells one business from another. */
+export function isIdentifying(token: string): boolean {
   return !NON_IDENTIFYING.has(token) && (token.length > 1 || /\d/.test(token))
+}
+
+/** A lowercase article, joiner, or lone letter: part of a name's phrasing, not its content. */
+export function isJoiningWord(token: string): boolean {
+  return JOINING_WORDS.has(token) || (token.length === 1 && !/\d/.test(token))
 }
 
 /** Runs of identifying words: "Hotel Playa Azul & Spa at Bahia" -> ["playa azul"], ["bahia"]. */

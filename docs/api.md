@@ -145,7 +145,7 @@ When the page names at least one of its businesses and nothing mismatches, the p
 
 ### Pages that name another entity
 
-A site that publishes a page per property, location or brand can pass `entityRegistry` to `runSiteCrawl`, `runAgentReadinessAudit`, `runSitemapAudit` or `runStaticAudit`. Each entity has a stable `key`, its `names` (display name first, then aliases) and the `urlMatchers` (host plus path prefix) of the pages that belong to it. An entity that owns no pages on the site, such as a competitor, has no matchers.
+A site that publishes a page per property, location or brand can pass `entityRegistry` to `runSiteCrawl`, `runAgentReadinessAudit`, `runSitemapAudit` or `runStaticAudit`. Each entity has a stable `key`, its `names` (display name first, then aliases) and the `urlMatchers` (host plus path prefix) of the pages that belong to it. An entity that owns no pages on the site, such as a competitor, omits `urlMatchers`. A run reads the registry once, when it starts.
 
 ```ts
 const report = await runSiteCrawl('https://homes.example.com', {
@@ -158,17 +158,19 @@ const report = await runSiteCrawl('https://homes.example.com', {
 })
 ```
 
-A page belongs to the entity whose matcher has the longest path prefix on the page's host. Hosts ignore case and a leading `www.`; paths ignore case, and `/homes/northwind-harbor/` also covers `/homes/northwind-harbor`. When that page's FAQPage questions or answers, its title or an H1 name a different entity, the page gets a `names-another-entity` critical defect ("Names another entity"). Its `evidence` lists each mention, up to 25, with the `field` (`faq-question`, `faq-answer`, `title` or `h1`), the FAQ `question`, the `entityKey`, the matched `entityName` and a `snippet` of up to 160 characters. That is the usual trace of content copied between entity pages without the names changed, and those are the parts of a page search engines and AI assistants read first.
+A page belongs to the entity whose matcher has the longest path prefix on the page's host. Hosts ignore case, a leading `www.` and any port, and an international host matches its `xn--` form. Paths ignore case and compare URL-encoded, so `/wohnungen/münchen/` matches `/wohnungen/m%C3%BCnchen/`, and `/homes/northwind-harbor/` also covers `/homes/northwind-harbor`. The host is the one the audit fetches: `runStaticAudit` addresses pages under `baseUrl` (default `https://localhost`), so set `baseUrl` to the site's own origin, and when `--rewrite-sitemap-origin` moves a sitemap to a preview host, list that host in the matchers.
+
+When the page's FAQPage questions or answers, its title or an H1 name a different entity, the page gets a `names-another-entity` critical defect ("Names another entity"). FAQ questions and answers are read from every FAQPage on the page, including one nested in another node and questions written elsewhere in the graph and referenced by `@id`, as Yoast does. The defect's `detail` names the page's own entity and the others it names, and its `recommendation` reads the same on every page, so a rolled-up group can show it once. Its `evidence` lists each mention, up to 25, with the `field` (`faq-question`, `faq-answer`, `title` or `h1`), the FAQ `question`, the `entityKey`, the matched `entityName` and a `snippet` of up to 160 characters. That is the usual trace of content copied between entity pages without the names changed, and those are the parts of a page search engines and AI assistants read first.
 
 The check prefers silence to a false alarm:
 
-- It matches whole words, longest name first, and ignores case and curly apostrophes.
-- A name needs at least two words; a one-word name or alias is never matched.
-- A name the page's own entity uses, or one that contains or sits inside one of its names, is the page talking about itself.
+- It matches whole words, longest name first, and ignores case, accents and curly apostrophes. Line breaks and block elements separate words.
+- A name is matched only when it has at least two words besides articles, joiners and lone letters, and one of them is more than a kind of business. "Northwind Harbor" and "The Residences at Westshore" are matched; "Harbor", "The Lofts", "Building A" and "Luxury Apartments" read as ordinary words and are not.
+- A name the page's own entity uses, or one that contains or sits inside one of its names (one-word names included), is the page talking about itself.
 - Body text is not checked, so a "nearby properties" list can name siblings.
 - Pages no entity owns (a city page listing every property) are skipped, and so is every page without a registry.
 
-Scores do not change. Report schema 3.6 adds the optional `evidence` on `criticalDefects[]` and on the pages of a rolled-up critical defect group.
+Scores do not change. Report schema 3.6 adds the optional `evidence` on `criticalDefects[]` and on the pages of a rolled-up critical defect group, and `compareMeta.entityCheck: true` on reports from a run with a registry. `compare` leaves `names-another-entity` out, with a warning, when only one of the two reports checked entities, so turning the check on is not a regression.
 
 ### Link placement
 

@@ -16,6 +16,7 @@ import { PAGE_SPECIFIC_FACTOR_IDS, factorApplies } from './scoring.js'
 import { buildTemplateGroups, summarizeFixReach } from './templates.js'
 import { buildCoverage, deriveUrlShapes, selectRepresentativeSample } from './url-templates.js'
 import { buildDuplicateMetadataIssues } from './site-issues.js'
+import { snapshotEntityRegistry } from './entity-mentions.js'
 import type {
   AuditCoverage,
   AuditReport,
@@ -875,7 +876,8 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     factors: options.factors,
     includeGeo: options.includeGeo,
     includeAgentSkills: options.includeAgentSkills,
-    entityRegistry: options.entityRegistry,
+    // Read once for every page of the run.
+    entityRegistry: snapshotEntityRegistry(options.entityRegistry),
     signal: options.signal,
     onOutboundAttempt: options.onOutboundAttempt,
     // Forward the target-scoped private-host allowance so `--allow-local` reaches
@@ -980,6 +982,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     compareMeta: {
       engineVersion: engineVersion(),
       factorIds: unionFactorIds(successReports),
+      ...(auditOptions.entityRegistry ? { entityCheck: true } : {}),
     },
     sitemapUrl,
     auditedAt: new Date().toISOString(),
