@@ -816,7 +816,7 @@ export interface CrawlDiscoveryProvenance {
   discoveredFrom: string[]
   /** Sitemap documents that named this page. */
   sitemapSources: string[]
-  /** True for the single URL explicitly passed to `runSiteCrawl`. */
+  /** True for the URLs explicitly passed to `runSiteCrawl`: the root and any `additionalRoots`. */
   root: boolean
 }
 
@@ -1109,6 +1109,15 @@ export interface SiteCrawlOptions extends RunAgentReadinessAuditOptions {
   /** Additional explicit sitemap seeds, useful for split sitemap families. */
   sitemapUrls?: string[]
   respectRobots?: boolean
+  /**
+   * More roots on other hosts the same site owns, such as a search or booking
+   * subdomain. Each host is crawled and audited like the root's: its root page,
+   * its /sitemap.xml, /sitemap-index.xml and robots.txt sitemaps (explicit
+   * sitemap seeds replace only the root host's defaults), and its own robots.txt
+   * rules, llms.txt and llms-full.txt. Links between the hosts are internal. The
+   * page budget is shared. A root on the root's own host is ignored.
+   */
+  additionalRoots?: string[]
   /** Derive internal dead-link findings from crawl observations. Defaults to false; external links are never probed. */
   checkDeadLinks?: boolean
   maxPages?: number

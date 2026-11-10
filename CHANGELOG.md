@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.2.0 (2026-11-10)
+
+### Added
+
+- **`additionalRoots` for site crawls.** A site that serves pages from more than one host it owns, such as a main site and a search subdomain, can crawl them in one run. Each host gets its own root page, sitemaps, robots.txt rules, llms.txt and llms-full.txt; links between the hosts are internal; URL versions are learned per host; the page budget is shared. Crawls without the option are unchanged. See "Other hosts the site owns" in `docs/api.md`.
+
 ## 8.1.0 (2026-11-10)
 
 ### Added
