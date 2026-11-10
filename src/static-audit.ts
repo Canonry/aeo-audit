@@ -250,6 +250,7 @@ export async function runStaticAudit(targetPath: string, options: StaticAuditOpt
     factors: options.factors,
     includeGeo: options.includeGeo,
     includeAgentSkills: options.includeAgentSkills,
+    entityRegistry: options.entityRegistry,
   }
 
   const settled = await mapWithConcurrency(

@@ -143,6 +143,33 @@ The check prefers silence to a false alarm. It skips `Organization` markup, whic
 
 When the page names at least one of its businesses and nothing mismatches, the page gets `entity-consistency.schema-identity.ok` instead. A page carries at most one of the two codes. The mismatch message names the first business that does not match, says what conflicts, and counts any others. Neither code changes the score, and the mismatch recommendation leads the factor's list.
 
+### Pages that name another entity
+
+A site that publishes a page per property, location or brand can pass `entityRegistry` to `runSiteCrawl`, `runAgentReadinessAudit`, `runSitemapAudit` or `runStaticAudit`. Each entity has a stable `key`, its `names` (display name first, then aliases) and the `urlMatchers` (host plus path prefix) of the pages that belong to it. An entity that owns no pages on the site, such as a competitor, has no matchers.
+
+```ts
+const report = await runSiteCrawl('https://homes.example.com', {
+  entityRegistry: {
+    entities: [
+      { key: 'ridge', names: ['Northwind Ridge'], urlMatchers: [{ host: 'homes.example.com', pathPrefix: '/homes/northwind-ridge/' }] },
+      { key: 'harbor', names: ['Northwind Harbor'], urlMatchers: [{ host: 'homes.example.com', pathPrefix: '/homes/northwind-harbor/' }] },
+    ],
+  },
+})
+```
+
+A page belongs to the entity whose matcher has the longest path prefix on the page's host. Hosts ignore case and a leading `www.`; paths ignore case, and `/homes/northwind-harbor/` also covers `/homes/northwind-harbor`. When that page's FAQPage questions or answers, its title or an H1 name a different entity, the page gets a `names-another-entity` critical defect ("Names another entity"). Its `evidence` lists each mention, up to 25, with the `field` (`faq-question`, `faq-answer`, `title` or `h1`), the FAQ `question`, the `entityKey`, the matched `entityName` and a `snippet` of up to 160 characters. That is the usual trace of content copied between entity pages without the names changed, and those are the parts of a page search engines and AI assistants read first.
+
+The check prefers silence to a false alarm:
+
+- It matches whole words, longest name first, and ignores case and curly apostrophes.
+- A name needs at least two words; a one-word name or alias is never matched.
+- A name the page's own entity uses, or one that contains or sits inside one of its names, is the page talking about itself.
+- Body text is not checked, so a "nearby properties" list can name siblings.
+- Pages no entity owns (a city page listing every property) are skipped, and so is every page without a registry.
+
+Scores do not change. Report schema 3.6 adds the optional `evidence` on `criticalDefects[]` and on the pages of a rolled-up critical defect group.
+
 ### Link placement
 
 Every anchor edge carries `placementOccurrences?: { navigation, content, unknown }`, which is where the occurrences of that link sat in the page. Placement is read from HTML landmarks, so a nav link and an in-prose link to the same URL with the same anchor text are distinguishable without inferring anything from how often the link repeats across the site.

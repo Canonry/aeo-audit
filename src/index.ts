@@ -94,6 +94,11 @@ export type {
   CriticalDefectGroup,
   CriticalDefectId,
   CriticalDefectSeverity,
+  EntityMentionEvidence,
+  EntityMentionField,
+  EntityRegistry,
+  EntityRegistryEntry,
+  EntityUrlMatcher,
   PrioritizedFix,
 } from './types.js'
 export type { StaticAuditOptions, StaticAuditResult } from './static-audit.js'

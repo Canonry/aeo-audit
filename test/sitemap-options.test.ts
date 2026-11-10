@@ -83,6 +83,14 @@ describe('runSitemapAudit option forwarding', () => {
     expect(options.includeGeo).toBeFalsy()
   })
 
+  it('passes the entity registry through to each page', async () => {
+    const entityRegistry = { entities: [{ key: 'ridge', names: ['Northwind Ridge'], urlMatchers: [{ host: '1.1.1.1', pathPrefix: '/' }] }] }
+    await runSitemapAudit(PAGE_URL, { sitemapUrl: SITEMAP_URL, entityRegistry })
+
+    const [, options] = runAgentReadinessAuditMock.mock.calls[0]
+    expect(options.entityRegistry).toBe(entityRegistry)
+  })
+
   it('passes an explicit factor subset through to each page', async () => {
     await runSitemapAudit(PAGE_URL, {
       sitemapUrl: SITEMAP_URL,

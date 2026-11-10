@@ -1,5 +1,11 @@
 # Changelog
 
+## 8.1.0 (2026-11-10)
+
+### Added
+
+- **`names-another-entity` critical defect.** Pass `entityRegistry` (each entity's key, names and page URL matchers) to a crawl, sitemap, static or single-page audit, and a page that belongs to one entity is flagged when its FAQPage questions or answers, its title or an H1 name a different one. That is the usual trace of FAQ or page copy duplicated across a portfolio's property or location pages without the names changed. Each defect carries `evidence` with the field, FAQ question, entity and a snippet. Scores do not change, and audits without a registry are unchanged. Report schema 3.6 adds the optional `evidence` on `criticalDefects[]` and on rolled-up defect pages. See "Pages that name another entity" in `docs/api.md`.
+
 ## 8.0.1 (2026-11-07)
 
 ### Fixed

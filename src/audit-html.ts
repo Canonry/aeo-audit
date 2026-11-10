@@ -165,7 +165,7 @@ export async function auditHtmlPage(page: AuditHtmlPageInput, options: RunAgentR
     overallScore,
     summary: buildSummary(factors, overallScore),
     factors,
-    criticalDefects: detectCriticalDefects(context),
+    criticalDefects: detectCriticalDefects(context, { entityRegistry: options.entityRegistry }),
     compareMeta: { engineVersion: engineVersion(), factorIds: factors.map((factor) => factor.id).sort() },
     metadata: {
       fetchTimeMs: page.fetchTimeMs,

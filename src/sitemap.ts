@@ -875,6 +875,7 @@ export async function runSitemapAudit(rawUrl: string, options: SitemapAuditOptio
     factors: options.factors,
     includeGeo: options.includeGeo,
     includeAgentSkills: options.includeAgentSkills,
+    entityRegistry: options.entityRegistry,
     signal: options.signal,
     onOutboundAttempt: options.onOutboundAttempt,
     // Forward the target-scoped private-host allowance so `--allow-local` reaches

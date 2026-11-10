@@ -1861,6 +1861,7 @@ export async function runSiteCrawl(rawUrl: string, options: SiteCrawlOptions = {
         includeGeo: options.includeGeo,
         includeAgentSkills: options.includeAgentSkills,
         includeLighthouse: options.includeLighthouse,
+        entityRegistry: options.entityRegistry,
       })
     } catch (error) {
       // An analyzer failure must not discard the fetched crawl observation.

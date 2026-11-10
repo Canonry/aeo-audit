@@ -1,3 +1,4 @@
+import { detectEntityMentions } from './entity-mentions.js'
 import type {
   AuditContext,
   AuditReport,
@@ -5,6 +6,7 @@ import type {
   CriticalDefectGroup,
   CriticalDefectId,
   CriticalDefectSeverity,
+  EntityRegistry,
 } from './types.js'
 
 /** Human-readable labels for each defect, used in rollups and formatters. */
@@ -13,6 +15,7 @@ export const DEFECT_TITLES: Record<CriticalDefectId, string> = {
   'multiple-h1': 'Multiple H1 tags',
   'missing-title': 'Missing <title>',
   'missing-meta-description': 'Missing meta description',
+  'names-another-entity': 'Names another entity',
 }
 
 const SEVERITY_RANK: Record<CriticalDefectSeverity, number> = {
@@ -28,8 +31,11 @@ const SEVERITY_RANK: Record<CriticalDefectSeverity, number> = {
  * that can read "healthy" (issue #42) even when one sub-check fails; here each
  * defect is an unambiguous, one-line-fixable yes/no, so it can be surfaced on its
  * own merits regardless of how the surrounding factor happened to average out.
+ *
+ * With an `entityRegistry`, a page that belongs to one entity is also checked for
+ * FAQ, title, or H1 text naming another (`names-another-entity`).
  */
-export function detectCriticalDefects(context: AuditContext): CriticalDefect[] {
+export function detectCriticalDefects(context: AuditContext, options: { entityRegistry?: EntityRegistry } = {}): CriticalDefect[] {
   const defects: CriticalDefect[] = []
 
   const h1Count = context.$('h1').length
@@ -57,6 +63,9 @@ export function detectCriticalDefects(context: AuditContext): CriticalDefect[] {
       recommendation: 'Add a concise <title> that names the page.',
     })
   }
+
+  const namesAnother = detectEntityMentions(context, options.entityRegistry)
+  if (namesAnother) defects.push(namesAnother)
 
   const metaDesc = context.$('meta[name="description"]').attr('content')?.trim() ?? ''
   if (!metaDesc) {
@@ -120,6 +129,7 @@ export function buildCriticalDefects(
         detail: defect.detail,
         isHomepage: isHomepageUrl(page.finalUrl),
         priority: priorityByUrl.get(page.finalUrl),
+        ...(defect.evidence ? { evidence: defect.evidence } : {}),
       })
     }
   }
