@@ -162,19 +162,44 @@ A site with one page per property, location or brand often copies FAQ answers an
 ```json
 {
   "entities": [
-    { "key": "ridge", "names": ["Northwind Ridge"], "urlMatchers": [{ "host": "homes.example.com", "pathPrefix": "/homes/northwind-ridge/" }] },
-    { "key": "harbor", "names": ["Northwind Harbor", "The Harbor at Northwind"], "urlMatchers": [{ "host": "homes.example.com", "pathPrefix": "/homes/northwind-harbor/" }] },
-    { "key": "rival", "names": ["Rival Lofts"] }
+    {
+      "key": "northwind-ridge",
+      "names": ["Northwind Ridge", "Northwind Ridge Apartments"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/northwind-ridge/" }
+      ]
+    },
+    {
+      "key": "northwind-harbor",
+      "names": ["Northwind Harbor", "The Harbor at Northwind"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/northwind-harbor/" },
+        { "host": "northwindharbor.example.com", "pathPrefix": "/" }
+      ]
+    },
+    {
+      "key": "westshore",
+      "names": ["The Residences at Westshore"],
+      "urlMatchers": [
+        { "host": "homes.example.com", "pathPrefix": "/apartments/westshore/" }
+      ]
+    },
+    {
+      "key": "rival-lofts",
+      "names": ["Rival Lofts"]
+    }
   ]
 }
 ```
+
+That file ships with the package as [`skills/agent-readiness/entities.example.json`](../skills/agent-readiness/entities.example.json): copy it and replace the names, hosts and paths. Northwind Harbor also has a site of its own (every page on `northwindharbor.example.com`), and Rival Lofts is a competitor with no pages on the site, so a page that names it is flagged too.
 
 ```bash
 # Every page in the sitemap
 npx @canonry/agent-readiness https://homes.example.com --sitemap --entities entities.json
 
 # One page
-npx @canonry/agent-readiness https://homes.example.com/homes/northwind-ridge/ --entities entities.json
+npx @canonry/agent-readiness https://homes.example.com/apartments/northwind-ridge/ --entities entities.json
 
 # Built HTML: --base-url puts the pages on the host the matchers name
 npx @canonry/agent-readiness ./out --base-url https://homes.example.com --entities entities.json

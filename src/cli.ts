@@ -360,6 +360,9 @@ Options:
                           another entity" critical defect when its FAQ, title or H1 names
                           another. Single-URL, sitemap and static-output modes; in static-output
                           mode pass --base-url with the site's origin so pages match the hosts.
+                          Example: entities.example.json in the package's skills/agent-readiness
+                          folder, also at
+                          https://github.com/Canonry/agent-readiness/blob/main/skills/agent-readiness/entities.example.json
   -h, --help              Show this help message
 
 Examples:

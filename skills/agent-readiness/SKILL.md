@@ -106,14 +106,7 @@ Pass `--require-meta` (single or sitemap mode) to force exit `1` whenever any au
 
 Use when the site has one page per property, location or brand and the user asks whether pages mention the wrong one, or audits such a portfolio. Copied FAQ answers and titles often keep another property's name.
 
-1. Build the list from what the user gives you (names and the URL path of each one's pages) and write it with `Write(entities.json)`:
-   ```json
-   { "entities": [
-     { "key": "ridge", "names": ["Northwind Ridge"], "urlMatchers": [{ "host": "homes.example.com", "pathPrefix": "/homes/northwind-ridge/" }] },
-     { "key": "harbor", "names": ["Northwind Harbor"], "urlMatchers": [{ "host": "homes.example.com", "pathPrefix": "/homes/northwind-harbor/" }] }
-   ] }
-   ```
-   Names need two real words ("Northwind Harbor", not "Harbor"). Leave `urlMatchers` out for an entity with no pages on the site.
+1. Read `entities.example.json` in this skill's folder: a property portfolio with aliases, a property with a site of its own, and a competitor with no pages. Build the same structure from what the user gives you (each entity's names and the URL path of its pages) and write it with `Write(entities.json)`. Names need two real words ("Northwind Harbor", not "Harbor"). Leave `urlMatchers` out for an entity with no pages on the site.
 2. Run:
    ```bash
    npx @canonry/agent-readiness@8 "<url>" --sitemap --entities entities.json --format json
