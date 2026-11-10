@@ -1,5 +1,6 @@
 import { factorSharePct } from '../scoring.js'
-import { isHomepageUrl } from '../critical-defects.js'
+import { DEFECT_TITLES, isHomepageUrl } from '../critical-defects.js'
+import { entityMentionLine } from '../entity-mentions.js'
 import type {
   AuditCoverage,
   AuditReport,
@@ -24,6 +25,20 @@ export function formatMarkdown(report: AuditReport): string {
   lines.push(``)
   lines.push(report.summary)
   lines.push(``)
+
+  if (report.criticalDefects.length > 0) {
+    lines.push(`## Critical Defects`)
+    lines.push(``)
+    lines.push(`High-impact, binary structural defects, not counted in the score.`)
+    lines.push(``)
+    for (const defect of report.criticalDefects) {
+      lines.push(`- **${DEFECT_TITLES[defect.id] ?? defect.id}** _(${defect.severity})_: ${defect.detail}`)
+      for (const mention of defect.evidence ?? []) lines.push(`  - ${issueText(entityMentionLine(mention))}`)
+      lines.push(`  - Fix: ${defect.recommendation}`)
+    }
+    lines.push(``)
+  }
+
   lines.push(`## Factor Breakdown`)
   lines.push(``)
   lines.push(`| Factor | % of score | Score |`)
@@ -157,6 +172,7 @@ export function formatSitemapMarkdown(report: SitemapAuditReport, topIssuesOnly 
       for (const page of group.pages) {
         const home = page.isHomepage ? ' **(homepage)**' : ''
         lines.push(`- \`${page.url}\`${home} — ${page.detail}`)
+        for (const mention of page.evidence ?? []) lines.push(`  - ${issueText(entityMentionLine(mention))}`)
       }
       lines.push(``)
     }

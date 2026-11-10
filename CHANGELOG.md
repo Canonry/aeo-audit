@@ -5,6 +5,11 @@
 ### Added
 
 - **`names-another-entity` critical defect.** Pass `entityRegistry` (each entity's key, names and page URL matchers) to a crawl, sitemap, static or single-page audit, and a page that belongs to one entity is flagged when its FAQPage questions or answers, its title or an H1 name a different one. That is the usual trace of FAQ or page copy duplicated across a portfolio's property or location pages without the names changed. FAQ questions written elsewhere in a JSON-LD graph and referenced by `@id` (as Yoast writes them) and FAQPages nested in other nodes are read too. Names match whole words regardless of case and accents, and a name needs two words besides articles and lone letters, one of them more than a kind of business, so "The Lofts" or "Building A" never match ordinary text. Each defect's detail names the page's own entity, its recommendation reads the same on every page, and it carries `evidence` with the field, FAQ question, entity and a snippet of at most 160 characters. Scores do not change, and audits without a registry are unchanged. Report schema 3.6 adds the optional `evidence` on `criticalDefects[]` and on rolled-up defect pages, and `compareMeta.entityCheck`; `compare` does not count the defect when only one report checked entities. See "Pages that name another entity" in `docs/api.md`.
+- **`--entities <file>`** runs the same check from the CLI, in single-URL, sitemap and static-output modes. The file holds the same `{ "entities": [...] }` list as JSON; a malformed entry stops the run with exit `1` and names the field. The skill can write `entities.json` and documents the workflow.
+
+### Changed
+
+- Single-page text and Markdown reports now list the page's critical defects (missing or extra H1, missing title, missing meta description, names another entity), which only multi-page reports showed before. Multi-page reports list each `names-another-entity` mention under its page.
 
 ## 8.0.1 (2026-11-07)
 

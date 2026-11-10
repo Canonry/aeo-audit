@@ -145,7 +145,7 @@ When the page names at least one of its businesses and nothing mismatches, the p
 
 ### Pages that name another entity
 
-A site that publishes a page per property, location or brand can pass `entityRegistry` to `runSiteCrawl`, `runAgentReadinessAudit`, `runSitemapAudit` or `runStaticAudit`. Each entity has a stable `key`, its `names` (display name first, then aliases) and the `urlMatchers` (host plus path prefix) of the pages that belong to it. An entity that owns no pages on the site, such as a competitor, omits `urlMatchers`. A run reads the registry once, when it starts.
+A site that publishes a page per property, location or brand can pass `entityRegistry` to `runSiteCrawl`, `runAgentReadinessAudit`, `runSitemapAudit` or `runStaticAudit`. Each entity has a stable `key`, its `names` (display name first, then aliases) and the `urlMatchers` (host plus path prefix) of the pages that belong to it. An entity that owns no pages on the site, such as a competitor, omits `urlMatchers`. A run reads the registry once, when it starts. The CLI takes the same object as a JSON file with `--entities <file>` (see [docs/cli.md](cli.md#pages-that-name-another-entity---entities)).
 
 ```ts
 const report = await runSiteCrawl('https://homes.example.com', {

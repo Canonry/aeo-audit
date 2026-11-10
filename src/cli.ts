@@ -7,6 +7,7 @@ import { normalizeTargetUrl } from './fetch-page.js'
 import { detectPlatform, detectPlatformBatch } from './detect-platform.js'
 import { getChangedRoutePaths, normalizeRoutePath } from './changed-pages.js'
 import { AgentReadinessError, isAgentReadinessError } from './errors.js'
+import { readEntityRegistryFile } from './cli-entities.js'
 import {
   formatBatchPlatformJson,
   formatJson,
@@ -96,6 +97,7 @@ interface ParsedArgs {
   base: string
   includeCritical: boolean
   criticalPaths: string[] | null
+  entities: string | null
 }
 
 function isFormatterName(value: string): value is FormatterName {
@@ -128,6 +130,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     base: 'main',
     includeCritical: false,
     criticalPaths: null,
+    entities: null,
   }
 
   for (let i = 0; i < args.length; i += 1) {
@@ -196,6 +199,9 @@ function parseArgs(argv: string[]): ParsedArgs {
         .split(',')
         .map((path) => path.trim())
         .filter((path) => path.length > 0)
+      i += 1
+    } else if (args[i] === '--entities' && args[i + 1]) {
+      result.entities = args[i + 1]
       i += 1
     } else if (args[i] === '--help' || args[i] === '-h') {
       result.help = true
@@ -348,6 +354,12 @@ Options:
   --critical-paths <list> Comma-separated critical paths for --include-critical.
   --base-url <url>        In static-output mode, base URL used to map files to page URLs
                           (e.g. out/about/index.html -> <base>/about/). Default https://localhost.
+  --entities <file>       JSON file listing the entities (properties, locations, brands) the site
+                          has pages for: {"entities": [{"key", "names", "urlMatchers": [{"host",
+                          "pathPrefix"}]}]}. A page that belongs to one entity gets a "Names
+                          another entity" critical defect when its FAQ, title or H1 names
+                          another. Single-URL, sitemap and static-output modes; in static-output
+                          mode pass --base-url with the site's origin so pages match the hosts.
   -h, --help              Show this help message
 
 Examples:
@@ -375,6 +387,8 @@ Examples:
   agent-readiness ./out
   agent-readiness ./out --base-url https://example.com --require-meta
   agent-readiness ./dist/index.html
+  agent-readiness https://example.com --sitemap --entities entities.json
+  agent-readiness ./out --base-url https://example.com --entities entities.json
   agent-readiness https://example.com --detect-platform
   agent-readiness https://example.com --detect-platform --format json
   agent-readiness https://example.com --detect-platform --min-confidence medium
@@ -390,6 +404,7 @@ In --detect-platform mode, exit code is 0 if any platform is detected, 1 otherwi
 In --detect-platform batch mode, exit code is 0 if at least one URL succeeded, 1 otherwise.
 With --require-meta, exit is 1 if any audited page is missing <meta name="description">,
 regardless of the score-based rule above.
+An unreadable or invalid --entities file exits 1 before any audit runs.
 For the 'compare' subcommand: 0 = no regression / improvement / no-baseline, 1 = regression,
 2 = misconfiguration. See 'agent-readiness compare --help'.
 `)
@@ -655,7 +670,17 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     return 1
   }
 
+  if (args.entities && args.detectPlatform) {
+    console.error('Error: --entities cannot be combined with --detect-platform, which runs no audit.')
+    return 1
+  }
+
   try {
+    const entityRegistry = args.entities ? await readEntityRegistryFile(args.entities) : undefined
+    if (entityRegistry && !entityRegistry.entities.some((entity) => (entity.urlMatchers ?? []).length > 0)) {
+      console.error(`Notice: no entity in ${args.entities} has urlMatchers, so no page belongs to an entity and nothing is checked.`)
+    }
+
     // Static-output mode: the positional arg is a filesystem path, audited offline.
     if (args.url && (await isStaticTarget(args.url))) {
       if (args.detectPlatform || args.sitemap || args.lighthouse || args.factors?.includes('lighthouse')) {
@@ -665,10 +690,15 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         return 1
       }
 
+      if (entityRegistry?.entities.some((entity) => (entity.urlMatchers ?? []).length > 0) && !args.baseUrl) {
+        console.error('Notice: static-output mode addresses pages under https://localhost. Pass --base-url with the site\'s origin so --entities urlMatchers can match them.')
+      }
+
       const result = await runStaticAudit(args.url, {
         factors: args.factors,
         includeGeo: args.includeGeo,
         includeAgentSkills: args.includeAgentSkills,
+        entityRegistry,
         baseUrl: args.baseUrl ?? undefined,
         limit: args.limit ?? undefined,
         topIssuesOnly: args.topIssues,
@@ -760,6 +790,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         factors: args.factors,
         includeGeo: args.includeGeo,
         includeAgentSkills: args.includeAgentSkills,
+        entityRegistry,
         sitemapUrl: args.sitemapUrl ?? undefined,
         limit: args.limit ?? undefined,
         topIssuesOnly: args.topIssues,
@@ -801,6 +832,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
       includeGeo: args.includeGeo,
       includeAgentSkills: args.includeAgentSkills,
       includeLighthouse: args.lighthouse,
+      entityRegistry,
       allowPrivateHost,
     })
 

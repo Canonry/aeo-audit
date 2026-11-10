@@ -343,6 +343,20 @@ function snippetAround(text: string, start: number, end: number): string {
   return `${from > 0 ? '…' : ''}${text.slice(from, to).trim()}${to < text.length ? '…' : ''}`
 }
 
+/** One mention as a report line: where it is, then the text around the name. */
+export function entityMentionLine(mention: EntityMentionEvidence): string {
+  switch (mention.field) {
+    case 'faq-answer':
+      return mention.question ? `FAQ answer to "${mention.question}": "${mention.snippet}"` : `FAQ answer: "${mention.snippet}"`
+    case 'faq-question':
+      return `FAQ question: "${mention.snippet}"`
+    case 'title':
+      return `Title: "${mention.snippet}"`
+    case 'h1':
+      return `H1: "${mention.snippet}"`
+  }
+}
+
 function joinList(items: string[]): string {
   if (items.length <= 1) return items.join('')
   return `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`

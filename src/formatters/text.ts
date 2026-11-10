@@ -7,7 +7,8 @@ const RED = '\x1b[31m'
 const CYAN = '\x1b[36m'
 
 import { factorSharePct } from '../scoring.js'
-import { isHomepageUrl } from '../critical-defects.js'
+import { DEFECT_TITLES, isHomepageUrl } from '../critical-defects.js'
+import { entityMentionLine } from '../entity-mentions.js'
 import type {
   AuditReport,
   BatchDetectionEntry,
@@ -75,6 +76,17 @@ export function formatText(report: AuditReport): string {
   lines.push(`${BOLD}Summary${RESET}`)
   lines.push(`  ${report.summary}`)
   lines.push(``)
+
+  if (report.criticalDefects.length > 0) {
+    lines.push(`${BOLD}Critical Defects${RESET} ${DIM}(not counted in the score)${RESET}`)
+    for (const defect of report.criticalDefects) {
+      const tag = defect.severity === 'critical' ? `${RED}critical${RESET}` : `${YELLOW}warning${RESET}`
+      lines.push(`  [${tag}] ${BOLD}${DEFECT_TITLES[defect.id] ?? defect.id}${RESET}: ${defect.detail}`)
+      for (const mention of defect.evidence ?? []) lines.push(`      ${DIM}· ${issueText(entityMentionLine(mention))}${RESET}`)
+      lines.push(`      ${DIM}→ ${defect.recommendation}${RESET}`)
+    }
+    lines.push(``)
+  }
 
   // Show top recommendations
   const withRecs = report.factors
@@ -154,6 +166,7 @@ export function formatSitemapText(report: SitemapAuditReport, topIssuesOnly = fa
       for (const page of group.pages) {
         const home = page.isHomepage ? ` ${CYAN}(homepage)${RESET}` : ''
         lines.push(`      ${DIM}- ${page.url}${home}: ${page.detail}${RESET}`)
+        for (const mention of page.evidence ?? []) lines.push(`          ${DIM}· ${issueText(entityMentionLine(mention))}${RESET}`)
       }
     }
 
