@@ -100,6 +100,23 @@ describe('runSiteCrawl additionalRoots', () => {
     expect(byUrl(report).get(`${search}/ridge`)?.provenance.discoveredFrom).toContain(`${main}/`)
   })
 
+  it('checks pages on an additional host against the entity registry', async () => {
+    // The search host's Ridge page names Harbor, a sibling owned on the main host.
+    const ridgeFaq = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'Is there a pool?', acceptedAnswer: { '@type': 'Answer', text: 'Yes, Northwind Harbor has a heated pool.' } }] }
+    site[`${search}/ridge`] = page('Northwind Ridge', `<script type="application/ld+json">${JSON.stringify(ridgeFaq)}</script>`)
+    try {
+      const entityRegistry = { entities: [
+        { key: 'ridge', names: ['Northwind Ridge'], urlMatchers: [{ host: 'search.homes.test', pathPrefix: '/ridge' }] },
+        { key: 'harbor', names: ['Northwind Harbor'], urlMatchers: [{ host: 'www.homes.test', pathPrefix: '/homes/harbor/' }] },
+      ] }
+      const pages = byUrl(await runSiteCrawl(main, { mode: 'full', factors: ['technical-seo'], additionalRoots: [`${search}/`], entityRegistry }))
+      const defect = pages.get(`${search}/ridge`)?.audit?.criticalDefects.find((item) => item.id === 'names-another-entity')
+      expect(defect?.evidence?.map((item) => [item.field, item.entityKey])).toEqual([['faq-answer', 'harbor']])
+    } finally {
+      site[`${search}/ridge`] = page('Ridge on search', `<a href="${main}/homes/ridge/">Main site</a>`)
+    }
+  })
+
   it('crawls only the root host without additional roots, and ignores one on the root host', async () => {
     for (const additionalRoots of [undefined, [`${main}/homes/`]]) {
       requested.length = 0
